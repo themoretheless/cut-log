@@ -1,0 +1,29 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Visual Studio
+.vs/
+*.rsuser
+[Dd]ebug/
+[Rr]elease/
+
+## VS Code
+.vscode/
+
+## Node
+node_modules/
+
+## macOS
+.DS_Store
+Thumbs.db
+
+## Secrets
+*.pfx
+appsettings.*.json
+!appsettings.json
+!appsettings.Development.json
