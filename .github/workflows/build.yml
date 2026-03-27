@@ -27,9 +27,6 @@ jobs:
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      - name: Install wasm-opt (binaryen)
-        run: sudo apt-get install -y binaryen
-
       - name: Cache Cargo
         uses: actions/cache@v5
         with:
@@ -40,18 +37,11 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Build WASM (release + optimized)
+      - name: Build WASM
         working-directory: crates/wasm
         run: wasm-pack build --target web --release
 
-      - name: Optimize WASM with wasm-opt
-        run: |
-          wasm-opt -Oz \
-            crates/wasm/pkg/cutter_wasm_bg.wasm \
-            -o crates/wasm/pkg/cutter_wasm_bg.wasm
-          ls -lh crates/wasm/pkg/cutter_wasm_bg.wasm
-
-      - name: Copy WASM to Vue
+      - name: Copy WASM to frontend
         run: |
           mkdir -p frontend/wasm frontend/public
           cp -r crates/wasm/pkg/* frontend/wasm/
@@ -78,5 +68,4 @@ jobs:
           path: frontend/dist
 
       - name: Run Rust tests
-        working-directory: .
         run: cargo test -p cutter-core
