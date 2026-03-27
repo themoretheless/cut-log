@@ -41,6 +41,13 @@ jobs:
         working-directory: crates/wasm
         run: wasm-pack build --target web --release
 
+      - name: Optimize WASM
+        run: |
+          npx -y binaryen@latest wasm-opt -Oz --enable-bulk-memory \
+            crates/wasm/pkg/cutter_wasm_bg.wasm \
+            -o crates/wasm/pkg/cutter_wasm_bg.wasm
+          ls -lh crates/wasm/pkg/cutter_wasm_bg.wasm
+
       - name: Copy WASM to frontend
         run: |
           mkdir -p frontend/wasm frontend/public
