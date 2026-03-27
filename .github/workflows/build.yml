@@ -40,14 +40,9 @@ jobs:
         working-directory: crates/wasm
         run: wasm-pack build --target web --release
 
-      - name: Install wasm-opt
-        run: |
-          BINARYEN_VER=version_120
-          curl -sL https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VER}/binaryen-${BINARYEN_VER}-x86_64-linux.tar.gz | tar xz
-          echo "$PWD/binaryen-${BINARYEN_VER}/bin" >> $GITHUB_PATH
-
       - name: Optimize WASM
         run: |
+          cargo install wasm-opt --locked
           wasm-opt -Oz --enable-bulk-memory \
             crates/wasm/pkg/cutter_wasm_bg.wasm \
             -o crates/wasm/pkg/cutter_wasm_bg.wasm
