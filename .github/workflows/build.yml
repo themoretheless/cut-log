@@ -40,9 +40,19 @@ jobs:
         working-directory: crates/wasm
         run: wasm-pack build --target web --release
 
+      - name: Cache wasm-opt
+        id: cache-wasm-opt
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/wasm-opt
+          key: ${{ runner.os }}-wasm-opt
+
+      - name: Install wasm-opt
+        if: steps.cache-wasm-opt.outputs.cache-hit != 'true'
+        run: cargo install wasm-opt --locked
+
       - name: Optimize WASM
         run: |
-          cargo install wasm-opt --locked
           wasm-opt -Oz --enable-bulk-memory \
             crates/wasm/pkg/cutter_wasm_bg.wasm \
             -o crates/wasm/pkg/cutter_wasm_bg.wasm
