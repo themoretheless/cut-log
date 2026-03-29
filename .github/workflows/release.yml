@@ -13,11 +13,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
+  ci:
     uses: ./.github/workflows/build.yml
 
   release:
-    needs: build
+    needs: ci
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -48,7 +48,7 @@ jobs:
           generate_release_notes: true
 
   deploy:
-    needs: [build, release]
+    needs: [ci, release]
     runs-on: ubuntu-latest
     environment:
       name: github-pages

@@ -48,14 +48,14 @@ jobs:
           echo "tag=${{ inputs.release }}" >> $GITHUB_OUTPUT
           echo "Deploying release ${{ inputs.release }}"
 
-  build:
+  ci:
     needs: validate
     uses: ./.github/workflows/build.yml
     with:
       ref: ${{ needs.validate.outputs.tag }}
 
   deploy:
-    needs: build
+    needs: ci
     runs-on: ubuntu-latest
     environment:
       name: github-pages
