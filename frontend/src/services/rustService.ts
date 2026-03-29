@@ -13,7 +13,7 @@ export async function ensureWasm(): Promise<WasmModule> {
   if (!initPromise) {
     initPromise = (async () => {
       const mod = await import('../../wasm/cutter_wasm')
-      await mod.default({ module_or_path: '/cutter_wasm_bg.wasm' })
+      await mod.default({ module_or_path: `${import.meta.env.BASE_URL}cutter_wasm_bg.wasm` })
       wasm = mod
     })()
   }
