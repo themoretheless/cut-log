@@ -1,6 +1,6 @@
 [package]
 name = "cutter-ui"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Frontend helpers: SVG rendering, Three.js scene JSON, colors"
 
