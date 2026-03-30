@@ -1,7 +1,5 @@
-name: Release & Deploy
+name: Release
 
-# 1) Push в main → билд, тесты, релиз (если новая версия), деплой
-# 2) Ручной запуск из PR → пререлиз + деплой
 on:
   push:
     branches: ["main"]
@@ -14,12 +12,6 @@ on:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
   build-and-test:
@@ -54,6 +46,12 @@ jobs:
             exit 1
           fi
 
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+          path: .
+
       - name: Create tag
         run: |
           git tag ${{ steps.version.outputs.tag }}
@@ -66,14 +64,4 @@ jobs:
           name: Release ${{ steps.version.outputs.tag }}
           prerelease: ${{ steps.version.outputs.is_pre == 'true' }}
           generate_release_notes: true
-
-  deploy:
-    needs: [build-and-test, release]
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          files: artifact.tar

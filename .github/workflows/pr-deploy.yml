@@ -1,0 +1,32 @@
+name: PR Deploy
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  pull-requests: write
+
+jobs:
+  deploy:
+    if: github.event.issue.pull_request && contains(github.event.comment.body, '/deploy')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get PR branch
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BRANCH=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }} --jq '.head.ref')
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          gh pr comment ${{ github.event.issue.number }} -b "🚀 Deploying branch \`$BRANCH\`..."
+
+      - name: Trigger deploy-branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run deploy-branch.yml --ref "${{ steps.pr.outputs.branch }}"
+          gh pr comment ${{ github.event.issue.number }} -b "✅ Deploy started. [Watch progress](https://github.com/${{ github.repository }}/actions/workflows/deploy-branch.yml)"
