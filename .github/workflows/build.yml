@@ -23,9 +23,6 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-
       - name: Cache Cargo
         uses: actions/cache@v5
         with:
@@ -36,6 +33,17 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: Cache tools
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/wasm-pack
+            ~/.cargo/bin/wasm-opt
+          key: ${{ runner.os }}-tools
+
+      - name: Install wasm-pack
+        run: which wasm-pack || cargo install wasm-pack --locked
+
       - name: Run Rust tests
         run: cargo test -p cutter-core
 
@@ -43,16 +51,8 @@ jobs:
         working-directory: crates/wasm
         run: wasm-pack build --target web --release
 
-      - name: Cache wasm-opt
-        id: cache-wasm-opt
-        uses: actions/cache@v5
-        with:
-          path: ~/.cargo/bin/wasm-opt
-          key: ${{ runner.os }}-wasm-opt
-
       - name: Install wasm-opt
-        if: steps.cache-wasm-opt.outputs.cache-hit != 'true'
-        run: cargo install wasm-opt --locked
+        run: which wasm-opt || cargo install wasm-opt --locked
 
       - name: Optimize WASM
         run: |
@@ -81,6 +81,9 @@ jobs:
       - name: Build Vue
         working-directory: frontend
         run: npx vite build
+
+      - name: SPA fallback for GitHub Pages
+        run: cp frontend/dist/index.html frontend/dist/404.html
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
