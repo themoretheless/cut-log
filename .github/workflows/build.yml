@@ -17,18 +17,37 @@ jobs:
           ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 0
 
-      - name: Check version is new
+      - name: Check version
         if: github.event_name == 'pull_request' && github.base_ref == 'main'
         run: |
           VERSION=$(node -p 'require("./version.json").version')
           LATEST=$(git tag --sort=-v:refname | grep '^v[0-9]' | head -1 | sed 's/^v//' || echo "0.0.0")
-          if git tag -l "v${VERSION}" | grep -q .; then
-            echo "::error::v${VERSION} already released. Bump version in version.json."
-            exit 1
-          fi
-          if [ "$(printf '%s\n' "$LATEST" "$VERSION" | sort -V | tail -1)" != "$VERSION" ]; then
-            echo "::error::v${VERSION} is less than latest release v${LATEST}. Version must be higher."
-            exit 1
+
+          # Check if code files changed (not just CI/docs)
+          CODE_CHANGED=$(git diff --name-only origin/main...HEAD \
+            | grep -v '^\.github/' \
+            | grep -v '^\.vscode/' \
+            | grep -v '^\.claude/' \
+            | grep -v '^\.gitignore' \
+            | grep -v '^README' \
+            | grep -v '^LICENSE' \
+            | grep -v '^CHANGELOG' \
+            | grep -v '^\.env' \
+            | grep -v '\.md$' \
+            || true)
+
+          if [ -n "$CODE_CHANGED" ]; then
+            if git tag -l "v${VERSION}" | grep -q .; then
+              echo "::error::v${VERSION} already released. Bump version.json."
+              exit 1
+            fi
+            if [ "$(printf '%s\n' "$LATEST" "$VERSION" | sort -V | tail -1)" != "$VERSION" ]; then
+              echo "::error::v${VERSION} is less than latest release v${LATEST}. Version must be higher."
+              exit 1
+            fi
+            echo "New version v${VERSION} (latest: v${LATEST})"
+          else
+            echo "No code changes, version bump not required"
           fi
 
       - name: Install Rust

@@ -3,10 +3,14 @@ target/
 *.swp
 
 # Node
-frontend/node_modules/
+node_modules/
 frontend/dist/
 frontend/wasm/
 frontend/public/cutter_wasm_bg.wasm
+frontend/.vite/
+
+# WASM build artifacts
+crates/wasm/pkg/
 
 # .NET
 bin/
@@ -23,14 +27,34 @@ appsettings.*.json
 !appsettings.json
 !appsettings.Development.json
 
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
 # IDE
 .vscode/
 .idea/
 .vs/
+*.swp
+*.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
+Desktop.ini
+ehthumbs.db
 
-# WASM build artifacts
-crates/wasm/pkg/
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Claude
+.claude/

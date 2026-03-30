@@ -38,26 +38,28 @@ jobs:
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "is_pre=$IS_PRE" >> $GITHUB_OUTPUT
 
-      - name: Ensure version is new
-        run: |
-          VERSION=$(node -p 'require("./version.json").version')
           if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
-            echo "::error::Tag v${VERSION} already exists. Bump version in version.json before merging."
-            exit 1
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Version v${VERSION} already released, skipping"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Download build artifact
+        if: steps.version.outputs.skip != 'true'
         uses: actions/download-artifact@v4
         with:
           name: github-pages
           path: .
 
       - name: Create tag
+        if: steps.version.outputs.skip != 'true'
         run: |
           git tag ${{ steps.version.outputs.tag }}
           git push origin ${{ steps.version.outputs.tag }}
 
       - name: Create GitHub Release
+        if: steps.version.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
