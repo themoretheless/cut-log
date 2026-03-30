@@ -3,6 +3,9 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useL10n } from './stores/l10n'
 
 const { lang, t, toggleLang } = useL10n()
+const pkgVersion = __PKG_VERSION__
+const appVersion = import.meta.env.VITE_APP_VERSION || `v${pkgVersion}`
+const appSha = import.meta.env.VITE_APP_SHA || ''
 const isDark = ref(true)
 const trackRef = ref<HTMLElement | null>(null)
 let starsInterval: ReturnType<typeof setInterval> | null = null
@@ -120,4 +123,8 @@ function spawnStars() {
   </nav>
 
   <router-view />
+
+  <footer class="app-footer">
+    <span class="version-badge" :title="appSha">{{ appVersion }}</span>
+  </footer>
 </template>
