@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 const lang = ref<'ru' | 'en'>('ru')
 
 const ru: Record<string, string> = {
-  'app.title': 'Оптимизатор раскроя фанеры',
+  'app.title': 'CutLog — Оптимизатор раскроя фанеры',
   sheets: 'листов', efficiency: 'эффективность', waste: 'отходы', sheet: 'Лист',
   pieces_short: 'дет.', calculate: 'Рассчитать', clear_all: 'Очистить всё',
   add: 'Добавить', delete: 'Удалить', save: 'Сохранить', name: 'Название',
@@ -62,7 +62,7 @@ const ru: Record<string, string> = {
 }
 
 const en: Record<string, string> = {
-  'app.title': 'Plywood Cutting Optimizer',
+  'app.title': 'CutLog — Plywood Cutting Optimizer',
   sheets: 'sheets', efficiency: 'efficiency', waste: 'waste', sheet: 'Sheet',
   pieces_short: 'pcs', calculate: 'Calculate', clear_all: 'Clear all',
   add: 'Add', delete: 'Delete', save: 'Save', name: 'Name',

@@ -4,7 +4,7 @@ import { resolve } from 'path'
 import ver from '../version.json'
 
 export default defineConfig({
-  base: '/plywood-cutter/',
+  base: '/cut-log/',
   plugins: [vue()],
   define: { __PKG_VERSION__: JSON.stringify(ver.version) },
   resolve: { alias: { '@': resolve(__dirname, 'src') } },
