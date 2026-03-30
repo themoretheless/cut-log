@@ -1,8 +1,6 @@
 name: Build
 
 on:
-  push:
-    branches: ["main"]
   pull_request:
   workflow_call:
     inputs:
@@ -17,6 +15,21 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Check version is new
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        run: |
+          VERSION=$(node -p 'require("./version.json").version')
+          LATEST=$(git tag --sort=-v:refname | grep '^v[0-9]' | head -1 | sed 's/^v//' || echo "0.0.0")
+          if git tag -l "v${VERSION}" | grep -q .; then
+            echo "::error::v${VERSION} already released. Bump version in version.json."
+            exit 1
+          fi
+          if [ "$(printf '%s\n' "$LATEST" "$VERSION" | sort -V | tail -1)" != "$VERSION" ]; then
+            echo "::error::v${VERSION} is less than latest release v${LATEST}. Version must be higher."
+            exit 1
+          fi
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -81,6 +94,9 @@ jobs:
       - name: Build Vue
         working-directory: frontend
         run: npx vite build
+        env:
+          VITE_APP_VERSION: ${{ inputs.ref || '' }}
+          VITE_APP_SHA: ${{ github.sha }}
 
       - name: SPA fallback for GitHub Pages
         run: cp frontend/dist/index.html frontend/dist/404.html
