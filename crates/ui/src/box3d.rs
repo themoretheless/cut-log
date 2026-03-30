@@ -113,6 +113,23 @@ pub fn side_holes_3d(x0: f64, d: f64, tab_h: f64, tf: f64, n_tab: usize, shelf_y
     holes
 }
 
+/// Holes in back wall for shelf slots.
+pub fn back_holes_3d(y0: f64, t: f64, tab_h: f64, tf: f64, n_tab: usize, wi: f64, shelf_ys: &[f64]) -> Vec<Vec<Pt3>> {
+    let mut holes = Vec::new();
+    for &sz in shelf_ys {
+        for tx in tab_positions(wi, n_tab, tab_h) {
+            let rx = t + tx;
+            holes.push(vec![
+                [rx, y0, sz],
+                [rx + tab_h, y0, sz],
+                [rx + tab_h, y0, sz + tf],
+                [rx, y0, sz + tf],
+            ]);
+        }
+    }
+    holes
+}
+
 /// Build the full scene JSON for Three.js box3d.update().
 pub fn build_scene_json(
     w: f64, h: f64, d: f64, t: f64,
@@ -186,9 +203,11 @@ pub fn build_scene_json(
     // Back
     json.push(',');
     let back_pts = back_pts_3d(d + ey, w, h, t, tab_h, tf, n_tab, wi, hi);
+    let bh = back_holes_3d(d + ey, t, tab_h, tf, n_tab, wi, shelf_ys);
     json.push_str(&format!(
-        "{{\"c\":{},\"n\":[0,-1,0],\"t\":{t},\"col\":\"#8e44ad\",\"ec\":\"#5b2c6f\",\"h\":null}}",
-        pts_json(&back_pts)
+        "{{\"c\":{},\"n\":[0,-1,0],\"t\":{t},\"col\":\"#8e44ad\",\"ec\":\"#5b2c6f\"{}}}",
+        pts_json(&back_pts),
+        if bh.is_empty() { ",\"h\":null".into() } else { format!(",\"h\":{}", holes_json(&bh)) }
     ));
 
     // Shelves
