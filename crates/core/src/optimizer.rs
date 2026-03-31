@@ -20,60 +20,72 @@ pub enum SortOrder {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
 pub enum CuttingStrategy {
-    Auto,
-    BestAreaAreaDesc,
-    BestAreaMaxSideDesc,
-    BestAreaPerimeterDesc,
-    BestShortSideAreaDesc,
-    BestShortSideMaxSideDesc,
-    BestShortSidePerimeterDesc,
-    BestLongSideAreaDesc,
-    BestLongSideMaxSideDesc,
-    BestLongSidePerimeterDesc,
+    Auto = 0,
+    BestAreaAreaDesc = 1,
+    BestAreaMaxSideDesc = 2,
+    BestAreaPerimeterDesc = 3,
+    BestShortSideAreaDesc = 4,
+    BestShortSideMaxSideDesc = 5,
+    BestShortSidePerimeterDesc = 6,
+    BestLongSideAreaDesc = 7,
+    BestLongSideMaxSideDesc = 8,
+    BestLongSidePerimeterDesc = 9,
+}
+
+impl TryFrom<u8> for CuttingStrategy {
+    type Error = u8;
+
+    fn try_from(v: u8) -> Result<Self, Self::Error> {
+        match v {
+            0 => Ok(Self::Auto),
+            1 => Ok(Self::BestAreaAreaDesc),
+            2 => Ok(Self::BestAreaMaxSideDesc),
+            3 => Ok(Self::BestAreaPerimeterDesc),
+            4 => Ok(Self::BestShortSideAreaDesc),
+            5 => Ok(Self::BestShortSideMaxSideDesc),
+            6 => Ok(Self::BestShortSidePerimeterDesc),
+            7 => Ok(Self::BestLongSideAreaDesc),
+            8 => Ok(Self::BestLongSideMaxSideDesc),
+            9 => Ok(Self::BestLongSidePerimeterDesc),
+            _ => Err(v),
+        }
+    }
+}
+
+impl From<CuttingStrategy> for u8 {
+    fn from(s: CuttingStrategy) -> u8 {
+        s as u8
+    }
 }
 
 // ── Strategy helpers ──────────────────────────────────────────────────────────
 
-const ALL_STRATEGIES: [(FitHeuristic, SortOrder); 9] = [
-    (FitHeuristic::BestArea, SortOrder::AreaDesc),
-    (FitHeuristic::BestArea, SortOrder::MaxSideDesc),
-    (FitHeuristic::BestArea, SortOrder::PerimeterDesc),
-    (FitHeuristic::BestShortSide, SortOrder::AreaDesc),
-    (FitHeuristic::BestShortSide, SortOrder::MaxSideDesc),
-    (FitHeuristic::BestShortSide, SortOrder::PerimeterDesc),
-    (FitHeuristic::BestLongSide, SortOrder::AreaDesc),
-    (FitHeuristic::BestLongSide, SortOrder::MaxSideDesc),
-    (FitHeuristic::BestLongSide, SortOrder::PerimeterDesc),
+const ALL_STRATEGIES: [(FitHeuristic, SortOrder, CuttingStrategy); 9] = [
+    (FitHeuristic::BestArea, SortOrder::AreaDesc, CuttingStrategy::BestAreaAreaDesc),
+    (FitHeuristic::BestArea, SortOrder::MaxSideDesc, CuttingStrategy::BestAreaMaxSideDesc),
+    (FitHeuristic::BestArea, SortOrder::PerimeterDesc, CuttingStrategy::BestAreaPerimeterDesc),
+    (FitHeuristic::BestShortSide, SortOrder::AreaDesc, CuttingStrategy::BestShortSideAreaDesc),
+    (FitHeuristic::BestShortSide, SortOrder::MaxSideDesc, CuttingStrategy::BestShortSideMaxSideDesc),
+    (FitHeuristic::BestShortSide, SortOrder::PerimeterDesc, CuttingStrategy::BestShortSidePerimeterDesc),
+    (FitHeuristic::BestLongSide, SortOrder::AreaDesc, CuttingStrategy::BestLongSideAreaDesc),
+    (FitHeuristic::BestLongSide, SortOrder::MaxSideDesc, CuttingStrategy::BestLongSideMaxSideDesc),
+    (FitHeuristic::BestLongSide, SortOrder::PerimeterDesc, CuttingStrategy::BestLongSidePerimeterDesc),
 ];
 
 fn decompose(s: CuttingStrategy) -> (FitHeuristic, SortOrder) {
-    match s {
-        CuttingStrategy::BestAreaAreaDesc => (FitHeuristic::BestArea, SortOrder::AreaDesc),
-        CuttingStrategy::BestAreaMaxSideDesc => (FitHeuristic::BestArea, SortOrder::MaxSideDesc),
-        CuttingStrategy::BestAreaPerimeterDesc => (FitHeuristic::BestArea, SortOrder::PerimeterDesc),
-        CuttingStrategy::BestShortSideAreaDesc => (FitHeuristic::BestShortSide, SortOrder::AreaDesc),
-        CuttingStrategy::BestShortSideMaxSideDesc => (FitHeuristic::BestShortSide, SortOrder::MaxSideDesc),
-        CuttingStrategy::BestShortSidePerimeterDesc => (FitHeuristic::BestShortSide, SortOrder::PerimeterDesc),
-        CuttingStrategy::BestLongSideAreaDesc => (FitHeuristic::BestLongSide, SortOrder::AreaDesc),
-        CuttingStrategy::BestLongSideMaxSideDesc => (FitHeuristic::BestLongSide, SortOrder::MaxSideDesc),
-        CuttingStrategy::BestLongSidePerimeterDesc => (FitHeuristic::BestLongSide, SortOrder::PerimeterDesc),
-        CuttingStrategy::Auto => (FitHeuristic::BestArea, SortOrder::AreaDesc),
-    }
+    ALL_STRATEGIES.iter()
+        .find(|(_, _, cs)| *cs == s)
+        .map(|&(fit, sort, _)| (fit, sort))
+        .unwrap_or((FitHeuristic::BestArea, SortOrder::AreaDesc))
 }
 
 fn compose(fit: FitHeuristic, sort: SortOrder) -> CuttingStrategy {
-    match (fit, sort) {
-        (FitHeuristic::BestArea, SortOrder::AreaDesc) => CuttingStrategy::BestAreaAreaDesc,
-        (FitHeuristic::BestArea, SortOrder::MaxSideDesc) => CuttingStrategy::BestAreaMaxSideDesc,
-        (FitHeuristic::BestArea, SortOrder::PerimeterDesc) => CuttingStrategy::BestAreaPerimeterDesc,
-        (FitHeuristic::BestShortSide, SortOrder::AreaDesc) => CuttingStrategy::BestShortSideAreaDesc,
-        (FitHeuristic::BestShortSide, SortOrder::MaxSideDesc) => CuttingStrategy::BestShortSideMaxSideDesc,
-        (FitHeuristic::BestShortSide, SortOrder::PerimeterDesc) => CuttingStrategy::BestShortSidePerimeterDesc,
-        (FitHeuristic::BestLongSide, SortOrder::AreaDesc) => CuttingStrategy::BestLongSideAreaDesc,
-        (FitHeuristic::BestLongSide, SortOrder::MaxSideDesc) => CuttingStrategy::BestLongSideMaxSideDesc,
-        (FitHeuristic::BestLongSide, SortOrder::PerimeterDesc) => CuttingStrategy::BestLongSidePerimeterDesc,
-    }
+    ALL_STRATEGIES.iter()
+        .find(|(f, s, _)| *f == fit && *s == sort)
+        .map(|&(_, _, cs)| cs)
+        .expect("invalid fit/sort combination")
 }
 
 // ── FreeRect ──────────────────────────────────────────────────────────────────
@@ -131,7 +143,7 @@ fn run_auto(
     let mut best: Option<CuttingResult> = None;
     let mut best_strategy = CuttingStrategy::Auto;
 
-    for &(fit, sort) in &ALL_STRATEGIES {
+    for &(fit, sort, _) in &ALL_STRATEGIES {
         let result = run_single(sheet_width, sheet_height, pieces, kerf, fit, sort);
         debug!(
             ?fit, ?sort,

@@ -77,33 +77,11 @@ struct PlacedOutput {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn to_strategy(v: u8) -> CuttingStrategy {
-    match v {
-        1 => CuttingStrategy::BestAreaAreaDesc,
-        2 => CuttingStrategy::BestAreaMaxSideDesc,
-        3 => CuttingStrategy::BestAreaPerimeterDesc,
-        4 => CuttingStrategy::BestShortSideAreaDesc,
-        5 => CuttingStrategy::BestShortSideMaxSideDesc,
-        6 => CuttingStrategy::BestShortSidePerimeterDesc,
-        7 => CuttingStrategy::BestLongSideAreaDesc,
-        8 => CuttingStrategy::BestLongSideMaxSideDesc,
-        9 => CuttingStrategy::BestLongSidePerimeterDesc,
-        _ => CuttingStrategy::Auto,
-    }
+    CuttingStrategy::try_from(v).unwrap_or(CuttingStrategy::Auto)
 }
 
 fn from_strategy(s: CuttingStrategy) -> u8 {
-    match s {
-        CuttingStrategy::Auto => 0,
-        CuttingStrategy::BestAreaAreaDesc => 1,
-        CuttingStrategy::BestAreaMaxSideDesc => 2,
-        CuttingStrategy::BestAreaPerimeterDesc => 3,
-        CuttingStrategy::BestShortSideAreaDesc => 4,
-        CuttingStrategy::BestShortSideMaxSideDesc => 5,
-        CuttingStrategy::BestShortSidePerimeterDesc => 6,
-        CuttingStrategy::BestLongSideAreaDesc => 7,
-        CuttingStrategy::BestLongSideMaxSideDesc => 8,
-        CuttingStrategy::BestLongSidePerimeterDesc => 9,
-    }
+    u8::from(s)
 }
 
 fn convert_sheet(s: &Sheet) -> SheetOutput {
