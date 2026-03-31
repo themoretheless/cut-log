@@ -18,6 +18,9 @@ jobs:
   # Try to deploy from release artifact (instant, no rebuild)
   deploy-from-release:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     outputs:
       found: ${{ steps.download.outputs.found }}
     steps:
