@@ -1,7 +1,7 @@
 use cutter_core::models::CutPiece;
 use cutter_core::optimizer::{optimize, CuttingStrategy};
 
-fn piece(w: f64, h: f64, qty: u32) -> CutPiece {
+fn base_piece(w: f64, h: f64, qty: u32) -> CutPiece {
     CutPiece {
         id: uuid::Uuid::new_v4(),
         label: String::new(),
@@ -11,30 +11,18 @@ fn piece(w: f64, h: f64, qty: u32) -> CutPiece {
         allow_rotation: true,
         color: "#4A90D9".into(),
     }
+}
+
+fn piece(w: f64, h: f64, qty: u32) -> CutPiece {
+    base_piece(w, h, qty)
 }
 
 fn piece_no_rot(w: f64, h: f64, qty: u32) -> CutPiece {
-    CutPiece {
-        id: uuid::Uuid::new_v4(),
-        label: String::new(),
-        width: w,
-        height: h,
-        quantity: qty,
-        allow_rotation: false,
-        color: "#4A90D9".into(),
-    }
+    CutPiece { allow_rotation: false, ..base_piece(w, h, qty) }
 }
 
 fn piece_labeled(label: &str, w: f64, h: f64, qty: u32) -> CutPiece {
-    CutPiece {
-        id: uuid::Uuid::new_v4(),
-        label: label.into(),
-        width: w,
-        height: h,
-        quantity: qty,
-        allow_rotation: true,
-        color: "#4A90D9".into(),
-    }
+    CutPiece { label: label.into(), ..base_piece(w, h, qty) }
 }
 
 // ── Basic placement ─────────────────────────────────────────────
@@ -213,7 +201,7 @@ fn auto_at_least_as_good_as_any_single() {
     let auto = optimize(2440.0, 1220.0, &pieces, 3.0, CuttingStrategy::Auto);
 
     for strategy_val in 1..=9u8 {
-        let s: CuttingStrategy = unsafe { std::mem::transmute(strategy_val) };
+        let s = CuttingStrategy::try_from(strategy_val).unwrap();
         let single = optimize(2440.0, 1220.0, &pieces, 3.0, s);
         assert!(auto.total_sheets() <= single.total_sheets(),
             "Auto should use <= sheets than {:?}", s);
@@ -232,7 +220,7 @@ fn specific_strategy_returns_that_strategy() {
 fn all_nine_strategies_produce_valid_results() {
     let pieces = vec![piece(500.0, 400.0, 3), piece(300.0, 200.0, 5)];
     for strategy_val in 1..=9u8 {
-        let s: CuttingStrategy = unsafe { std::mem::transmute(strategy_val) };
+        let s = CuttingStrategy::try_from(strategy_val).unwrap();
         let result = optimize(2440.0, 1220.0, &pieces, 3.0, s);
         assert!(result.unplaced_pieces.is_empty(), "Strategy {:?} failed to place all pieces", s);
         assert!(result.total_sheets() > 0);
