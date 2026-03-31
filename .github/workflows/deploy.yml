@@ -27,7 +27,7 @@ jobs:
     outputs:
       found: ${{ steps.download.outputs.found }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Try download release artifact
         id: download

@@ -24,7 +24,7 @@ jobs:
     outputs:
       branch: ${{ steps.pr.outputs.branch }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: React to comment
         env:
@@ -57,7 +57,7 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v5
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Comment result
         env:
