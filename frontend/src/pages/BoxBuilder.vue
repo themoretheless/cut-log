@@ -459,6 +459,18 @@ function sideHoles3D(x0: number): number[][][] {
   return holes
 }
 
+function backHoles3D(y0: number): number[][][] {
+  const holes: number[][][] = []
+  const tf = TF.value, th = TabH.value, t = T.value
+  for (const sz of shelfSlotYs())
+    for (const tx of tabPositions(Wi.value))
+      holes.push([
+        [t + tx, y0, sz], [t + tx + th, y0, sz],
+        [t + tx + th, y0, sz + tf], [t + tx, y0, sz + tf],
+      ])
+  return holes
+}
+
 function initThree() {
   const c = document.getElementById('box3d-container')
   if (!c) return
@@ -536,12 +548,13 @@ function updateScene() {
   // Panels
   const lh = sideHoles3D(-ex)
   const rh = sideHoles3D(w + ex)
+  const bh = backHoles3D(d + ey)
   const panels: PanelData[] = [
     { c: sidePts3D(-ex), n: [1, 0, 0], t: thick, col: '#2980b9', ec: '#1a5276', h: lh.length > 0 ? lh : undefined },
     { c: sidePts3D(w + ex), n: [-1, 0, 0], t: thick, col: '#2980b9', ec: '#1a5276', h: rh.length > 0 ? rh : undefined },
     { c: horizPts3D(h + ez), n: [0, 0, -1], t: thick, col: '#27ae60', ec: '#1e8449' },
     { c: horizPts3D(-ez), n: [0, 0, 1], t: thick, col: '#27ae60', ec: '#1e8449' },
-    { c: backPts3D(d + ey), n: [0, -1, 0], t: thick, col: '#8e44ad', ec: '#5b2c6f' },
+    { c: backPts3D(d + ey), n: [0, -1, 0], t: thick, col: '#8e44ad', ec: '#5b2c6f', h: bh.length > 0 ? bh : undefined },
   ]
   for (const sz of shelfSlotYs())
     panels.push({ c: shelfPts3D(sz), n: [0, 0, 1], t: thick, col: '#e67e22', ec: '#ca6f1e' })
