@@ -16,6 +16,7 @@ const Kerf = ref(0.1)
 const TabH = ref(30)
 const NTab = ref(1)
 const NShelves = ref(0)
+const Bevel = ref(0)
 
 const SheetW = ref(1220)
 const SheetH = ref(2440)
@@ -27,6 +28,8 @@ const isoExplode = ref(0.22)
 const TF = computed(() => T.value + Kerf.value)
 const Wi = computed(() => W.value - 2 * T.value)
 const Hi = computed(() => H.value - 2 * T.value)
+const SideOW = computed(() => D.value + Math.abs(Bevel.value))
+const SideOff = computed(() => Math.max(Bevel.value, 0))
 
 // ── Tab positions ───────────────────────────────────────────────────────────
 function tabPositions(L: number): number[] {
@@ -55,6 +58,7 @@ function f(v: number): string { return v.toFixed(2) }
 
 function pathSide(): string {
   const pw = D.value, ph = H.value, tf = TF.value, th = TabH.value
+  const bv = Bevel.value
   let d = 'M0,0'
   for (const x of tabPositions(D.value))
     d += ` L${f(x)},0 L${f(x)},${f(tf)} L${f(x + th)},${f(tf)} L${f(x + th)},0`
@@ -64,7 +68,7 @@ function pathSide(): string {
   d += ` L${f(pw)},${f(ph)}`
   for (const x of [...tabPositions(D.value)].reverse())
     d += ` L${f(x + th)},${f(ph)} L${f(x + th)},${f(ph - tf)} L${f(x)},${f(ph - tf)} L${f(x)},${f(ph)}`
-  d += ` L0,${f(ph)} Z`
+  d += ` L${f(-bv)},${f(ph)} Z`
   for (const sy of shelfSlotYs())
     for (const x of tabPositions(D.value))
       d += ` M${f(x)},${f(sy)} L${f(x + th)},${f(sy)} L${f(x + th)},${f(sy + tf)} L${f(x)},${f(sy + tf)} Z`
@@ -141,13 +145,13 @@ function svgScale(pw: number, ph: number): number {
 }
 
 // ── Piece data lookup by label ──────────────────────────────────────────────
-function pieceData(label: string): { ow: number; oh: number; path: string } {
+function pieceData(label: string): { ow: number; oh: number; path: string; xOff: number } {
   const side = t('box.side_short')
   const back = t('box.back_short')
-  if (label.startsWith(side)) return { ow: D.value, oh: H.value, path: pathSide() }
-  if (label === t('box.top_short') || label === t('box.bottom_short')) return { ow: W.value, oh: D.value, path: pathTopBottom() }
-  if (label.startsWith(back)) return { ow: W.value, oh: H.value, path: pathBack() }
-  return { ow: W.value, oh: D.value, path: pathShelf() }
+  if (label.startsWith(side)) return { ow: SideOW.value, oh: H.value, path: pathSide(), xOff: SideOff.value }
+  if (label === t('box.top_short') || label === t('box.bottom_short')) return { ow: W.value, oh: D.value, path: pathTopBottom(), xOff: 0 }
+  if (label.startsWith(back)) return { ow: W.value, oh: H.value, path: pathBack(), xOff: 0 }
+  return { ow: W.value, oh: D.value, path: pathShelf(), xOff: 0 }
 }
 
 // ── Cutting layout (shelf-based FFD with rotation) ──────────────────────────
@@ -157,8 +161,8 @@ interface LayoutPiece { x: number; y: number; w: number; h: number; label: strin
 function allPieces(): PieceInfo[] {
   const side = t('box.side_short')
   const list: PieceInfo[] = [
-    { w: D.value, h: H.value, label: `${side}1`, color: 'var(--accent)' },
-    { w: D.value, h: H.value, label: `${side}2`, color: 'var(--accent)' },
+    { w: SideOW.value, h: H.value, label: `${side}1`, color: 'var(--accent)' },
+    { w: SideOW.value, h: H.value, label: `${side}2`, color: 'var(--accent)' },
     { w: W.value, h: D.value, label: t('box.top_short'), color: '#27ae60' },
     { w: W.value, h: D.value, label: t('box.bottom_short'), color: '#27ae60' },
     { w: W.value, h: H.value, label: t('box.back_short'), color: '#8e44ad' },
@@ -389,7 +393,8 @@ function sidePts3D(x0: number): number[][] {
   const pts: number[][] = []
   const a = (y: number, z: number) => pts.push([x0, y, z])
   const d = D.value, h = H.value, tf = TF.value, th = TabH.value
-  a(0, 0)
+  const bv = Bevel.value
+  a(-bv, 0)
   for (const ty of tabPositions(d)) { a(ty, 0); a(ty, tf); a(ty + th, tf); a(ty + th, 0) }
   a(d, 0)
   for (const tz of tabPositions(h)) { a(d, tz); a(d - tf, tz); a(d - tf, tz + th); a(d, tz + th) }
@@ -601,8 +606,9 @@ function updateScene() {
 
   addLabel(t('box.top_short'), '#a0e0a0', sz(w, d), w / 2, d / 2, h + ez)
   addLabel(t('box.bottom_short'), '#a0e0a0', sz(w, d), w / 2, d / 2, -ez)
-  addLabel(t('box.side_short'), '#80c0e0', sz(d, h), -ex, d / 2, h / 2)
-  addLabel(t('box.side_short'), '#80c0e0', sz(d, h), w + ex, d / 2, h / 2)
+  const bv = Bevel.value
+  addLabel(t('box.side_short'), '#80c0e0', sz(d + bv, h), -ex, d / 2, h / 2)
+  addLabel(t('box.side_short'), '#80c0e0', sz(d + bv, h), w + ex, d / 2, h / 2)
   addLabel(t('box.back_short'), '#c0a0d0', sz(w, h), w / 2, d + ey, h / 2)
 
   const shYs = shelfSlotYs()
@@ -636,7 +642,7 @@ onUnmounted(() => {
 })
 
 watch(
-  [W, H, D, T, Kerf, TabH, NTab, NShelves, isoExplode],
+  [W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, isoExplode],
   () => updateScene(),
   { flush: 'post' },
 )
@@ -652,23 +658,24 @@ function downloadSvg(name: string, content: string) {
   URL.revokeObjectURL(url)
 }
 
-function wrapCutSvg(pathData: string, pw: number, ph: number): string {
+function wrapCutSvg(pathData: string, pw: number, ph: number, xOff = 0): string {
   return `<?xml version="1.0" encoding="utf-8"?>\n` +
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${pw.toFixed(2)}mm" height="${ph.toFixed(2)}mm" viewBox="0 0 ${pw.toFixed(2)} ${ph.toFixed(2)}">\n` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${pw.toFixed(2)}mm" height="${ph.toFixed(2)}mm" viewBox="${(-xOff).toFixed(2)} 0 ${pw.toFixed(2)} ${ph.toFixed(2)}">\n` +
     `  <path d="${pathData}" fill="none" stroke="#ff0000" stroke-width="0.01" stroke-linejoin="miter"/>\n` +
     `</svg>`
 }
 
-function dlPiece(name: string, path: string, pw: number, ph: number) {
-  downloadSvg(name, wrapCutSvg(path, pw, ph))
+function dlPiece(name: string, path: string, pw: number, ph: number, xOff = 0) {
+  downloadSvg(name, wrapCutSvg(path, pw, ph, xOff))
 }
 
 function getCutSheetTransform(p: LayoutPiece): string {
   const pd = pieceData(p.label)
   const rotated = Math.abs(p.w - pd.oh) < 1 && Math.abs(p.h - pd.ow) < 1
+  const bvOff = pd.xOff
   return rotated
-    ? `translate(${p.x.toFixed(2)},${(p.y + pd.ow).toFixed(2)}) rotate(90)`
-    : `translate(${p.x.toFixed(2)},${p.y.toFixed(2)})`
+    ? `translate(${(p.x + bvOff).toFixed(2)},${(p.y + pd.ow).toFixed(2)}) rotate(90)`
+    : `translate(${(p.x + bvOff).toFixed(2)},${p.y.toFixed(2)})`
 }
 
 function getCutSheetPath(p: LayoutPiece): string {
@@ -690,6 +697,7 @@ function getCutSheetPath(p: LayoutPiece): string {
           <div class="form-row"><label>{{ t('box.outer_width') }}</label><NumberField v-model="W" :min="50" :step="10" /></div>
           <div class="form-row"><label>{{ t('box.height') }}</label><NumberField v-model="H" :min="50" :step="10" /></div>
           <div class="form-row"><label>{{ t('box.depth') }}</label><NumberField v-model="D" :min="50" :step="10" /></div>
+          <div class="form-row"><label>{{ t('box.bevel') }}</label><NumberField v-model="Bevel" :step="5" /></div>
         </section>
         <section class="card">
           <h2>{{ t('box.material') }}</h2>
@@ -701,7 +709,7 @@ function getCutSheetPath(p: LayoutPiece): string {
         </section>
         <section class="card shelf-summary">
           <h2>{{ t('box.parts') }}</h2>
-          <div class="shelf-part-row"><span>{{ t('box.sides') }}</span><span>2 &times; {{ D.toFixed(0) }}&times;{{ H.toFixed(0) }} mm</span></div>
+          <div class="shelf-part-row"><span>{{ t('box.sides') }}</span><span>2 &times; {{ SideOW.toFixed(0) }}&times;{{ H.toFixed(0) }} mm</span></div>
           <div class="shelf-part-row"><span>{{ t('box.top_bottom') }}</span><span>2 &times; {{ W.toFixed(0) }}&times;{{ D.toFixed(0) }} mm</span></div>
           <div class="shelf-part-row"><span>{{ t('box.back') }}</span><span>1 &times; {{ W.toFixed(0) }}&times;{{ H.toFixed(0) }} mm</span></div>
           <div v-if="NShelves > 0" class="shelf-part-row"><span>{{ t('box.shelf') }}</span><span>{{ NShelves }} &times; {{ W.toFixed(0) }}&times;{{ D.toFixed(0) }} mm</span></div>
@@ -727,23 +735,23 @@ function getCutSheetPath(p: LayoutPiece): string {
         <section class="card">
           <div class="card-head">
             <h2>{{ t('box.side_wall') }} <small>(2 {{ t('box.pcs') }})</small></h2>
-            <button class="btn-dl" @click="dlPiece('side.svg', pathSide(), D, H)">&#x2193; SVG</button>
+            <button class="btn-dl" @click="dlPiece('side.svg', pathSide(), SideOW, H, SideOff)">&#x2193; SVG</button>
           </div>
           <div class="sheet-svg-wrap">
             <svg
-              :width="D * svgScale(D, H) + 30"
-              :height="H * svgScale(D, H) + 30"
-              :viewBox="`-15 -15 ${D * svgScale(D, H) + 30} ${H * svgScale(D, H) + 30}`"
+              :width="SideOW * svgScale(SideOW, H) + 30"
+              :height="H * svgScale(SideOW, H) + 30"
+              :viewBox="`-15 -15 ${SideOW * svgScale(SideOW, H) + 30} ${H * svgScale(SideOW, H) + 30}`"
               style="display:block;margin:auto;"
             >
-              <rect x="-15" y="-15" :width="D * svgScale(D, H) + 30" :height="H * svgScale(D, H) + 30" fill="var(--laser-sheet-bg)" />
-              <g :transform="`scale(${svgScale(D, H).toFixed(4)})`">
-                <path :d="pathSide()" fill="var(--accent)" fill-opacity="0.28" fill-rule="evenodd" stroke="var(--laser-cut)" :stroke-width="(1.5 / svgScale(D, H)).toFixed(3)" stroke-linejoin="miter" />
+              <rect x="-15" y="-15" :width="SideOW * svgScale(SideOW, H) + 30" :height="H * svgScale(SideOW, H) + 30" fill="var(--laser-sheet-bg)" />
+              <g :transform="`translate(${(SideOff * svgScale(SideOW, H)).toFixed(4)}, 0) scale(${svgScale(SideOW, H).toFixed(4)})`">
+                <path :d="pathSide()" fill="var(--accent)" fill-opacity="0.28" fill-rule="evenodd" stroke="var(--laser-cut)" :stroke-width="(1.5 / svgScale(SideOW, H)).toFixed(3)" stroke-linejoin="miter" />
               </g>
-              <text :x="(D * svgScale(D, H) + 30) / 2 - 15" :y="H * svgScale(D, H) + 10" text-anchor="middle" font-size="10" fill="var(--muted)">{{ D.toFixed(0) }} &times; {{ H.toFixed(0) }} mm</text>
+              <text :x="(SideOW * svgScale(SideOW, H) + 30) / 2 - 15" :y="H * svgScale(SideOW, H) + 10" text-anchor="middle" font-size="10" fill="var(--muted)">{{ SideOW.toFixed(0) }} &times; {{ H.toFixed(0) }} mm</text>
             </svg>
           </div>
-          <div class="sheet-footer">{{ D.toFixed(0) }} &times; {{ H.toFixed(0) }} mm</div>
+          <div class="sheet-footer">{{ SideOW.toFixed(0) }} &times; {{ H.toFixed(0) }} mm</div>
         </section>
 
         <!-- Top/Bottom wall -->
