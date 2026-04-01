@@ -4,6 +4,7 @@ import NumberField from '@/components/NumberField.vue'
 import { useL10n } from '@/stores/l10n'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { TrackballControls } from 'three/addons/controls/TrackballControls.js'
 
 const { t } = useL10n()
 
@@ -16,6 +17,7 @@ const Kerf = ref(0.1)
 const TabH = ref(30)
 const NTab = ref(1)
 const NShelves = ref(0)
+const Bevel = ref(0)
 
 const SheetW = ref(1220)
 const SheetH = ref(2440)
@@ -27,6 +29,10 @@ const isoExplode = ref(0.22)
 const TF = computed(() => T.value + Kerf.value)
 const Wi = computed(() => W.value - 2 * T.value)
 const Hi = computed(() => H.value - 2 * T.value)
+const SideOW = computed(() => D.value)
+const SideOff = computed(() => 0)
+const TopD = computed(() => D.value - Math.max(Bevel.value, 0))
+const BotD = computed(() => D.value - Math.max(-Bevel.value, 0))
 
 // ── Tab positions ───────────────────────────────────────────────────────────
 function tabPositions(L: number): number[] {
@@ -36,6 +42,14 @@ function tabPositions(L: number): number[] {
   const pos: number[] = []
   for (let i = 0; i < n; i++) pos.push(gap + i * (gap + th))
   return pos
+}
+
+/** Tab positions from tabPositions(fullLen), filtered to [offset, offset+len] and shifted by -offset */
+function depthTabs(fullLen: number, offset: number, len: number): number[] {
+  const th = TabH.value
+  return tabPositions(fullLen)
+    .filter(x => x >= offset && x + th <= offset + len)
+    .map(x => x - offset)
 }
 
 // ── Shelf slot Y positions ──────────────────────────────────────────────────
@@ -50,31 +64,62 @@ function shelfSlotYs(): number[] {
   return ys
 }
 
+const shelfColors = ['#e67e22', '#e74c3c', '#9b59b6', '#1abc9c', '#f1c40f', '#3498db']
+function shelfColor(i: number) { return shelfColors[i % shelfColors.length] }
+function shelfEdgeColor(i: number) {
+  const cols = ['#ca6f1e', '#c0392b', '#7d3c98', '#148f77', '#d4ac0d', '#2471a3']
+  return cols[i % cols.length]
+}
+
+function shelfOffsetAt(sy: number): number {
+  const frac = sy / H.value
+  const cTop = Math.max(Bevel.value, 0)
+  const cBot = Math.max(-Bevel.value, 0)
+  return cBot + (cTop - cBot) * frac
+}
+
+function shelfDepthAt(sy: number): number {
+  return D.value - shelfOffsetAt(sy)
+}
+
 // ── SVG path builders ───────────────────────────────────────────────────────
 function f(v: number): string { return v.toFixed(2) }
 
 function pathSide(): string {
   const pw = D.value, ph = H.value, tf = TF.value, th = TabH.value
-  let d = 'M0,0'
-  for (const x of tabPositions(D.value))
+  const bv = Bevel.value
+  const clipTop = Math.max(0, bv)
+  const clipBot = Math.max(0, -bv)
+  let d = `M${f(clipTop)},0`
+  for (const x of tabPositions(D.value)) {
+    if (x < clipTop) continue
     d += ` L${f(x)},0 L${f(x)},${f(tf)} L${f(x + th)},${f(tf)} L${f(x + th)},0`
+  }
   d += ` L${f(pw)},0`
   for (const y of tabPositions(H.value))
     d += ` L${f(pw)},${f(y)} L${f(pw - tf)},${f(y)} L${f(pw - tf)},${f(y + th)} L${f(pw)},${f(y + th)}`
   d += ` L${f(pw)},${f(ph)}`
-  for (const x of [...tabPositions(D.value)].reverse())
+  for (const x of [...tabPositions(D.value)].reverse()) {
+    if (x < clipBot) continue
     d += ` L${f(x + th)},${f(ph)} L${f(x + th)},${f(ph - tf)} L${f(x)},${f(ph - tf)} L${f(x)},${f(ph)}`
-  d += ` L0,${f(ph)} Z`
-  for (const sy of shelfSlotYs())
-    for (const x of tabPositions(D.value))
+  }
+  d += ` L${f(clipBot)},${f(ph)} Z`
+  for (const sy of shelfSlotYs()) {
+    const sOff = shelfOffsetAt(sy)
+    for (const x of tabPositions(D.value)) {
+      if (x < sOff || x + th > pw) continue
       d += ` M${f(x)},${f(sy)} L${f(x + th)},${f(sy)} L${f(x + th)},${f(sy + tf)} L${f(x)},${f(sy + tf)} Z`
+    }
+  }
   return d
 }
 
-function pathTopBottom(): string {
-  const pw = W.value, ph = D.value, tf = TF.value, th = TabH.value, t = T.value, wi = Wi.value
+function pathTopBottom(depth?: number, depthOff = 0): string {
+  const ph = depth ?? D.value
+  const pw = W.value, tf = TF.value, th = TabH.value, t = T.value, wi = Wi.value
+  const sideTabs = depthTabs(D.value, depthOff, ph)
   let d = `M${f(t)},0 L${f(pw - t)},0`
-  for (const y of tabPositions(D.value))
+  for (const y of sideTabs)
     d += ` L${f(pw - t)},${f(y)} L${f(pw)},${f(y)} L${f(pw)},${f(y + th)} L${f(pw - t)},${f(y + th)}`
   d += ` L${f(pw - t)},${f(ph)}`
   for (const x of [...tabPositions(wi)].reverse()) {
@@ -82,7 +127,7 @@ function pathTopBottom(): string {
     d += ` L${f(rx + th)},${f(ph)} L${f(rx + th)},${f(ph - tf)} L${f(rx)},${f(ph - tf)} L${f(rx)},${f(ph)}`
   }
   d += ` L${f(t)},${f(ph)}`
-  for (const y of [...tabPositions(D.value)].reverse())
+  for (const y of [...sideTabs].reverse())
     d += ` L${f(t)},${f(y + th)} L0,${f(y + th)} L0,${f(y)} L${f(t)},${f(y)}`
   d += ` L${f(t)},0 Z`
   return d
@@ -118,10 +163,12 @@ function pathBack(): string {
   return d
 }
 
-function pathShelf(): string {
-  const pw = W.value, ph = D.value, tf = TF.value, th = TabH.value, t = T.value, wi = Wi.value
+function pathShelf(depth?: number, depthOff = 0): string {
+  const ph = depth ?? D.value
+  const pw = W.value, tf = TF.value, th = TabH.value, t = T.value, wi = Wi.value
+  const sideTabs = depthTabs(D.value, depthOff, ph)
   let d = `M${f(t)},0 L${f(pw - t)},0`
-  for (const y of tabPositions(D.value))
+  for (const y of sideTabs)
     d += ` L${f(pw - t)},${f(y)} L${f(pw)},${f(y)} L${f(pw)},${f(y + th)} L${f(pw - t)},${f(y + th)}`
   d += ` L${f(pw - t)},${f(ph - t)}`
   for (const x of [...tabPositions(wi)].reverse()) {
@@ -129,7 +176,7 @@ function pathShelf(): string {
     d += ` L${f(rx + th)},${f(ph - t)} L${f(rx + th)},${f(ph)} L${f(rx)},${f(ph)} L${f(rx)},${f(ph - t)}`
   }
   d += ` L${f(t)},${f(ph - t)}`
-  for (const y of [...tabPositions(D.value)].reverse())
+  for (const y of [...sideTabs].reverse())
     d += ` L${f(t)},${f(y + th)} L0,${f(y + th)} L0,${f(y)} L${f(t)},${f(y)}`
   d += ` L${f(t)},0 Z`
   return d
@@ -141,13 +188,19 @@ function svgScale(pw: number, ph: number): number {
 }
 
 // ── Piece data lookup by label ──────────────────────────────────────────────
-function pieceData(label: string): { ow: number; oh: number; path: string } {
+function pieceData(label: string): { ow: number; oh: number; path: string; xOff: number } {
   const side = t('box.side_short')
   const back = t('box.back_short')
-  if (label.startsWith(side)) return { ow: D.value, oh: H.value, path: pathSide() }
-  if (label === t('box.top_short') || label === t('box.bottom_short')) return { ow: W.value, oh: D.value, path: pathTopBottom() }
-  if (label.startsWith(back)) return { ow: W.value, oh: H.value, path: pathBack() }
-  return { ow: W.value, oh: D.value, path: pathShelf() }
+  if (label.startsWith(side)) return { ow: SideOW.value, oh: H.value, path: pathSide(), xOff: SideOff.value }
+  if (label === t('box.top_short')) return { ow: W.value, oh: TopD.value, path: pathTopBottom(TopD.value, Math.max(Bevel.value, 0)), xOff: 0 }
+  if (label === t('box.bottom_short')) return { ow: W.value, oh: BotD.value, path: pathTopBottom(BotD.value, Math.max(-Bevel.value, 0)), xOff: 0 }
+  if (label.startsWith(back)) return { ow: W.value, oh: H.value, path: pathBack(), xOff: 0 }
+  const shIdx = parseInt(label.replace(t('box.shelf_short'), '')) - 1
+  const sys = shelfSlotYs()
+  const sy = shIdx >= 0 && shIdx < sys.length ? sys[shIdx] : 0
+  const sd = shelfDepthAt(sy)
+  const sOff = shelfOffsetAt(sy)
+  return { ow: W.value, oh: sd, path: pathShelf(sd, sOff), xOff: 0 }
 }
 
 // ── Cutting layout (shelf-based FFD with rotation) ──────────────────────────
@@ -157,14 +210,17 @@ interface LayoutPiece { x: number; y: number; w: number; h: number; label: strin
 function allPieces(): PieceInfo[] {
   const side = t('box.side_short')
   const list: PieceInfo[] = [
-    { w: D.value, h: H.value, label: `${side}1`, color: 'var(--accent)' },
-    { w: D.value, h: H.value, label: `${side}2`, color: 'var(--accent)' },
-    { w: W.value, h: D.value, label: t('box.top_short'), color: '#27ae60' },
-    { w: W.value, h: D.value, label: t('box.bottom_short'), color: '#27ae60' },
+    { w: SideOW.value, h: H.value, label: `${side}1`, color: 'var(--accent)' },
+    { w: SideOW.value, h: H.value, label: `${side}2`, color: 'var(--accent)' },
+    { w: W.value, h: TopD.value, label: t('box.top_short'), color: '#27ae60' },
+    { w: W.value, h: BotD.value, label: t('box.bottom_short'), color: Bevel.value !== 0 ? '#1abc9c' : '#27ae60' },
     { w: W.value, h: H.value, label: t('box.back_short'), color: '#8e44ad' },
   ]
-  for (let i = 1; i <= NShelves.value; i++)
-    list.push({ w: W.value, h: D.value, label: `${t('box.shelf_short')}${i}`, color: '#e67e22' })
+  const sys = shelfSlotYs()
+  for (let i = 0; i < sys.length; i++) {
+    const sd = shelfDepthAt(sys[i])
+    list.push({ w: W.value, h: sd, label: `${t('box.shelf_short')}${i + 1}`, color: Bevel.value !== 0 ? shelfColor(i) : '#e67e22' })
+  }
   list.sort((a, b) => b.w * b.h - a.w * a.h)
   return list
 }
@@ -389,29 +445,39 @@ function sidePts3D(x0: number): number[][] {
   const pts: number[][] = []
   const a = (y: number, z: number) => pts.push([x0, y, z])
   const d = D.value, h = H.value, tf = TF.value, th = TabH.value
-  a(0, 0)
-  for (const ty of tabPositions(d)) { a(ty, 0); a(ty, tf); a(ty + th, tf); a(ty + th, 0) }
+  const bv = Bevel.value
+  const clipBot = Math.max(0, -bv)
+  const clipTop = Math.max(0, bv)
+  a(clipBot, 0)
+  for (const ty of tabPositions(d)) {
+    if (ty < clipBot) continue
+    a(ty, 0); a(ty, tf); a(ty + th, tf); a(ty + th, 0)
+  }
   a(d, 0)
   for (const tz of tabPositions(h)) { a(d, tz); a(d - tf, tz); a(d - tf, tz + th); a(d, tz + th) }
   a(d, h)
-  for (const ty of [...tabPositions(d)].reverse()) { a(ty + th, h); a(ty + th, h - tf); a(ty, h - tf); a(ty, h) }
-  a(0, h)
+  for (const ty of [...tabPositions(d)].reverse()) {
+    if (ty < clipTop) continue
+    a(ty + th, h); a(ty + th, h - tf); a(ty, h - tf); a(ty, h)
+  }
+  a(clipTop, h)
   return pts
 }
 
-function horizPts3D(z0: number): number[][] {
+function horizPts3D(z0: number, depth?: number, yOff = 0): number[][] {
   const pts: number[][] = []
-  const a = (x: number, y: number) => pts.push([x, y, z0])
-  const w = W.value, d = D.value, tf = TF.value, th = TabH.value, t = T.value, wi = Wi.value
+  const a = (x: number, y: number) => pts.push([x, y + yOff, z0])
+  const w = W.value, d = depth ?? D.value, tf = TF.value, th = TabH.value, t = T.value, wi = Wi.value
+  const sTabs = depthTabs(D.value, yOff, d)
   a(t, 0); a(w - t, 0)
-  for (const ty of tabPositions(d)) { a(w - t, ty); a(w, ty); a(w, ty + th); a(w - t, ty + th) }
+  for (const ty of sTabs) { a(w - t, ty); a(w, ty); a(w, ty + th); a(w - t, ty + th) }
   a(w - t, d)
   for (const tx of [...tabPositions(wi)].reverse()) {
     const rx = t + tx
     a(rx + th, d); a(rx + th, d - tf); a(rx, d - tf); a(rx, d)
   }
   a(t, d)
-  for (const ty of [...tabPositions(d)].reverse()) { a(t, ty + th); a(0, ty + th); a(0, ty); a(t, ty) }
+  for (const ty of [...sTabs].reverse()) { a(t, ty + th); a(0, ty + th); a(0, ty); a(t, ty) }
   return pts
 }
 
@@ -431,31 +497,36 @@ function backPts3D(y0: number): number[][] {
   return pts
 }
 
-function shelfPts3D(z0: number): number[][] {
+function shelfPts3D(z0: number, depth?: number, yOff = 0): number[][] {
   const pts: number[][] = []
-  const a = (x: number, y: number) => pts.push([x, y, z0])
-  const w = W.value, d = D.value, tf = TF.value, th = TabH.value, t = T.value, wi = Wi.value
+  const a = (x: number, y: number) => pts.push([x, y + yOff, z0])
+  const w = W.value, d = depth ?? D.value, tf = TF.value, th = TabH.value, t = T.value, wi = Wi.value
+  const sTabs = depthTabs(D.value, yOff, d)
   a(t, 0); a(w - t, 0)
-  for (const ty of tabPositions(d)) { a(w - t, ty); a(w, ty); a(w, ty + th); a(w - t, ty + th) }
+  for (const ty of sTabs) { a(w - t, ty); a(w, ty); a(w, ty + th); a(w - t, ty + th) }
   a(w - t, d - t)
   for (const tx of [...tabPositions(wi)].reverse()) {
     const rx = t + tx
     a(rx + th, d - t); a(rx + th, d); a(rx, d); a(rx, d - t)
   }
   a(t, d - t)
-  for (const ty of [...tabPositions(d)].reverse()) { a(t, ty + th); a(0, ty + th); a(0, ty); a(t, ty) }
+  for (const ty of [...sTabs].reverse()) { a(t, ty + th); a(0, ty + th); a(0, ty); a(t, ty) }
   return pts
 }
 
 function sideHoles3D(x0: number): number[][][] {
   const holes: number[][][] = []
-  const tf = TF.value, th = TabH.value
-  for (const sz of shelfSlotYs())
-    for (const ty of tabPositions(D.value))
+  const tf = TF.value, th = TabH.value, d = D.value
+  for (const sz of shelfSlotYs()) {
+    const sOff = shelfOffsetAt(sz)
+    for (const ty of tabPositions(d)) {
+      if (ty < sOff || ty + th > d) continue
       holes.push([
         [x0, ty, sz], [x0, ty + th, sz],
         [x0, ty + th, sz + tf], [x0, ty, sz + tf],
       ])
+    }
+  }
   return holes
 }
 
@@ -549,19 +620,40 @@ function updateScene() {
   const lh = sideHoles3D(-ex)
   const rh = sideHoles3D(w + ex)
   const bh = backHoles3D(d + ey)
-  const panels: PanelData[] = [
-    { c: sidePts3D(-ex), n: [1, 0, 0], t: thick, col: '#2980b9', ec: '#1a5276', h: lh.length > 0 ? lh : undefined },
-    { c: sidePts3D(w + ex), n: [-1, 0, 0], t: thick, col: '#2980b9', ec: '#1a5276', h: rh.length > 0 ? rh : undefined },
-    { c: horizPts3D(h + ez), n: [0, 0, -1], t: thick, col: '#27ae60', ec: '#1e8449' },
-    { c: horizPts3D(-ez), n: [0, 0, 1], t: thick, col: '#27ae60', ec: '#1e8449' },
-    { c: backPts3D(d + ey), n: [0, -1, 0], t: thick, col: '#8e44ad', ec: '#5b2c6f', h: bh.length > 0 ? bh : undefined },
+  const sel = galPieces.value[galIdx.value]?.id ?? null
+  type TaggedPanel = PanelData & { gid: string }
+  const panels: TaggedPanel[] = [
+    { c: sidePts3D(-ex), n: [1, 0, 0], t: thick, col: '#2980b9', ec: '#1a5276', h: lh.length > 0 ? lh : undefined, gid: 'side' },
+    { c: sidePts3D(w + ex), n: [-1, 0, 0], t: thick, col: '#2980b9', ec: '#1a5276', h: rh.length > 0 ? rh : undefined, gid: 'side' },
+    { c: horizPts3D(h + ez, TopD.value, Math.max(Bevel.value, 0)), n: [0, 0, -1], t: thick, col: '#27ae60', ec: '#1e8449', gid: 'top' },
+    { c: horizPts3D(-ez, BotD.value, Math.max(-Bevel.value, 0)), n: [0, 0, 1], t: thick, col: Bevel.value !== 0 ? '#1abc9c' : '#27ae60', ec: Bevel.value !== 0 ? '#27ae60' : '#1e8449', gid: 'bot' },
+    { c: backPts3D(d + ey), n: [0, -1, 0], t: thick, col: '#8e44ad', ec: '#5b2c6f', h: bh.length > 0 ? bh : undefined, gid: 'back' },
   ]
-  for (const sz of shelfSlotYs())
-    panels.push({ c: shelfPts3D(sz), n: [0, 0, 1], t: thick, col: '#e67e22', ec: '#ca6f1e' })
+  const clipTop = Math.max(Bevel.value, 0)
+  const clipBot = Math.max(-Bevel.value, 0)
+  const shSlots = shelfSlotYs()
+  for (let si = 0; si < shSlots.length; si++) {
+    const frac = shSlots[si] / h
+    const shelfYOff = clipBot + (clipTop - clipBot) * frac
+    const shelfDepth = d - shelfYOff
+    const sc = Bevel.value !== 0 ? shelfColor(si) : '#e67e22'
+    const sec = Bevel.value !== 0 ? shelfEdgeColor(si) : '#ca6f1e'
+    panels.push({ c: shelfPts3D(shSlots[si], shelfDepth, shelfYOff), n: [0, 0, 1], t: thick, col: sc, ec: sec, gid: `shelf${si}` })
+  }
 
   for (const p of panels) {
     const mesh = buildPanel(p)
-    if (mesh) panelGroup.add(mesh)
+    if (!mesh) continue
+    const match = sel === 'tb' ? (p.gid === 'top' || p.gid === 'bot') : sel === 'shelf' ? p.gid.startsWith('shelf') : p.gid === sel
+    if (sel && !match) {
+      mesh.traverse(child => {
+        if ('material' in child) {
+          const mat = (child as THREE.Mesh).material as THREE.Material
+          if (mat) { mat.transparent = true; mat.opacity = 0.15 }
+        }
+      })
+    }
+    panelGroup.add(mesh)
   }
 
   // Guide lines
@@ -601,8 +693,9 @@ function updateScene() {
 
   addLabel(t('box.top_short'), '#a0e0a0', sz(w, d), w / 2, d / 2, h + ez)
   addLabel(t('box.bottom_short'), '#a0e0a0', sz(w, d), w / 2, d / 2, -ez)
-  addLabel(t('box.side_short'), '#80c0e0', sz(d, h), -ex, d / 2, h / 2)
-  addLabel(t('box.side_short'), '#80c0e0', sz(d, h), w + ex, d / 2, h / 2)
+  const bv = Bevel.value
+  addLabel(t('box.side_short'), '#80c0e0', sz(d + bv, h), -ex, d / 2, h / 2)
+  addLabel(t('box.side_short'), '#80c0e0', sz(d + bv, h), w + ex, d / 2, h / 2)
   addLabel(t('box.back_short'), '#c0a0d0', sz(w, h), w / 2, d + ey, h / 2)
 
   const shYs = shelfSlotYs()
@@ -625,21 +718,343 @@ function disposeThree() {
   resizeObs = null
 }
 
+// ── Piece 3D (isolated view) ────────────────────────────────────────────────
+let pScene: THREE.Scene | null = null
+let pCamera: THREE.PerspectiveCamera | null = null
+let pRenderer: THREE.WebGLRenderer | null = null
+let pControls: TrackballControls | null = null
+let pGroup: THREE.Group | null = null
+let pResizeObs: ResizeObserver | null = null
+let pAnimId = 0
+
+function initPieceThree() {
+  const c = document.getElementById('piece3d-container')
+  if (!c) return
+  const w = c.clientWidth || 400
+  const h = c.clientHeight || 300
+
+  pScene = new THREE.Scene()
+  pScene.background = new THREE.Color(0x1e1e2e)
+
+  pCamera = new THREE.PerspectiveCamera(38, w / h, 1, 20000)
+  pCamera.up.set(0, 0, 1)
+  pCamera.position.set(400, -300, 250)
+
+  pRenderer = new THREE.WebGLRenderer({ antialias: true })
+  pRenderer.setSize(w, h)
+  pRenderer.setPixelRatio(Math.min(devicePixelRatio, 2))
+  c.appendChild(pRenderer.domElement)
+
+  pControls = new TrackballControls(pCamera, pRenderer.domElement)
+  pControls.rotateSpeed = 3
+  pControls.zoomSpeed = 1.2
+  pControls.panSpeed = 0.8
+  pControls.dynamicDampingFactor = 0.12
+  pControls.staticMoving = false
+  pControls.noZoom = true
+  pControls.noPan = true
+  const raycaster = new THREE.Raycaster()
+  const mouse = new THREE.Vector2()
+  let hitPiece = false
+  pRenderer.domElement.addEventListener('pointerdown', (e) => {
+    if (!pCamera || !pGroup) return
+    const rect = pRenderer!.domElement.getBoundingClientRect()
+    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
+    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+    raycaster.setFromCamera(mouse, pCamera)
+    hitPiece = raycaster.intersectObjects(pGroup.children, true).length > 0
+    pControls!.noRotate = !hitPiece
+  }, true)
+  window.addEventListener('pointerup', () => {
+    hitPiece = false
+    if (pControls) pControls.noRotate = true
+  })
+
+  pScene.add(new THREE.AmbientLight(0xffffff, 0.5))
+  const d1 = new THREE.DirectionalLight(0xffffff, 0.8)
+  d1.position.set(400, -500, 600)
+  pScene.add(d1)
+  const d2 = new THREE.DirectionalLight(0xffffff, 0.3)
+  d2.position.set(-300, 400, -200)
+  pScene.add(d2)
+
+  pGroup = new THREE.Group()
+  pScene.add(pGroup)
+
+  const cam = pCamera, ctrl = pControls, rend = pRenderer, sc = pScene
+  ;(function loop() {
+    pAnimId = requestAnimationFrame(loop)
+    if (pRing.active && pGroup) {
+      pRing.t += 0.04
+      if (pRing.t >= 1) {
+        pRing.active = false
+        pRing.t = 1
+      }
+      const e = 1 - Math.pow(1 - pRing.t, 3)
+      const curAngle = pRing.from + (pRing.to - pRing.from) * e
+      positionRing(curAngle)
+      // smoothly reset camera to initial view
+      const p0 = (ctrl as any)._position0 as THREE.Vector3
+      const t0 = (ctrl as any)._target0 as THREE.Vector3
+      const u0 = (ctrl as any)._up0 as THREE.Vector3
+      cam.position.lerp(p0, e)
+      ctrl.target.lerp(t0, e)
+      cam.up.lerp(u0, e).normalize()
+    }
+    // set opacity: active piece = 1, others = 0.3
+    if (pGroup) {
+      const activeIdx = galIdx.value
+      pGroup.children.forEach((sub, i) => {
+        const isActive = i === activeIdx
+        sub.traverse(child => {
+          if ('material' in child) {
+            const mat = (child as THREE.Mesh).material as THREE.Material
+            if (mat) {
+              mat.transparent = !isActive
+              mat.opacity = isActive ? 1 : 0.3
+              mat.depthWrite = isActive
+            }
+          }
+        })
+      })
+    }
+    if (pCamReset.active) {
+      pCamReset.t += 0.04
+      if (pCamReset.t >= 1) {
+        pCamReset.active = false
+        pCamReset.t = 1
+      }
+      const e = 1 - Math.pow(1 - pCamReset.t, 3)
+      const p0 = (ctrl as any)._position0 as THREE.Vector3
+      const t0 = (ctrl as any)._target0 as THREE.Vector3
+      const u0 = (ctrl as any)._up0 as THREE.Vector3
+      cam.position.lerp(p0, e)
+      ctrl.target.lerp(t0, e)
+      cam.up.lerp(u0, e).normalize()
+    }
+    ctrl.update()
+    rend.render(sc, cam)
+  })()
+
+  pResizeObs = new ResizeObserver(() => {
+    const rw = c.clientWidth, rh = c.clientHeight
+    if (rw > 0 && rh > 0) {
+      cam.aspect = rw / rh
+      cam.updateProjectionMatrix()
+      rend.setSize(rw, rh)
+    }
+  })
+  pResizeObs.observe(c)
+}
+
+const RING_RADIUS = 1000
+const pRing = { active: false, t: 1, from: 0, to: 0 }
+const pCamReset = { active: false, t: 1 }
+
+function rebuildAllPieces() {
+  if (!pGroup) return
+  clearGroup(pGroup)
+
+  const thick = T.value
+  const pieces = galPieces.value
+
+  for (let i = 0; i < pieces.length; i++) {
+    const gp = pieces[i]
+    const inner = new THREE.Group()
+
+    const panels: PanelData[] = []
+    if (gp.id === 'side') {
+      panels.push({ c: sidePts3D(0), n: [1, 0, 0], t: thick, col: '#2980b9', ec: '#1a5276', h: sideHoles3D(0).length > 0 ? sideHoles3D(0) : undefined })
+    } else if (gp.id === 'tb') {
+      panels.push({ c: horizPts3D(0), n: [0, 0, 1], t: thick, col: '#27ae60', ec: '#1e8449' })
+    } else if (gp.id === 'top') {
+      panels.push({ c: horizPts3D(0, TopD.value, Math.max(Bevel.value, 0)), n: [0, 0, 1], t: thick, col: '#27ae60', ec: '#1e8449' })
+    } else if (gp.id === 'bot') {
+      panels.push({ c: horizPts3D(0, BotD.value, Math.max(-Bevel.value, 0)), n: [0, 0, 1], t: thick, col: '#1abc9c', ec: '#148f77' })
+    } else if (gp.id === 'back') {
+      panels.push({ c: backPts3D(0), n: [0, -1, 0], t: thick, col: '#8e44ad', ec: '#5b2c6f', h: backHoles3D(0).length > 0 ? backHoles3D(0) : undefined })
+    } else if (gp.id.startsWith('shelf')) {
+      const si = parseInt(gp.id.replace('shelf', '')) || 0
+      const sys = shelfSlotYs()
+      const sy = si < sys.length ? sys[si] : 0
+      const sd = shelfDepthAt(sy)
+      const sOff = shelfOffsetAt(sy)
+      const sc = Bevel.value !== 0 ? shelfColor(si) : '#e67e22'
+      const sec = Bevel.value !== 0 ? shelfEdgeColor(si) : '#ca6f1e'
+      panels.push({ c: shelfPts3D(0, sd, sOff), n: [0, 0, 1], t: thick, col: sc, ec: sec })
+    }
+
+    for (const p of panels) {
+      const mesh = buildPanel(p)
+      if (mesh) inner.add(mesh)
+    }
+
+    // rotate inner so panel faces -Y (camera direction)
+    const norm = panels[0]?.n ?? [0, -1, 0]
+    if (Math.abs(norm[0]) > 0.5) {
+      inner.rotation.set(0, 0, -Math.sign(norm[0]) * Math.PI / 2)
+    } else if (Math.abs(norm[2]) > 0.5) {
+      inner.rotation.set(Math.sign(norm[2]) * Math.PI / 2, 0, 0)
+    }
+
+    // center at origin and scale to fit uniform size
+    const sub = new THREE.Group()
+    sub.add(inner)
+    let box = new THREE.Box3().setFromObject(sub)
+    let center = box.getCenter(new THREE.Vector3())
+    inner.position.sub(center)
+
+    let sz = box.getSize(new THREE.Vector3())
+    const fitSize = 300
+    const aspect = pCamera!.aspect
+    const fovRad = pCamera!.fov * Math.PI / 180
+
+    // check if 90° Y rotation fits viewport better
+    const distNorm = Math.max((sz.z / 2) / Math.tan(fovRad / 2), (sz.x / 2) / (Math.tan(fovRad / 2) * aspect))
+    const distRot = Math.max((sz.x / 2) / Math.tan(fovRad / 2), (sz.z / 2) / (Math.tan(fovRad / 2) * aspect))
+    if (distRot < distNorm) {
+      inner.rotation.y += Math.PI / 2
+      box = new THREE.Box3().setFromObject(sub)
+      center = box.getCenter(new THREE.Vector3())
+      inner.position.sub(center)
+      sz = box.getSize(new THREE.Vector3())
+    }
+
+    const scale = fitSize / Math.max(sz.x, sz.z, 1)
+    sub.scale.setScalar(scale)
+
+    const angle = (i / pieces.length) * Math.PI * 2
+    sub.userData.angle = angle
+    pGroup.add(sub)
+  }
+}
+
+function ringLift(a: number): number { return (1 - Math.cos(a)) * 30 }
+
+function positionRing(angle: number) {
+  if (!pGroup) return
+  pGroup.userData.ringAngle = angle
+  const activeIdx = galIdx.value
+  pGroup.children.forEach((sub, i) => {
+    const sa = (sub.userData.angle || 0) + angle
+    sub.position.set(Math.sin(sa) * RING_RADIUS, -Math.cos(sa) * RING_RADIUS, ringLift(sa))
+    // active piece faces camera, others angled along ring
+    sub.rotation.z = i === activeIdx ? 0 : sa
+  })
+}
+
+function setupPieceCam() {
+  if (!pCamera || !pControls) return
+  const fitSize = 300
+  const aspect = pCamera.aspect
+  const fovRad = pCamera.fov * Math.PI / 180
+  const distH = (fitSize / 2) / Math.tan(fovRad / 2)
+  const distW = (fitSize / 2) / (Math.tan(fovRad / 2) * aspect)
+  const dist = Math.max(distH, distW) * 1.02
+  pCamera.up.set(0, 0, 1)
+  pCamera.position.set(0, -(RING_RADIUS + dist), 0)
+  pControls.target.set(0, -RING_RADIUS, 0)
+  ;(pControls as any)._target0.set(0, -RING_RADIUS, 0)
+  ;(pControls as any)._position0.copy(pCamera.position)
+  ;(pControls as any)._up0.set(0, 0, 1)
+  pControls.reset()
+}
+
+function pieceAngle(idx: number): number {
+  return -(idx / galPieces.value.length) * Math.PI * 2
+}
+
+function updatePieceScene(animate = false) {
+  if (!pGroup || !pControls || !pCamera) return
+
+  if (!animate) {
+    rebuildAllPieces()
+    positionRing(pieceAngle(galIdx.value))
+    setupPieceCam()
+  } else {
+    const target = pieceAngle(galIdx.value)
+    let from = pGroup.userData.ringAngle ?? 0
+    let delta = target - from
+    while (delta > Math.PI) delta -= Math.PI * 2
+    while (delta < -Math.PI) delta += Math.PI * 2
+    pRing.from = from
+    pRing.to = from + delta
+    pRing.active = true
+    pRing.t = 0
+  }
+}
+
+function disposePieceThree() {
+  if (pAnimId) cancelAnimationFrame(pAnimId)
+  if (pResizeObs) pResizeObs.disconnect()
+  if (pRenderer) {
+    pRenderer.dispose()
+    pRenderer.domElement?.remove()
+  }
+  pScene = pCamera = pRenderer = pControls = null
+  pGroup = null
+  pResizeObs = null
+}
+
+// ── Gallery ────────────────────────────────────────────────────────────────
+const galIdx = ref(0)
+
+const galPieces = computed(() => {
+  const bv = Bevel.value
+  const list: { id: string; title: string; count: number; pw: number; ph: number; path: () => string; color: string; xOff: number }[] = [
+    { id: 'side', title: `${t('box.side_wall')}`, count: 2, pw: SideOW.value, ph: H.value, path: pathSide, color: 'var(--accent)', xOff: SideOff.value },
+  ]
+  if (bv === 0) {
+    list.push({ id: 'tb', title: `${t('box.top_bottom_wall')}`, count: 2, pw: W.value, ph: D.value, path: () => pathTopBottom(), color: '#27ae60', xOff: 0 })
+  } else {
+    const topOff = Math.max(bv, 0), botOff = Math.max(-bv, 0)
+    list.push({ id: 'top', title: `${t('box.top_short')}`, count: 1, pw: W.value, ph: TopD.value, path: () => pathTopBottom(TopD.value, topOff), color: '#27ae60', xOff: 0 })
+    list.push({ id: 'bot', title: `${t('box.bottom_short')}`, count: 1, pw: W.value, ph: BotD.value, path: () => pathTopBottom(BotD.value, botOff), color: '#1abc9c', xOff: 0 })
+  }
+  list.push({ id: 'back', title: `${t('box.back_wall')}`, count: 1, pw: W.value, ph: H.value, path: pathBack, color: '#8e44ad', xOff: 0 })
+  const sys = shelfSlotYs()
+  if (bv === 0 && sys.length > 0) {
+    list.push({ id: 'shelf', title: `${t('box.shelf')}`, count: sys.length, pw: W.value, ph: D.value, path: () => pathShelf(), color: '#e67e22', xOff: 0 })
+  } else {
+    for (let i = 0; i < sys.length; i++) {
+      const sd = shelfDepthAt(sys[i])
+      const sOff = shelfOffsetAt(sys[i])
+      list.push({ id: `shelf${i}`, title: `${t('box.shelf_short')}${i + 1}`, count: 1, pw: W.value, ph: sd, path: () => pathShelf(sd, sOff), color: shelfColor(i), xOff: 0 })
+    }
+  }
+  return list
+})
+
+function galResetView() {
+  pCamReset.active = true
+  pCamReset.t = 0
+}
+
+function galDlSvg() {
+  const p = galPieces.value[galIdx.value]
+  dlPiece(`${p.id}.svg`, p.path(), p.pw, p.ph, p.xOff)
+}
+
 // ── Lifecycle ───────────────────────────────────────────────────────────────
 onMounted(() => {
   initThree()
   updateScene()
+  initPieceThree()
+  updatePieceScene()
 })
 
 onUnmounted(() => {
   disposeThree()
+  disposePieceThree()
 })
 
 watch(
-  [W, H, D, T, Kerf, TabH, NTab, NShelves, isoExplode],
-  () => updateScene(),
+  [W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, isoExplode],
+  () => { updateScene(); updatePieceScene() },
   { flush: 'post' },
 )
+
+watch(galIdx, () => { updateScene(); updatePieceScene(true) }, { flush: 'post' })
 
 // ── Download helpers ────────────────────────────────────────────────────────
 function downloadSvg(name: string, content: string) {
@@ -652,23 +1067,24 @@ function downloadSvg(name: string, content: string) {
   URL.revokeObjectURL(url)
 }
 
-function wrapCutSvg(pathData: string, pw: number, ph: number): string {
+function wrapCutSvg(pathData: string, pw: number, ph: number, xOff = 0): string {
   return `<?xml version="1.0" encoding="utf-8"?>\n` +
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${pw.toFixed(2)}mm" height="${ph.toFixed(2)}mm" viewBox="0 0 ${pw.toFixed(2)} ${ph.toFixed(2)}">\n` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${pw.toFixed(2)}mm" height="${ph.toFixed(2)}mm" viewBox="${(-xOff).toFixed(2)} 0 ${pw.toFixed(2)} ${ph.toFixed(2)}">\n` +
     `  <path d="${pathData}" fill="none" stroke="#ff0000" stroke-width="0.01" stroke-linejoin="miter"/>\n` +
     `</svg>`
 }
 
-function dlPiece(name: string, path: string, pw: number, ph: number) {
-  downloadSvg(name, wrapCutSvg(path, pw, ph))
+function dlPiece(name: string, path: string, pw: number, ph: number, xOff = 0) {
+  downloadSvg(name, wrapCutSvg(path, pw, ph, xOff))
 }
 
 function getCutSheetTransform(p: LayoutPiece): string {
   const pd = pieceData(p.label)
   const rotated = Math.abs(p.w - pd.oh) < 1 && Math.abs(p.h - pd.ow) < 1
+  const bvOff = pd.xOff
   return rotated
-    ? `translate(${p.x.toFixed(2)},${(p.y + pd.ow).toFixed(2)}) rotate(90)`
-    : `translate(${p.x.toFixed(2)},${p.y.toFixed(2)})`
+    ? `translate(${(p.x + bvOff).toFixed(2)},${(p.y + pd.ow).toFixed(2)}) rotate(90)`
+    : `translate(${(p.x + bvOff).toFixed(2)},${p.y.toFixed(2)})`
 }
 
 function getCutSheetPath(p: LayoutPiece): string {
@@ -690,6 +1106,7 @@ function getCutSheetPath(p: LayoutPiece): string {
           <div class="form-row"><label>{{ t('box.outer_width') }}</label><NumberField v-model="W" :min="50" :step="10" /></div>
           <div class="form-row"><label>{{ t('box.height') }}</label><NumberField v-model="H" :min="50" :step="10" /></div>
           <div class="form-row"><label>{{ t('box.depth') }}</label><NumberField v-model="D" :min="50" :step="10" /></div>
+          <div class="form-row"><label>{{ t('box.bevel') }}</label><NumberField v-model="Bevel" :step="5" /></div>
         </section>
         <section class="card">
           <h2>{{ t('box.material') }}</h2>
@@ -701,10 +1118,17 @@ function getCutSheetPath(p: LayoutPiece): string {
         </section>
         <section class="card shelf-summary">
           <h2>{{ t('box.parts') }}</h2>
-          <div class="shelf-part-row"><span>{{ t('box.sides') }}</span><span>2 &times; {{ D.toFixed(0) }}&times;{{ H.toFixed(0) }} mm</span></div>
-          <div class="shelf-part-row"><span>{{ t('box.top_bottom') }}</span><span>2 &times; {{ W.toFixed(0) }}&times;{{ D.toFixed(0) }} mm</span></div>
+          <div class="shelf-part-row"><span>{{ t('box.sides') }}</span><span>2 &times; {{ SideOW.toFixed(0) }}&times;{{ H.toFixed(0) }} mm</span></div>
+          <div v-if="Bevel === 0" class="shelf-part-row"><span>{{ t('box.top_bottom') }}</span><span>2 &times; {{ W.toFixed(0) }}&times;{{ D.toFixed(0) }} mm</span></div>
+          <div v-else class="shelf-part-row"><span>{{ t('box.top_short') }}</span><span>1 &times; {{ W.toFixed(0) }}&times;{{ TopD.toFixed(0) }} mm</span></div>
+          <div v-if="Bevel !== 0" class="shelf-part-row"><span>{{ t('box.bottom_short') }}</span><span>1 &times; {{ W.toFixed(0) }}&times;{{ BotD.toFixed(0) }} mm</span></div>
           <div class="shelf-part-row"><span>{{ t('box.back') }}</span><span>1 &times; {{ W.toFixed(0) }}&times;{{ H.toFixed(0) }} mm</span></div>
-          <div v-if="NShelves > 0" class="shelf-part-row"><span>{{ t('box.shelf') }}</span><span>{{ NShelves }} &times; {{ W.toFixed(0) }}&times;{{ D.toFixed(0) }} mm</span></div>
+          <template v-if="NShelves > 0 && Bevel === 0">
+            <div class="shelf-part-row"><span>{{ t('box.shelf') }}</span><span>{{ NShelves }} &times; {{ W.toFixed(0) }}&times;{{ D.toFixed(0) }} mm</span></div>
+          </template>
+          <template v-else-if="NShelves > 0">
+            <div v-for="(sy, i) in shelfSlotYs()" :key="i" class="shelf-part-row"><span>{{ t('box.shelf_short') }}{{ i + 1 }}</span><span>1 &times; {{ W.toFixed(0) }}&times;{{ shelfDepthAt(sy).toFixed(0) }} mm</span></div>
+          </template>
           <div class="shelf-part-row shelf-total"><span>{{ t('box.total') }}</span><span>{{ 5 + NShelves }} {{ t('box.pcs') }}</span></div>
         </section>
         <section class="card">
@@ -723,96 +1147,37 @@ function getCutSheetPath(p: LayoutPiece): string {
       </aside>
 
       <main class="panel panel-result">
-        <!-- Side wall -->
-        <section class="card">
-          <div class="card-head">
-            <h2>{{ t('box.side_wall') }} <small>(2 {{ t('box.pcs') }})</small></h2>
-            <button class="btn-dl" @click="dlPiece('side.svg', pathSide(), D, H)">&#x2193; SVG</button>
+        <!-- Pieces gallery + 3D -->
+        <section class="card gallery">
+          <div class="piece3d-wrap">
+            <button class="piece3d-nav piece3d-prev" @click="galIdx = (galIdx - 1 + galPieces.length) % galPieces.length">&lsaquo;</button>
+            <div id="piece3d-container" style="width:100%;height:350px;border-radius:8px;overflow:hidden;"></div>
+            <button class="piece3d-nav piece3d-next" @click="galIdx = (galIdx + 1) % galPieces.length">&rsaquo;</button>
+            <button class="piece3d-nav piece3d-reset" @click="galResetView" title="Reset view">&#x21ba;</button>
           </div>
-          <div class="sheet-svg-wrap">
-            <svg
-              :width="D * svgScale(D, H) + 30"
-              :height="H * svgScale(D, H) + 30"
-              :viewBox="`-15 -15 ${D * svgScale(D, H) + 30} ${H * svgScale(D, H) + 30}`"
-              style="display:block;margin:auto;"
+          <div class="gallery-3d-bar">
+            <span class="gallery-sel-title">{{ galPieces[galIdx].title }} <small>({{ galPieces[galIdx].count }} {{ t('box.pcs') }}, {{ galPieces[galIdx].pw.toFixed(0) }}&times;{{ galPieces[galIdx].ph.toFixed(0) }} mm)</small></span>
+            <button class="btn-dl" @click="galDlSvg">&#x2193; SVG</button>
+          </div>
+          <div class="gallery-thumbs">
+            <div
+              v-for="(p, i) in galPieces" :key="p.id"
+              :class="['gallery-thumb', i === galIdx && 'active']"
+              @click="galIdx = i"
             >
-              <rect x="-15" y="-15" :width="D * svgScale(D, H) + 30" :height="H * svgScale(D, H) + 30" fill="var(--laser-sheet-bg)" />
-              <g :transform="`scale(${svgScale(D, H).toFixed(4)})`">
-                <path :d="pathSide()" fill="var(--accent)" fill-opacity="0.28" fill-rule="evenodd" stroke="var(--laser-cut)" :stroke-width="(1.5 / svgScale(D, H)).toFixed(3)" stroke-linejoin="miter" />
-              </g>
-              <text :x="(D * svgScale(D, H) + 30) / 2 - 15" :y="H * svgScale(D, H) + 10" text-anchor="middle" font-size="10" fill="var(--muted)">{{ D.toFixed(0) }} &times; {{ H.toFixed(0) }} mm</text>
-            </svg>
+              <svg
+                :width="p.pw * svgScale(p.pw, p.ph) * 0.22 + 6"
+                :height="p.ph * svgScale(p.pw, p.ph) * 0.22 + 6"
+                :viewBox="`-3 -3 ${p.pw * svgScale(p.pw, p.ph) * 0.22 + 6} ${p.ph * svgScale(p.pw, p.ph) * 0.22 + 6}`"
+              >
+                <g :transform="`translate(${(p.xOff * svgScale(p.pw, p.ph) * 0.22).toFixed(4)}, 0) scale(${(svgScale(p.pw, p.ph) * 0.22).toFixed(4)})`">
+                  <path :d="p.path()" :fill="p.color" fill-opacity="0.4" fill-rule="evenodd" stroke="var(--laser-cut)" :stroke-width="(2 / (svgScale(p.pw, p.ph) * 0.22)).toFixed(1)" stroke-linejoin="miter" />
+                </g>
+              </svg>
+              <span class="gallery-thumb-label">{{ p.title }}</span>
+              <span class="gallery-thumb-info">{{ p.count }} {{ t('box.pcs') }}</span>
+            </div>
           </div>
-          <div class="sheet-footer">{{ D.toFixed(0) }} &times; {{ H.toFixed(0) }} mm</div>
-        </section>
-
-        <!-- Top/Bottom wall -->
-        <section class="card">
-          <div class="card-head">
-            <h2>{{ t('box.top_bottom_wall') }} <small>(2 {{ t('box.pcs') }})</small></h2>
-            <button class="btn-dl" @click="dlPiece('top-bottom.svg', pathTopBottom(), W, D)">&#x2193; SVG</button>
-          </div>
-          <div class="sheet-svg-wrap">
-            <svg
-              :width="W * svgScale(W, D) + 30"
-              :height="D * svgScale(W, D) + 30"
-              :viewBox="`-15 -15 ${W * svgScale(W, D) + 30} ${D * svgScale(W, D) + 30}`"
-              style="display:block;margin:auto;"
-            >
-              <rect x="-15" y="-15" :width="W * svgScale(W, D) + 30" :height="D * svgScale(W, D) + 30" fill="var(--laser-sheet-bg)" />
-              <g :transform="`scale(${svgScale(W, D).toFixed(4)})`">
-                <path :d="pathTopBottom()" fill="#27ae60" fill-opacity="0.28" fill-rule="evenodd" stroke="var(--laser-cut)" :stroke-width="(1.5 / svgScale(W, D)).toFixed(3)" stroke-linejoin="miter" />
-              </g>
-              <text :x="(W * svgScale(W, D) + 30) / 2 - 15" :y="D * svgScale(W, D) + 10" text-anchor="middle" font-size="10" fill="var(--muted)">{{ W.toFixed(0) }} &times; {{ D.toFixed(0) }} mm</text>
-            </svg>
-          </div>
-          <div class="sheet-footer">{{ W.toFixed(0) }} &times; {{ D.toFixed(0) }} mm</div>
-        </section>
-
-        <!-- Back wall -->
-        <section class="card">
-          <div class="card-head">
-            <h2>{{ t('box.back_wall') }} <small>(1 {{ t('box.pcs') }})</small></h2>
-            <button class="btn-dl" @click="dlPiece('back.svg', pathBack(), W, H)">&#x2193; SVG</button>
-          </div>
-          <div class="sheet-svg-wrap">
-            <svg
-              :width="W * svgScale(W, H) + 30"
-              :height="H * svgScale(W, H) + 30"
-              :viewBox="`-15 -15 ${W * svgScale(W, H) + 30} ${H * svgScale(W, H) + 30}`"
-              style="display:block;margin:auto;"
-            >
-              <rect x="-15" y="-15" :width="W * svgScale(W, H) + 30" :height="H * svgScale(W, H) + 30" fill="var(--laser-sheet-bg)" />
-              <g :transform="`scale(${svgScale(W, H).toFixed(4)})`">
-                <path :d="pathBack()" fill="#8e44ad" fill-opacity="0.28" fill-rule="evenodd" stroke="var(--laser-cut)" :stroke-width="(1.5 / svgScale(W, H)).toFixed(3)" stroke-linejoin="miter" />
-              </g>
-              <text :x="(W * svgScale(W, H) + 30) / 2 - 15" :y="H * svgScale(W, H) + 10" text-anchor="middle" font-size="10" fill="var(--muted)">{{ W.toFixed(0) }} &times; {{ H.toFixed(0) }} mm</text>
-            </svg>
-          </div>
-          <div class="sheet-footer">{{ W.toFixed(0) }} &times; {{ H.toFixed(0) }} mm</div>
-        </section>
-
-        <!-- Shelf -->
-        <section v-if="NShelves > 0" class="card">
-          <div class="card-head">
-            <h2>{{ t('box.shelf') }} <small>({{ NShelves }} {{ t('box.pcs') }})</small></h2>
-            <button class="btn-dl" @click="dlPiece('shelf.svg', pathShelf(), W, D)">&#x2193; SVG</button>
-          </div>
-          <div class="sheet-svg-wrap">
-            <svg
-              :width="W * svgScale(W, D) + 30"
-              :height="D * svgScale(W, D) + 30"
-              :viewBox="`-15 -15 ${W * svgScale(W, D) + 30} ${D * svgScale(W, D) + 30}`"
-              style="display:block;margin:auto;"
-            >
-              <rect x="-15" y="-15" :width="W * svgScale(W, D) + 30" :height="D * svgScale(W, D) + 30" fill="var(--laser-sheet-bg)" />
-              <g :transform="`scale(${svgScale(W, D).toFixed(4)})`">
-                <path :d="pathShelf()" fill="#e67e22" fill-opacity="0.28" fill-rule="evenodd" stroke="var(--laser-cut)" :stroke-width="(1.5 / svgScale(W, D)).toFixed(3)" stroke-linejoin="miter" />
-              </g>
-              <text :x="(W * svgScale(W, D) + 30) / 2 - 15" :y="D * svgScale(W, D) + 10" text-anchor="middle" font-size="10" fill="var(--muted)">{{ W.toFixed(0) }} &times; {{ D.toFixed(0) }} mm</text>
-            </svg>
-          </div>
-          <div class="sheet-footer">{{ W.toFixed(0) }} &times; {{ D.toFixed(0) }} mm</div>
         </section>
 
         <!-- 3D Assembly -->
@@ -821,7 +1186,6 @@ function getCutSheetPath(p: LayoutPiece): string {
           <div class="iso-controls">
             <label>{{ t('box.explode') }}</label>
             <input type="range" min="0" max="0.5" step="0.01" v-model.number="isoExplode" style="flex:1" />
-            <span class="iso-hint">{{ t('box.mouse_hint') }}</span>
           </div>
           <div id="box3d-container" style="width:100%;height:450px;border-radius:8px;overflow:hidden;"></div>
         </section>
