@@ -16,6 +16,12 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -71,3 +77,15 @@ jobs:
           prerelease: ${{ steps.version.outputs.is_pre == 'true' }}
           generate_release_notes: true
           files: artifact.tar
+
+  deploy:
+    needs: release
+    if: needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5
