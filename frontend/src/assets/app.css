@@ -316,6 +316,76 @@ h1:focus { outline: none; }
 
 /* ── Panel & Cards ────────────────────────────────────────────────────── */
 .panel { display: flex; flex-direction: column; gap: 16px; }
+.gallery-thumbs {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    padding-bottom: 8px;
+}
+.gallery-thumb {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+}
+.gallery-thumb:hover { background: var(--border); }
+.gallery-thumb.active { border-color: var(--accent); background: rgba(41,128,185,.08); }
+.gallery-thumb-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--heading);
+    white-space: nowrap;
+}
+.gallery-thumb-info {
+    font-size: 0.68rem;
+    color: var(--muted);
+}
+.gallery-3d-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+.gallery-sel-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--heading);
+}
+.gallery-sel-title small {
+    font-weight: 400;
+    color: var(--muted);
+}
+.piece3d-wrap {
+    position: relative;
+}
+.piece3d-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,.15);
+    background: rgba(30,30,46,.7);
+    color: #fff;
+    font-size: 1.4rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background .15s;
+}
+.piece3d-nav:hover { background: rgba(41,128,185,.6); }
+.piece3d-prev { left: 8px; }
+.piece3d-next { right: 8px; }
+.piece3d-reset { right: 8px; top: auto; bottom: 8px; transform: none; font-size: 1.1rem; }
 
 .card {
     background: var(--surface);
