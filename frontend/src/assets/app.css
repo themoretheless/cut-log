@@ -82,11 +82,19 @@
 /* ── Page Navigation ──────────────────────────────────────────────────── */
 .page-nav {
     display: flex;
-    gap: 4px;
+    align-items: center;
+    justify-content: space-between;
     padding: 8px 16px;
     background: var(--nav-bg);
     border-bottom: 1px solid var(--nav-border);
     transition: background .2s, border-color .2s;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.page-nav-links {
+    display: flex;
+    gap: 4px;
 }
 
 .page-nav-link {
@@ -127,16 +135,6 @@ html, body {
 h1:focus { outline: none; }
 
 /* ── Theme Toggle ─────────────────────────────────────────────────────── */
-.theme-toggle-wrap {
-    position: fixed;
-    top: 14px;
-    right: 18px;
-    z-index: 100;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
 .top-controls {
     display: flex;
     align-items: center;
@@ -314,8 +312,13 @@ h1:focus { outline: none; }
     .main-layout { grid-template-columns: 1fr; }
 }
 
+@media (max-width: 480px) {
+    .page-nav { flex-direction: column; align-items: flex-start; }
+    .page-nav-links { flex-direction: column; }
+}
+
 /* ── Panel & Cards ────────────────────────────────────────────────────── */
-.panel { display: flex; flex-direction: column; gap: 16px; }
+.panel { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .gallery-thumbs {
     display: flex;
     gap: 10px;
@@ -393,6 +396,7 @@ h1:focus { outline: none; }
     border-radius: 12px;
     padding: 18px 20px;
     transition: background .2s, border-color .2s;
+    min-width: 0;
 }
 
 .card h2 {
@@ -1060,6 +1064,12 @@ kbd {
     border-radius: 6px;
     overflow: hidden;
     flex-shrink: 0;
+    max-width: 100%;
+}
+
+.cut-sheet svg {
+    max-width: 100%;
+    height: auto;
 }
 
 .cut-sheet-title {
