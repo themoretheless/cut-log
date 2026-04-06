@@ -58,6 +58,13 @@ const ru: Record<string, string> = {
   'box.stats': 'Листов: {0} · Площадь деталей: {1} м² · Площадь материала: {2} м² · КИМ: {3}%',
   'box.sheet_label': 'Лист',
   'nav.cutting': 'Раскрой фанеры', 'nav.box': 'Коробка с перегородками', 'nav.laser': 'Лазерная резка',
+  'nav.scad': '3D Просмотр',
+  'scad.title': 'OpenSCAD 3D Просмотрщик', 'scad.subtitle': 'Редактор OpenSCAD с рендерингом через WebGPU',
+  'scad.render': 'Рендер', 'scad.auto': 'Авто', 'scad.examples': 'Примеры',
+  'scad.ex_basic': 'Базовый', 'scad.ex_house': 'Дом', 'scad.ex_gears': 'Фигуры',
+  'scad.meshes': 'Объектов', 'scad.triangles': 'Треугольников',
+  'scad.mouse_hint': 'ЛКМ: вращение · ПКМ/Shift: перемещение · колёсико: зум · Ctrl+Enter: рендер',
+  'scad.no_webgpu': 'WebGPU не поддерживается в этом браузере. Используйте Chrome 113+ или Edge 113+.',
   theme: 'Тема', 'notfound.title': 'Страница не найдена', 'notfound.text': 'Запрашиваемая страница не существует.',
 }
 
@@ -104,6 +111,13 @@ const en: Record<string, string> = {
   'box.stats': 'Sheets: {0} · Part area: {1} m² · Material area: {2} m² · Yield: {3}%',
   'box.sheet_label': 'Sheet',
   'nav.cutting': 'Plywood Cutting', 'nav.box': 'Box with Partitions', 'nav.laser': 'Laser Cutting',
+  'nav.scad': '3D Viewer',
+  'scad.title': 'OpenSCAD 3D Viewer', 'scad.subtitle': 'OpenSCAD editor with WebGPU rendering',
+  'scad.render': 'Render', 'scad.auto': 'Auto', 'scad.examples': 'Examples',
+  'scad.ex_basic': 'Basic', 'scad.ex_house': 'House', 'scad.ex_gears': 'Shapes',
+  'scad.meshes': 'Meshes', 'scad.triangles': 'Triangles',
+  'scad.mouse_hint': 'LMB: rotate · RMB/Shift: pan · wheel: zoom · Ctrl+Enter: render',
+  'scad.no_webgpu': 'WebGPU is not supported in this browser. Use Chrome 113+ or Edge 113+.',
   theme: 'Theme', 'notfound.title': 'Page not found', 'notfound.text': 'The requested page does not exist.',
 }
 
