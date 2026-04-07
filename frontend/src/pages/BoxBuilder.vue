@@ -24,6 +24,7 @@ const SheetH = ref(2440)
 const CutGap = ref(5)
 
 const isoExplode = ref(0.22)
+let isoExplodeCurrent = 0.22
 
 // ── Computed ────────────────────────────────────────────────────────────────
 const TF = computed(() => T.value + Kerf.value)
@@ -563,6 +564,7 @@ function initThree() {
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
   controls.dampingFactor = 0.12
+  controls.zoomSpeed = 0.2
   controls.target.set(150, 100, 150)
   controls.update()
 
@@ -587,8 +589,21 @@ function initThree() {
   const sc = scene
   const lg = labelsGroup
 
-  ;(function loop() {
+  isoExplodeCurrent = isoExplode.value
+  let lastFrameTime = 0
+  ;(function loop(now = performance.now()) {
     animFrameId = requestAnimationFrame(loop)
+    const dt = lastFrameTime > 0 ? Math.min((now - lastFrameTime) / 1000, 0.1) : 1 / 60
+    lastFrameTime = now
+    const target = isoExplode.value
+    const delta = target - isoExplodeCurrent
+    const snapThreshold = 0.0005 * dt * 60
+    if (Math.abs(delta) > snapThreshold) {
+      const easing = 1 - Math.pow(1 - 0.18, dt * 60)
+      isoExplodeCurrent += delta * easing
+      if (Math.abs(target - isoExplodeCurrent) < snapThreshold) isoExplodeCurrent = target
+      updateScene(false)
+    }
     ctrl.update()
     lg.children.forEach(s => s.quaternion.copy(cam.quaternion))
     rend.render(sc, cam)
@@ -606,14 +621,14 @@ function initThree() {
   resizeObs.observe(c)
 }
 
-function updateScene() {
+function updateScene(resetTarget = true) {
   if (!panelGroup || !guidesGroup || !labelsGroup || !controls) return
   clearGroup(panelGroup)
   clearGroup(guidesGroup)
   clearGroup(labelsGroup)
 
   const w = W.value, h = H.value, d = D.value, thick = T.value
-  const explode = Math.max(isoExplode.value, 0.001)
+  const explode = Math.max(isoExplodeCurrent, 0.001)
   const ex = w * explode, ey = d * explode, ez = h * explode
 
   // Panels
@@ -702,7 +717,9 @@ function updateScene() {
   for (let i = 0; i < shYs.length; i++)
     addLabel(`${t('box.shelf_short')}${i + 1}`, '#e0c080', sz(w, d), w / 2, d / 2, shYs[i])
 
-  controls.target.set(w / 2, d / 2, h / 2)
+  if (resetTarget) {
+    controls.target.set(w / 2, d / 2, h / 2)
+  }
   controls.update()
 }
 
@@ -797,9 +814,9 @@ function initPieceThree() {
       const p0 = (ctrl as any)._position0 as THREE.Vector3
       const t0 = (ctrl as any)._target0 as THREE.Vector3
       const u0 = (ctrl as any)._up0 as THREE.Vector3
-      cam.position.lerp(p0, e)
-      ctrl.target.lerp(t0, e)
-      cam.up.lerp(u0, e).normalize()
+      cam.position.lerpVectors(pRing.camPos, p0, e)
+      ctrl.target.lerpVectors(pRing.camTarget, t0, e)
+      cam.up.lerpVectors(pRing.camUp, u0, e).normalize()
     }
     // set opacity: active piece = 1, others = 0.3
     if (pGroup) {
@@ -828,9 +845,9 @@ function initPieceThree() {
       const p0 = (ctrl as any)._position0 as THREE.Vector3
       const t0 = (ctrl as any)._target0 as THREE.Vector3
       const u0 = (ctrl as any)._up0 as THREE.Vector3
-      cam.position.lerp(p0, e)
-      ctrl.target.lerp(t0, e)
-      cam.up.lerp(u0, e).normalize()
+      cam.position.lerpVectors(pCamReset.camPos, p0, e)
+      ctrl.target.lerpVectors(pCamReset.camTarget, t0, e)
+      cam.up.lerpVectors(pCamReset.camUp, u0, e).normalize()
     }
     ctrl.update()
     rend.render(sc, cam)
@@ -848,8 +865,10 @@ function initPieceThree() {
 }
 
 const RING_RADIUS = 1000
-const pRing = { active: false, t: 1, from: 0, to: 0 }
-const pCamReset = { active: false, t: 1 }
+const pRing = { active: false, t: 1, from: 0, to: 0,
+  camPos: new THREE.Vector3(), camTarget: new THREE.Vector3(), camUp: new THREE.Vector3() }
+const pCamReset = { active: false, t: 1,
+  camPos: new THREE.Vector3(), camTarget: new THREE.Vector3(), camUp: new THREE.Vector3() }
 
 function rebuildAllPieces() {
   if (!pGroup) return
@@ -979,6 +998,9 @@ function updatePieceScene(animate = false) {
     while (delta < -Math.PI) delta += Math.PI * 2
     pRing.from = from
     pRing.to = from + delta
+    pRing.camPos.copy(pCamera!.position)
+    pRing.camTarget.copy(pControls!.target)
+    pRing.camUp.copy(pCamera!.up)
     pRing.active = true
     pRing.t = 0
   }
@@ -1026,6 +1048,9 @@ const galPieces = computed(() => {
 })
 
 function galResetView() {
+  pCamReset.camPos.copy(pCamera!.position)
+  pCamReset.camTarget.copy(pControls!.target)
+  pCamReset.camUp.copy(pCamera!.up)
   pCamReset.active = true
   pCamReset.t = 0
 }
@@ -1049,7 +1074,7 @@ onUnmounted(() => {
 })
 
 watch(
-  [W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, isoExplode],
+  [W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel],
   () => { updateScene(); updatePieceScene() },
   { flush: 'post' },
 )
