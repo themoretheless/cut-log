@@ -590,12 +590,18 @@ function initThree() {
   const lg = labelsGroup
 
   isoExplodeCurrent = isoExplode.value
-  ;(function loop() {
+  let lastFrameTime = 0
+  ;(function loop(now = performance.now()) {
     animFrameId = requestAnimationFrame(loop)
+    const dt = lastFrameTime > 0 ? Math.min((now - lastFrameTime) / 1000, 0.1) : 1 / 60
+    lastFrameTime = now
     const target = isoExplode.value
-    if (Math.abs(isoExplodeCurrent - target) > 0.0005) {
-      isoExplodeCurrent += (target - isoExplodeCurrent) * 0.18
-      if (Math.abs(isoExplodeCurrent - target) < 0.0005) isoExplodeCurrent = target
+    const delta = target - isoExplodeCurrent
+    const snapThreshold = 0.0005 * dt * 60
+    if (Math.abs(delta) > snapThreshold) {
+      const easing = 1 - Math.pow(1 - 0.18, dt * 60)
+      isoExplodeCurrent += delta * easing
+      if (Math.abs(target - isoExplodeCurrent) < snapThreshold) isoExplodeCurrent = target
       updateScene(false)
     }
     ctrl.update()
