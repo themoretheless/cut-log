@@ -5,8 +5,6 @@ use std::sync::Once;
 
 use cutter_core::models::{CutPiece, Sheet};
 use cutter_core::optimizer::{self, CuttingStrategy};
-use cutter_core::box_builder::{self, BoxParams};
-use cutter_ui::box3d;
 
 static INIT: Once = Once::new();
 
@@ -164,80 +162,3 @@ pub fn optimize_sync(input_json: &str) -> String {
     run_optimize(input_json)
 }
 
-// ── Box builder (single source of truth in Rust) ─────────────────────────────
-
-fn parse_box_params(json: &str) -> BoxParams {
-    serde_json::from_str(json).unwrap_or(BoxParams {
-        w: 300.0, h: 400.0, d: 200.0, t: 6.0, kerf: 0.1,
-        tab_h: 30.0, n_tab: 1, n_shelves: 0, bevel: 0.0,
-    })
-}
-
-#[derive(Serialize)]
-struct GalleryEntry {
-    id: String,
-    count: usize,
-    w: f64,
-    h: f64,
-    path: String,
-    panel: box3d::PiecePanel,
-}
-
-#[derive(Serialize)]
-struct BoxModel {
-    gallery: Vec<GalleryEntry>,
-    scene: box3d::Scene,
-}
-
-#[derive(Serialize)]
-struct LayoutOut {
-    x: f64,
-    y: f64,
-    w: f64,
-    h: f64,
-    id: String,
-    /// Natural width/height of the piece in its own path space (for rotation detection).
-    ow: f64,
-    oh: f64,
-    path: String,
-}
-
-/// Gallery (grouped pieces with SVG paths + isolated 3D panels) and the assembly
-/// scene (base coordinates + explode metadata). Presentation stays in the frontend.
-#[wasm_bindgen]
-pub fn box_model(params_json: &str) -> String {
-    let p = parse_box_params(params_json);
-    let gallery: Vec<GalleryEntry> = box_builder::gallery_pieces(&p)
-        .into_iter()
-        .filter_map(|gp| {
-            let panel = box3d::gallery_panel(&p, &gp.id)?;
-            Some(GalleryEntry { id: gp.id, count: gp.count, w: gp.w, h: gp.h, path: gp.path, panel })
-        })
-        .collect();
-    let scene = box3d::assembly_scene(&p);
-    serde_json::to_string(&BoxModel { gallery, scene }).unwrap()
-}
-
-/// Cutting layout for the box: placements with their cut path and natural size.
-#[wasm_bindgen]
-pub fn box_layout(params_json: &str, sheet_w: f64, sheet_h: f64, gap: f64) -> String {
-    let p = parse_box_params(params_json);
-    let pieces = box_builder::all_box_pieces(&p);
-    let natural: std::collections::HashMap<&str, (f64, f64)> =
-        pieces.iter().map(|bp| (bp.id.as_str(), (bp.w, bp.h))).collect();
-    let layout = box_builder::compute_layout(&pieces, sheet_w, sheet_h, gap);
-    let out: Vec<Vec<LayoutOut>> = layout
-        .iter()
-        .map(|sheet| {
-            sheet
-                .iter()
-                .map(|lp| {
-                    let (ow, oh) = natural.get(lp.id.as_str()).copied().unwrap_or((lp.w, lp.h));
-                    let path = box_builder::piece_path(&p, &lp.id).unwrap_or_default();
-                    LayoutOut { x: lp.x, y: lp.y, w: lp.w, h: lp.h, id: lp.id.clone(), ow, oh, path }
-                })
-                .collect()
-        })
-        .collect();
-    serde_json::to_string(&out).unwrap()
-}

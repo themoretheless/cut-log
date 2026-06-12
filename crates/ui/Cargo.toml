@@ -6,5 +6,3 @@ description = "Frontend helpers: SVG rendering, Three.js scene JSON, colors"
 
 [dependencies]
 cutter-core = { path = "../core" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
