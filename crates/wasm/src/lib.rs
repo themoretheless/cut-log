@@ -3,7 +3,7 @@ use wasm_bindgen_futures::future_to_promise;
 use serde::{Deserialize, Serialize};
 use std::sync::Once;
 
-use cutter_core::models::{CutPiece, Sheet};
+use cutter_core::models::{CutPiece, Sheet, UnplacedPiece};
 use cutter_core::optimizer::{self, CuttingStrategy};
 
 static INIT: Once = Once::new();
@@ -44,7 +44,7 @@ struct PieceInput {
 #[derive(Serialize)]
 struct OptimizeOutput {
     sheets: Vec<SheetOutput>,
-    unplaced_pieces: Vec<String>,
+    unplaced_pieces: Vec<UnplacedPiece>,
     strategy: u8,
     auto_picked_strategy: Option<u8>,
     total_sheets: usize,

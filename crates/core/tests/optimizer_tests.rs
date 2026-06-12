@@ -318,7 +318,7 @@ fn labeled_unplaced_piece_shows_label() {
     let pieces = vec![piece_labeled("Полка XL", 5000.0, 5000.0, 1)];
     let result = optimize(2440.0, 1220.0, &pieces, 0.0, CuttingStrategy::Auto);
     assert_eq!(result.unplaced_pieces.len(), 1);
-    assert!(result.unplaced_pieces[0].contains("Полка XL"));
+    assert_eq!(result.unplaced_pieces[0].label, "Полка XL");
 }
 
 #[test]

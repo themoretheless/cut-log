@@ -456,7 +456,9 @@ onUnmounted(() => {
           <div v-if="result.unplacedPieces.length" class="alert alert-warn">
             <strong>{{ t('unplaced_warn') }}</strong>
             <ul>
-              <li v-for="(u, ui) in result.unplacedPieces" :key="ui">{{ u }}</li>
+              <li v-for="(u, ui) in result.unplacedPieces" :key="ui">
+                <template v-if="u.label.trim()">{{ u.label.trim() }} </template>({{ u.width.toFixed(0) }}&times;{{ u.height.toFixed(0) }})
+              </li>
             </ul>
           </div>
 

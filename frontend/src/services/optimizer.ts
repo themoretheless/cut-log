@@ -51,7 +51,7 @@ export async function optimize(
 
   return {
     sheets,
-    unplacedPieces: raw.unplaced_pieces,
+    unplacedPieces: (raw.unplaced_pieces as any[]).map(u => ({ label: u.label, width: u.width, height: u.height })),
     strategy: raw.strategy,
     autoPickedStrategy: raw.auto_picked_strategy ?? undefined,
     totalSheets: raw.total_sheets,
