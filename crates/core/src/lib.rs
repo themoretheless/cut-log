@@ -1,4 +1,3 @@
-pub mod box_builder;
 pub mod models;
 pub mod optimizer;
 
