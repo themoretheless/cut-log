@@ -30,6 +30,8 @@ export async function optimize(
 
   const raw = JSON.parse(wasm.optimize_sync(input))
 
+  const piecesById = new Map(pieces.map(p => [p.id, p]))
+
   const sheets: Sheet[] = raw.sheets.map((s: any) => ({
     index: s.index,
     width: s.width,
@@ -38,7 +40,7 @@ export async function optimize(
     totalArea: s.total_area,
     efficiency: s.efficiency,
     placedPieces: s.placed_pieces.map((pp: any): PlacedPiece => ({
-      source: pieces.find(p => p.id === pp.source_id) ?? {
+      source: piecesById.get(pp.source_id) ?? {
         id: pp.source_id, label: pp.source_label, color: pp.source_color,
         width: pp.width, height: pp.height, quantity: 1, allowRotation: true,
       },

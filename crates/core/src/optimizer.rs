@@ -98,6 +98,39 @@ struct FreeRect {
     h: f64,
 }
 
+// Free rects of one sheet plus an upper bound on their dimensions, so whole
+// sheets can be skipped without scanning every rect.
+#[derive(Debug, Clone, Default)]
+struct SheetSpace {
+    free: Vec<FreeRect>,
+    max_w: f64,
+    max_h: f64,
+}
+
+impl SheetSpace {
+    fn new(rect: FreeRect) -> Self {
+        Self { free: vec![rect], max_w: rect.w, max_h: rect.h }
+    }
+
+    fn refresh_bounds(&mut self) {
+        self.max_w = 0.0;
+        self.max_h = 0.0;
+        for fr in &self.free {
+            if fr.w > self.max_w { self.max_w = fr.w; }
+            if fr.h > self.max_h { self.max_h = fr.h; }
+        }
+    }
+
+    // Necessary (not sufficient) condition for the piece to fit somewhere on
+    // this sheet; false means no free rect can hold it in any orientation.
+    fn might_fit(&self, piece: &CutPiece, kerf: f64) -> bool {
+        let pw = piece.width + kerf;
+        let ph = piece.height + kerf;
+        (pw <= self.max_w && ph <= self.max_h)
+            || (piece.allow_rotation && ph <= self.max_w && pw <= self.max_h)
+    }
+}
+
 // ── Optimizer ─────────────────────────────────────────────────────────────────
 
 #[instrument(skip(pieces), fields(pieces_count = pieces.len()))]
@@ -143,15 +176,28 @@ fn run_auto(
     let mut best: Option<CuttingResult> = None;
     let mut best_strategy = CuttingStrategy::Auto;
 
+    // Only the sort order shapes the queue, so the three queues are built
+    // once and shared by the nine fit/sort combinations.
+    let queues = [
+        build_queue(pieces, SortOrder::AreaDesc),
+        build_queue(pieces, SortOrder::MaxSideDesc),
+        build_queue(pieces, SortOrder::PerimeterDesc),
+    ];
+    let queue_for = |sort: SortOrder| match sort {
+        SortOrder::AreaDesc => &queues[0],
+        SortOrder::MaxSideDesc => &queues[1],
+        SortOrder::PerimeterDesc => &queues[2],
+    };
+
     for &(fit, sort, _) in &ALL_STRATEGIES {
-        let result = run_single(sheet_width, sheet_height, pieces, kerf, fit, sort);
+        let result = run_packed(sheet_width, sheet_height, queue_for(sort), kerf, fit, sort);
         debug!(
             ?fit, ?sort,
             sheets = result.total_sheets(),
             efficiency = format!("{:.1}%", result.overall_efficiency()),
             "strategy result"
         );
-        if best.as_ref().map_or(true, |b| is_better(&result, b)) {
+        if best.as_ref().is_none_or(|b| is_better(&result, b)) {
             best_strategy = result.strategy;
             best = Some(result);
         }
@@ -174,6 +220,24 @@ fn is_better(candidate: &CuttingResult, current: &CuttingResult) -> bool {
     candidate.overall_efficiency() > current.overall_efficiency()
 }
 
+fn build_queue(pieces: &[CutPiece], sort_order: SortOrder) -> Vec<&CutPiece> {
+    let mut queue: Vec<(f64, &CutPiece)> = pieces
+        .iter()
+        .flat_map(|p| std::iter::repeat_n(p, p.quantity as usize))
+        .map(|p| {
+            let key = match sort_order {
+                SortOrder::AreaDesc => p.width * p.height,
+                SortOrder::MaxSideDesc => p.width.max(p.height),
+                SortOrder::PerimeterDesc => p.width + p.height,
+            };
+            (key, p)
+        })
+        .collect();
+
+    queue.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    queue.into_iter().map(|(_, p)| p).collect()
+}
+
 #[instrument(skip(pieces), fields(?heuristic, ?sort_order))]
 fn run_single(
     sheet_width: f64,
@@ -183,30 +247,35 @@ fn run_single(
     heuristic: FitHeuristic,
     sort_order: SortOrder,
 ) -> CuttingResult {
+    let queue = build_queue(pieces, sort_order);
+    run_packed(sheet_width, sheet_height, &queue, kerf, heuristic, sort_order)
+}
+
+fn run_packed(
+    sheet_width: f64,
+    sheet_height: f64,
+    queue: &[&CutPiece],
+    kerf: f64,
+    heuristic: FitHeuristic,
+    sort_order: SortOrder,
+) -> CuttingResult {
     let mut result = CuttingResult::new(compose(heuristic, sort_order));
-
-    let mut queue: Vec<&CutPiece> = pieces
-        .iter()
-        .flat_map(|p| std::iter::repeat_n(p, p.quantity as usize))
-        .collect();
-
-    queue.sort_by(|a, b| {
-        let key = |p: &CutPiece| match sort_order {
-            SortOrder::AreaDesc => p.width * p.height,
-            SortOrder::MaxSideDesc => p.width.max(p.height),
-            SortOrder::PerimeterDesc => p.width + p.height,
-        };
-        key(b).partial_cmp(&key(a)).unwrap_or(std::cmp::Ordering::Equal)
-    });
 
     if queue.is_empty() {
         return result;
     }
 
-    let mut sheet_free_rects: Vec<Vec<FreeRect>> = Vec::new();
+    // Free rects narrower than the smallest piece dimension can never hold
+    // anything; dropping them keeps every scan list short.
+    let min_dim = queue
+        .iter()
+        .map(|p| p.width.min(p.height) + kerf)
+        .fold(f64::MAX, f64::min);
 
-    for piece in &queue {
-        if try_place_on_existing(&mut result, &mut sheet_free_rects, piece, kerf, heuristic) {
+    let mut sheet_free_rects: Vec<SheetSpace> = Vec::new();
+
+    for &piece in queue {
+        if try_place_on_existing(&mut result, &mut sheet_free_rects, piece, kerf, heuristic, min_dim) {
             continue;
         }
 
@@ -226,6 +295,7 @@ fn run_single(
             sheet_height,
             kerf,
             heuristic,
+            min_dim,
         );
     }
 
@@ -234,15 +304,19 @@ fn run_single(
 
 fn try_place_on_existing(
     result: &mut CuttingResult,
-    sheet_free_rects: &mut [Vec<FreeRect>],
+    sheet_free_rects: &mut [SheetSpace],
     piece: &CutPiece,
     kerf: f64,
     heuristic: FitHeuristic,
+    min_dim: f64,
 ) -> bool {
-    for si in 0..sheet_free_rects.len() {
-        if let Some((fit_idx, rotated)) = find_best_fit(&sheet_free_rects[si], piece, kerf, heuristic) {
-            let fit = sheet_free_rects[si][fit_idx];
-            place_piece(&mut result.sheets[si], &mut sheet_free_rects[si], fit_idx, fit, piece, rotated, kerf);
+    for (si, space) in sheet_free_rects.iter_mut().enumerate() {
+        if !space.might_fit(piece, kerf) {
+            continue;
+        }
+        if let Some((fit_idx, rotated)) = find_best_fit(&space.free, piece, kerf, heuristic) {
+            let fit = space.free[fit_idx];
+            place_piece(&mut result.sheets[si], space, fit_idx, fit, piece, rotated, kerf, min_dim);
             return true;
         }
     }
@@ -254,17 +328,18 @@ fn fits_on_blank(piece: &CutPiece, sheet_width: f64, sheet_height: f64) -> bool 
         || (piece.allow_rotation && piece.height <= sheet_width && piece.width <= sheet_height)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn open_new_sheet_and_place(
     result: &mut CuttingResult,
-    sheet_free_rects: &mut Vec<Vec<FreeRect>>,
+    sheet_free_rects: &mut Vec<SheetSpace>,
     piece: &CutPiece,
     sheet_width: f64,
     sheet_height: f64,
     kerf: f64,
     heuristic: FitHeuristic,
+    min_dim: f64,
 ) {
-    let free_rects = vec![FreeRect { x: 0.0, y: 0.0, w: sheet_width, h: sheet_height }];
-    sheet_free_rects.push(free_rects);
+    sheet_free_rects.push(SheetSpace::new(FreeRect { x: 0.0, y: 0.0, w: sheet_width, h: sheet_height }));
 
     let sheet = Sheet {
         index: result.sheets.len(),
@@ -275,22 +350,24 @@ fn open_new_sheet_and_place(
     result.sheets.push(sheet);
 
     let si = sheet_free_rects.len() - 1;
-    if let Some((fit_idx, rotated)) = find_best_fit(&sheet_free_rects[si], piece, kerf, heuristic) {
-        let fit = sheet_free_rects[si][fit_idx];
-        place_piece(&mut result.sheets[si], &mut sheet_free_rects[si], fit_idx, fit, piece, rotated, kerf);
+    if let Some((fit_idx, rotated)) = find_best_fit(&sheet_free_rects[si].free, piece, kerf, heuristic) {
+        let fit = sheet_free_rects[si].free[fit_idx];
+        place_piece(&mut result.sheets[si], &mut sheet_free_rects[si], fit_idx, fit, piece, rotated, kerf, min_dim);
     } else {
         result.unplaced_pieces.push(format!("{} ({}x{})", piece.label, piece.width, piece.height));
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn place_piece(
     sheet: &mut Sheet,
-    free_rects: &mut Vec<FreeRect>,
+    space: &mut SheetSpace,
     fit_idx: usize,
     fit: FreeRect,
     piece: &CutPiece,
     rotated: bool,
     kerf: f64,
+    min_dim: f64,
 ) {
     let (pw, ph) = if rotated {
         (piece.height, piece.width)
@@ -309,7 +386,8 @@ fn place_piece(
         is_rotated: rotated,
     });
 
-    split_free_rect(free_rects, fit_idx, pw + kerf, ph + kerf);
+    split_free_rect(&mut space.free, fit_idx, pw + kerf, ph + kerf, min_dim);
+    space.refresh_bounds();
 }
 
 fn find_best_fit(
@@ -322,8 +400,11 @@ fn find_best_fit(
     let mut best_rotated = false;
     let mut best_score = f64::MAX;
 
+    let pw = piece.width + kerf;
+    let ph = piece.height + kerf;
+
     for (i, fr) in free_rects.iter().enumerate() {
-        if piece.width + kerf <= fr.w && piece.height + kerf <= fr.h {
+        if pw <= fr.w && ph <= fr.h {
             let score = calc_score(fr, piece.width, piece.height, heuristic);
             if score < best_score {
                 best_score = score;
@@ -332,7 +413,7 @@ fn find_best_fit(
             }
         }
 
-        if piece.allow_rotation && piece.height + kerf <= fr.w && piece.width + kerf <= fr.h {
+        if piece.allow_rotation && ph <= fr.w && pw <= fr.h {
             let score = calc_score(fr, piece.height, piece.width, heuristic);
             if score < best_score {
                 best_score = score;
@@ -353,25 +434,33 @@ fn calc_score(fr: &FreeRect, pw: f64, ph: f64, heuristic: FitHeuristic) -> f64 {
     }
 }
 
-fn split_free_rect(free_rects: &mut Vec<FreeRect>, idx: usize, pw: f64, ph: f64) {
+fn split_free_rect(free_rects: &mut Vec<FreeRect>, idx: usize, pw: f64, ph: f64, min_dim: f64) {
     let used = free_rects.remove(idx);
 
     let right_w = used.w - pw;
     let bottom_h = used.h - ph;
 
+    // A rect with either side below min_dim can never hold any piece, so it
+    // is dropped instead of polluting future scans.
+    let mut push = |r: FreeRect| {
+        if r.w >= min_dim && r.h >= min_dim {
+            free_rects.push(r);
+        }
+    };
+
     if right_w < bottom_h {
         if right_w > 0.0 {
-            free_rects.push(FreeRect { x: used.x + pw, y: used.y, w: right_w, h: ph });
+            push(FreeRect { x: used.x + pw, y: used.y, w: right_w, h: ph });
         }
         if bottom_h > 0.0 {
-            free_rects.push(FreeRect { x: used.x, y: used.y + ph, w: used.w, h: bottom_h });
+            push(FreeRect { x: used.x, y: used.y + ph, w: used.w, h: bottom_h });
         }
     } else {
         if bottom_h > 0.0 {
-            free_rects.push(FreeRect { x: used.x, y: used.y + ph, w: pw, h: bottom_h });
+            push(FreeRect { x: used.x, y: used.y + ph, w: pw, h: bottom_h });
         }
         if right_w > 0.0 {
-            free_rects.push(FreeRect { x: used.x + pw, y: used.y, w: right_w, h: used.h });
+            push(FreeRect { x: used.x + pw, y: used.y, w: right_w, h: used.h });
         }
     }
 }
