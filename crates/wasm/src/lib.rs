@@ -1,12 +1,11 @@
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::future_to_promise;
 use serde::{Deserialize, Serialize};
-use js_sys;
 use std::sync::Once;
 
 use cutter_core::models::{CutPiece, Sheet};
 use cutter_core::optimizer::{self, CuttingStrategy};
-use cutter_core::box_builder;
+use cutter_core::box_builder::{self, BoxParams};
 use cutter_ui::box3d;
 
 static INIT: Once = Once::new();
@@ -156,26 +155,6 @@ pub fn optimize(input_json: String) -> js_sys::Promise {
     })
 }
 
-/// Generate box scene JSON for Three.js. Returns Promise<string>.
-#[wasm_bindgen]
-pub fn box_scene_json(w: f64, h: f64, d: f64, t: f64, tab_h: f64, tf: f64, n_tab: usize, wi: f64, hi: f64, shelf_ys_json: String, explode: f64) -> js_sys::Promise {
-    future_to_promise(async move {
-        let shelf_ys: Vec<f64> = serde_json::from_str(&shelf_ys_json).unwrap_or_default();
-        let json = box3d::build_scene_json(w, h, d, t, tab_h, tf, n_tab, wi, hi, &shelf_ys, explode);
-        Ok(JsValue::from_str(&json))
-    })
-}
-
-/// Compute box cutting layout. Returns Promise<string>.
-#[wasm_bindgen]
-pub fn box_compute_layout(pieces_json: String, sheet_w: f64, sheet_h: f64, gap: f64) -> js_sys::Promise {
-    future_to_promise(async move {
-        let pieces: Vec<box_builder::BoxPiece> = serde_json::from_str(&pieces_json).unwrap_or_default();
-        let result = box_builder::compute_layout(&pieces, sheet_w, sheet_h, gap);
-        Ok(JsValue::from_str(&serde_json::to_string(&result).unwrap()))
-    })
-}
-
 // ── Sync API (lightweight, no need for async) ────────────────────────────────
 
 /// Synchronous optimize for small inputs.
@@ -185,39 +164,80 @@ pub fn optimize_sync(input_json: &str) -> String {
     run_optimize(input_json)
 }
 
-#[wasm_bindgen]
-pub fn box_tab_positions(len: f64, n_tab: usize, tab_h: f64) -> String {
-    serde_json::to_string(&box_builder::tab_positions(len, n_tab, tab_h)).unwrap()
+// ── Box builder (single source of truth in Rust) ─────────────────────────────
+
+fn parse_box_params(json: &str) -> BoxParams {
+    serde_json::from_str(json).unwrap_or(BoxParams {
+        w: 300.0, h: 400.0, d: 200.0, t: 6.0, kerf: 0.1,
+        tab_h: 30.0, n_tab: 1, n_shelves: 0, bevel: 0.0,
+    })
 }
 
-#[wasm_bindgen]
-pub fn box_path_side(d: f64, h: f64, tab_h: f64, tf: f64, n_tab: usize, shelf_ys_json: &str) -> String {
-    let shelf_ys: Vec<f64> = serde_json::from_str(shelf_ys_json).unwrap_or_default();
-    box_builder::path_side(d, h, tab_h, tf, n_tab, &shelf_ys)
+#[derive(Serialize)]
+struct GalleryEntry {
+    id: String,
+    count: usize,
+    w: f64,
+    h: f64,
+    path: String,
+    panel: box3d::PiecePanel,
 }
 
-#[wasm_bindgen]
-pub fn box_path_top_bottom(w: f64, d: f64, t: f64, tab_h: f64, tf: f64, n_tab: usize, wi: f64) -> String {
-    box_builder::path_top_bottom(w, d, t, tab_h, tf, n_tab, wi)
+#[derive(Serialize)]
+struct BoxModel {
+    gallery: Vec<GalleryEntry>,
+    scene: box3d::Scene,
 }
 
-#[wasm_bindgen]
-pub fn box_path_back(w: f64, h: f64, t: f64, tab_h: f64, tf: f64, n_tab: usize, wi: f64, hi: f64, shelf_ys_json: &str) -> String {
-    let shelf_ys: Vec<f64> = serde_json::from_str(shelf_ys_json).unwrap_or_default();
-    box_builder::path_back(w, h, t, tab_h, tf, n_tab, wi, hi, &shelf_ys)
+#[derive(Serialize)]
+struct LayoutOut {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    id: String,
+    /// Natural width/height of the piece in its own path space (for rotation detection).
+    ow: f64,
+    oh: f64,
+    path: String,
 }
 
+/// Gallery (grouped pieces with SVG paths + isolated 3D panels) and the assembly
+/// scene (base coordinates + explode metadata). Presentation stays in the frontend.
 #[wasm_bindgen]
-pub fn box_path_shelf(w: f64, d: f64, t: f64, tab_h: f64, tf: f64, n_tab: usize, wi: f64) -> String {
-    box_builder::path_shelf(w, d, t, tab_h, tf, n_tab, wi)
+pub fn box_model(params_json: &str) -> String {
+    let p = parse_box_params(params_json);
+    let gallery: Vec<GalleryEntry> = box_builder::gallery_pieces(&p)
+        .into_iter()
+        .filter_map(|gp| {
+            let panel = box3d::gallery_panel(&p, &gp.id)?;
+            Some(GalleryEntry { id: gp.id, count: gp.count, w: gp.w, h: gp.h, path: gp.path, panel })
+        })
+        .collect();
+    let scene = box3d::assembly_scene(&p);
+    serde_json::to_string(&BoxModel { gallery, scene }).unwrap()
 }
 
+/// Cutting layout for the box: placements with their cut path and natural size.
 #[wasm_bindgen]
-pub fn box_shelf_slot_ys(n_shelves: usize, hi: f64, tf: f64, t: f64) -> String {
-    serde_json::to_string(&box_builder::shelf_slot_ys(n_shelves, hi, tf, t)).unwrap()
-}
-
-#[wasm_bindgen]
-pub fn box_all_pieces(w: f64, h: f64, d: f64, n_shelves: usize) -> String {
-    serde_json::to_string(&box_builder::all_box_pieces(w, h, d, n_shelves)).unwrap()
+pub fn box_layout(params_json: &str, sheet_w: f64, sheet_h: f64, gap: f64) -> String {
+    let p = parse_box_params(params_json);
+    let pieces = box_builder::all_box_pieces(&p);
+    let natural: std::collections::HashMap<&str, (f64, f64)> =
+        pieces.iter().map(|bp| (bp.id.as_str(), (bp.w, bp.h))).collect();
+    let layout = box_builder::compute_layout(&pieces, sheet_w, sheet_h, gap);
+    let out: Vec<Vec<LayoutOut>> = layout
+        .iter()
+        .map(|sheet| {
+            sheet
+                .iter()
+                .map(|lp| {
+                    let (ow, oh) = natural.get(lp.id.as_str()).copied().unwrap_or((lp.w, lp.h));
+                    let path = box_builder::piece_path(&p, &lp.id).unwrap_or_default();
+                    LayoutOut { x: lp.x, y: lp.y, w: lp.w, h: lp.h, id: lp.id.clone(), ow, oh, path }
+                })
+                .collect()
+        })
+        .collect();
+    serde_json::to_string(&out).unwrap()
 }
