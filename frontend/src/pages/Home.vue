@@ -4,6 +4,7 @@ import NumberField from '@/components/NumberField.vue'
 import { optimize } from '@/services/optimizer'
 import { type CutPiece, type CuttingResult, CuttingStrategy, newPiece } from '@/services/types'
 import { PIECE_COLORS, truncate, efficiencyClass } from '@/helpers/svg'
+import { HOME_STATE_KEY, serializeHomeState, parseHomeState } from '@/lib/homeState'
 import { useL10n } from '@/stores/l10n'
 
 const { t } = useL10n()
@@ -65,13 +66,6 @@ const SVG_MAX_W = 520
 const SVG_MAX_H = 420
 
 // ── localStorage persistence ─────────────────────────────────────────────────
-interface HomeState {
-  sheetWidth: number
-  sheetHeight: number
-  kerf: number
-  pieces: CutPiece[]
-}
-
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 
 function saveState() {
@@ -81,29 +75,25 @@ function saveState() {
 
 function saveStateNow() {
   try {
-    const state: HomeState = {
+    localStorage.setItem(HOME_STATE_KEY, serializeHomeState({
       sheetWidth: sheetWidth.value,
       sheetHeight: sheetHeight.value,
       kerf: kerf.value,
       pieces: [...pieces],
-    }
-    localStorage.setItem('home_state', JSON.stringify(state))
+    }))
   } catch { /* ignore */ }
 }
 
 function loadState() {
-  try {
-    const raw = localStorage.getItem('home_state')
-    if (!raw) return
-    const saved: HomeState = JSON.parse(raw)
-    sheetWidth.value = saved.sheetWidth
-    sheetHeight.value = saved.sheetHeight
-    kerf.value = saved.kerf
-    if (saved.pieces?.length) {
-      pieces.splice(0, pieces.length, ...saved.pieces)
-      colorIdx = pieces.length
-    }
-  } catch { /* corrupted localStorage -- start fresh */ }
+  const saved = parseHomeState(localStorage.getItem(HOME_STATE_KEY))
+  if (!saved) return
+  sheetWidth.value = saved.sheetWidth
+  sheetHeight.value = saved.sheetHeight
+  kerf.value = saved.kerf
+  if (saved.pieces.length) {
+    pieces.splice(0, pieces.length, ...saved.pieces)
+    colorIdx = pieces.length
+  }
 }
 
 // ── Actions ──────────────────────────────────────────────────────────────────
