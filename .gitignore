@@ -58,3 +58,4 @@ npm-debug.log*
 
 # Claude
 .claude/
+crates/wasm/pkg-node/
