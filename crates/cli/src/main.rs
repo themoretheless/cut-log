@@ -2,7 +2,7 @@ use std::io::{self, Read};
 
 use serde::{Deserialize, Serialize};
 
-use cutter_core::models::CutPiece;
+use cutter_core::models::{CutPiece, UnplacedPiece};
 use cutter_core::optimizer::CuttingStrategy;
 use cutter_core::optimize;
 use cutter_ui::render_result_svg;
@@ -54,7 +54,7 @@ struct Output {
     waste_area: f64,
     strategy: CuttingStrategy,
     auto_picked_strategy: Option<CuttingStrategy>,
-    unplaced_pieces: Vec<String>,
+    unplaced_pieces: Vec<UnplacedPiece>,
     sheets: Vec<SheetOutput>,
 }
 
@@ -85,9 +85,18 @@ fn main() {
         .init();
 
     let mut input_str = String::new();
-    io::stdin().read_to_string(&mut input_str).expect("Ошибка чтения stdin");
+    if let Err(e) = io::stdin().read_to_string(&mut input_str) {
+        eprintln!("error: failed to read stdin: {e}");
+        std::process::exit(1);
+    }
 
-    let input: Input = serde_json::from_str(&input_str).expect("Ошибка парсинга JSON");
+    let input: Input = match serde_json::from_str(&input_str) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("error: invalid JSON input: {e}");
+            std::process::exit(1);
+        }
+    };
 
     let result = optimize(
         input.sheet_width,

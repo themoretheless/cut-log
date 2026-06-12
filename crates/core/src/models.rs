@@ -66,10 +66,19 @@ impl Sheet {
 
 // ── CuttingResult ─────────────────────────────────────────────────────────────
 
+/// A piece that could not be placed. Carries only data; how it is presented
+/// (label fallback, formatting, localization) is the caller's concern.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnplacedPiece {
+    pub label: String,
+    pub width: f64,
+    pub height: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CuttingResult {
     pub sheets: Vec<Sheet>,
-    pub unplaced_pieces: Vec<String>,
+    pub unplaced_pieces: Vec<UnplacedPiece>,
     pub strategy: CuttingStrategy,
     pub auto_picked_strategy: Option<CuttingStrategy>,
 }

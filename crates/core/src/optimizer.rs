@@ -131,6 +131,16 @@ impl SheetSpace {
     }
 }
 
+// Constants threaded through the packing of a single strategy run.
+#[derive(Debug, Clone, Copy)]
+struct PackCtx {
+    sheet_w: f64,
+    sheet_h: f64,
+    kerf: f64,
+    heuristic: FitHeuristic,
+    min_dim: f64,
+}
+
 // ── Optimizer ─────────────────────────────────────────────────────────────────
 
 #[instrument(skip(pieces), fields(pieces_count = pieces.len()))]
@@ -272,93 +282,86 @@ fn run_packed(
         .map(|p| p.width.min(p.height) + kerf)
         .fold(f64::MAX, f64::min);
 
+    let ctx = PackCtx {
+        sheet_w: sheet_width,
+        sheet_h: sheet_height,
+        kerf,
+        heuristic,
+        min_dim,
+    };
     let mut sheet_free_rects: Vec<SheetSpace> = Vec::new();
 
     for &piece in queue {
-        if try_place_on_existing(&mut result, &mut sheet_free_rects, piece, kerf, heuristic, min_dim) {
+        if try_place_on_existing(&mut result, &mut sheet_free_rects, piece, &ctx) {
             continue;
         }
 
-        if !fits_on_blank(piece, sheet_width, sheet_height) {
-            let label = if piece.label.trim().is_empty() { "Деталь" } else { &piece.label };
-            warn!(label, width = piece.width, height = piece.height, "piece too large, cannot place");
-            result.unplaced_pieces.push(format!("{} ({}x{})", label, piece.width, piece.height));
+        if !fits_on_blank(piece, &ctx) {
+            warn!(label = %piece.label, width = piece.width, height = piece.height, "piece too large, cannot place");
+            result.unplaced_pieces.push(unplaced(piece));
             continue;
         }
 
         debug!(width = piece.width, height = piece.height, sheet = result.sheets.len(), "opening new sheet");
-        open_new_sheet_and_place(
-            &mut result,
-            &mut sheet_free_rects,
-            piece,
-            sheet_width,
-            sheet_height,
-            kerf,
-            heuristic,
-            min_dim,
-        );
+        open_new_sheet_and_place(&mut result, &mut sheet_free_rects, piece, &ctx);
     }
 
     result
+}
+
+fn unplaced(piece: &CutPiece) -> UnplacedPiece {
+    UnplacedPiece { label: piece.label.clone(), width: piece.width, height: piece.height }
 }
 
 fn try_place_on_existing(
     result: &mut CuttingResult,
     sheet_free_rects: &mut [SheetSpace],
     piece: &CutPiece,
-    kerf: f64,
-    heuristic: FitHeuristic,
-    min_dim: f64,
+    ctx: &PackCtx,
 ) -> bool {
     for (si, space) in sheet_free_rects.iter_mut().enumerate() {
-        if !space.might_fit(piece, kerf) {
+        if !space.might_fit(piece, ctx.kerf) {
             continue;
         }
-        if let Some((fit_idx, rotated)) = find_best_fit(&space.free, piece, kerf, heuristic) {
+        if let Some((fit_idx, rotated)) = find_best_fit(&space.free, piece, ctx) {
             let fit = space.free[fit_idx];
-            place_piece(&mut result.sheets[si], space, fit_idx, fit, piece, rotated, kerf, min_dim);
+            place_piece(&mut result.sheets[si], space, fit_idx, fit, piece, rotated, ctx);
             return true;
         }
     }
     false
 }
 
-fn fits_on_blank(piece: &CutPiece, sheet_width: f64, sheet_height: f64) -> bool {
-    (piece.width <= sheet_width && piece.height <= sheet_height)
-        || (piece.allow_rotation && piece.height <= sheet_width && piece.width <= sheet_height)
+fn fits_on_blank(piece: &CutPiece, ctx: &PackCtx) -> bool {
+    (piece.width <= ctx.sheet_w && piece.height <= ctx.sheet_h)
+        || (piece.allow_rotation && piece.height <= ctx.sheet_w && piece.width <= ctx.sheet_h)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn open_new_sheet_and_place(
     result: &mut CuttingResult,
     sheet_free_rects: &mut Vec<SheetSpace>,
     piece: &CutPiece,
-    sheet_width: f64,
-    sheet_height: f64,
-    kerf: f64,
-    heuristic: FitHeuristic,
-    min_dim: f64,
+    ctx: &PackCtx,
 ) {
-    sheet_free_rects.push(SheetSpace::new(FreeRect { x: 0.0, y: 0.0, w: sheet_width, h: sheet_height }));
+    sheet_free_rects.push(SheetSpace::new(FreeRect { x: 0.0, y: 0.0, w: ctx.sheet_w, h: ctx.sheet_h }));
 
     let sheet = Sheet {
         index: result.sheets.len(),
-        width: sheet_width,
-        height: sheet_height,
+        width: ctx.sheet_w,
+        height: ctx.sheet_h,
         placed_pieces: Vec::new(),
     };
     result.sheets.push(sheet);
 
     let si = sheet_free_rects.len() - 1;
-    if let Some((fit_idx, rotated)) = find_best_fit(&sheet_free_rects[si].free, piece, kerf, heuristic) {
+    if let Some((fit_idx, rotated)) = find_best_fit(&sheet_free_rects[si].free, piece, ctx) {
         let fit = sheet_free_rects[si].free[fit_idx];
-        place_piece(&mut result.sheets[si], &mut sheet_free_rects[si], fit_idx, fit, piece, rotated, kerf, min_dim);
+        place_piece(&mut result.sheets[si], &mut sheet_free_rects[si], fit_idx, fit, piece, rotated, ctx);
     } else {
-        result.unplaced_pieces.push(format!("{} ({}x{})", piece.label, piece.width, piece.height));
+        result.unplaced_pieces.push(unplaced(piece));
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn place_piece(
     sheet: &mut Sheet,
     space: &mut SheetSpace,
@@ -366,8 +369,7 @@ fn place_piece(
     fit: FreeRect,
     piece: &CutPiece,
     rotated: bool,
-    kerf: f64,
-    min_dim: f64,
+    ctx: &PackCtx,
 ) {
     let (pw, ph) = if rotated {
         (piece.height, piece.width)
@@ -386,26 +388,25 @@ fn place_piece(
         is_rotated: rotated,
     });
 
-    split_free_rect(&mut space.free, fit_idx, pw + kerf, ph + kerf, min_dim);
+    split_free_rect(&mut space.free, fit_idx, pw + ctx.kerf, ph + ctx.kerf, ctx.min_dim);
     space.refresh_bounds();
 }
 
 fn find_best_fit(
     free_rects: &[FreeRect],
     piece: &CutPiece,
-    kerf: f64,
-    heuristic: FitHeuristic,
+    ctx: &PackCtx,
 ) -> Option<(usize, bool)> {
     let mut best_idx: Option<usize> = None;
     let mut best_rotated = false;
     let mut best_score = f64::MAX;
 
-    let pw = piece.width + kerf;
-    let ph = piece.height + kerf;
+    let pw = piece.width + ctx.kerf;
+    let ph = piece.height + ctx.kerf;
 
     for (i, fr) in free_rects.iter().enumerate() {
         if pw <= fr.w && ph <= fr.h {
-            let score = calc_score(fr, piece.width, piece.height, heuristic);
+            let score = calc_score(fr, piece.width, piece.height, ctx.heuristic);
             if score < best_score {
                 best_score = score;
                 best_idx = Some(i);
@@ -414,7 +415,7 @@ fn find_best_fit(
         }
 
         if piece.allow_rotation && ph <= fr.w && pw <= fr.h {
-            let score = calc_score(fr, piece.height, piece.width, heuristic);
+            let score = calc_score(fr, piece.height, piece.width, ctx.heuristic);
             if score < best_score {
                 best_score = score;
                 best_idx = Some(i);

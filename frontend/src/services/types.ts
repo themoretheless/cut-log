@@ -27,9 +27,15 @@ export interface Sheet {
   efficiency: number
 }
 
+export interface UnplacedPiece {
+  label: string
+  width: number
+  height: number
+}
+
 export interface CuttingResult {
   sheets: Sheet[]
-  unplacedPieces: string[]
+  unplacedPieces: UnplacedPiece[]
   strategy: CuttingStrategy
   autoPickedStrategy?: CuttingStrategy
   totalSheets: number
