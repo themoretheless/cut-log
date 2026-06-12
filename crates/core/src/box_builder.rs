@@ -59,6 +59,7 @@ pub fn path_top_bottom(w: f64, d: f64, t: f64, tab_h: f64, tf: f64, n_tab: usize
     s
 }
 
+#[allow(clippy::too_many_arguments)] // mirrors the flat scalar wasm-bindgen API
 pub fn path_back(w: f64, h: f64, t: f64, tab_h: f64, tf: f64, n_tab: usize, wi: f64, hi: f64, shelf_ys: &[f64]) -> String {
     let mut s = String::with_capacity(1024);
     write!(s, "M{t:.2},{t:.2}").unwrap();
@@ -168,15 +169,15 @@ pub fn compute_layout(pieces: &[BoxPiece], sheet_w: f64, sheet_h: f64, gap: f64)
                 if placed { break; }
                 if fw > sheet_w - 2.0 * gap || fh > sheet_h - 2.0 * gap { continue; }
 
-                for si in 0..shelves.len() {
+                for shelf in &mut shelves {
                     if placed { break; }
-                    let (sy, sh, nx) = shelves[si];
+                    let (sy, sh, nx) = *shelf;
                     if nx + fw + gap <= sheet_w && sy + fh + gap <= sheet_h {
                         sheet_pieces.push(LayoutPiece {
                             x: nx, y: sy, w: fw, h: fh,
                             label: p.label.clone(), color: p.color.clone(),
                         });
-                        shelves[si] = (sy, sh.max(fh), nx + fw + gap);
+                        *shelf = (sy, sh.max(fh), nx + fw + gap);
                         placed = true;
                     }
                 }

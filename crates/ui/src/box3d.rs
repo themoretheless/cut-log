@@ -27,6 +27,7 @@ pub fn side_pts_3d(x0: f64, d: f64, h: f64, tab_h: f64, tf: f64, n_tab: usize) -
 }
 
 /// Horizontal wall (top/bottom) contour at z = z0.
+#[allow(clippy::too_many_arguments)] // mirrors the flat scalar wasm-bindgen API
 pub fn horiz_pts_3d(z0: f64, w: f64, d: f64, t: f64, tab_h: f64, tf: f64, n_tab: usize, wi: f64) -> Vec<Pt3> {
     let mut p = Vec::new();
     let mut a = |x: f64, y: f64| p.push([x, y, z0]);
@@ -48,6 +49,7 @@ pub fn horiz_pts_3d(z0: f64, w: f64, d: f64, t: f64, tab_h: f64, tf: f64, n_tab:
 }
 
 /// Back wall contour at y = y0.
+#[allow(clippy::too_many_arguments)] // mirrors the flat scalar wasm-bindgen API
 pub fn back_pts_3d(y0: f64, w: f64, h: f64, t: f64, tab_h: f64, _tf: f64, n_tab: usize, wi: f64, hi: f64) -> Vec<Pt3> {
     let mut p = Vec::new();
     let mut a = |x: f64, z: f64| p.push([x, y0, z]);
@@ -131,6 +133,7 @@ pub fn back_holes_3d(y0: f64, t: f64, tab_h: f64, tf: f64, n_tab: usize, wi: f64
 }
 
 /// Build the full scene JSON for Three.js box3d.update().
+#[allow(clippy::too_many_arguments)] // mirrors the flat scalar wasm-bindgen API
 pub fn build_scene_json(
     w: f64, h: f64, d: f64, t: f64,
     tab_h: f64, tf: f64, n_tab: usize,

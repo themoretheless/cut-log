@@ -13,7 +13,12 @@ static INIT: Once = Once::new();
 
 fn ensure_tracing() {
     INIT.call_once(|| {
-        tracing_wasm::set_as_global_default();
+        // Console logging per event is expensive; WARN keeps real problems
+        // visible without paying console.log costs on every placement.
+        let config = tracing_wasm::WASMLayerConfigBuilder::new()
+            .set_max_level(tracing::Level::WARN)
+            .build();
+        tracing_wasm::set_as_global_default_with_config(config);
     });
 }
 
