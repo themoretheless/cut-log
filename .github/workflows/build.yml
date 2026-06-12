@@ -113,6 +113,12 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Typecheck and test frontend
+        working-directory: frontend
+        run: |
+          npx vue-tsc --noEmit
+          npm test
+
       - name: Build Vue
         working-directory: frontend
         run: npx vite build
