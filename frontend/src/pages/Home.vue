@@ -72,7 +72,14 @@ interface HomeState {
   pieces: CutPiece[]
 }
 
+let saveTimer: ReturnType<typeof setTimeout> | undefined
+
 function saveState() {
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(saveStateNow, 300)
+}
+
+function saveStateNow() {
   try {
     const state: HomeState = {
       sheetWidth: sheetWidth.value,
@@ -173,6 +180,18 @@ function svgScale(sheetW: number, sheetH: number) {
   return Math.min(SVG_MAX_W / sheetW, SVG_MAX_H / sheetH)
 }
 
+// All sheets in a result share the same dimensions, so one scale serves them all.
+const sheetScale = computed(() => {
+  const s = result.value?.sheets[0]
+  return s ? svgScale(s.width, s.height) : 1
+})
+
+const pieceIndexById = computed(() => {
+  const m = new Map<string, number>()
+  pieces.forEach((p, i) => m.set(p.id, i + 1))
+  return m
+})
+
 function grainLines(svgH: number): number[] {
   const lines: number[] = []
   for (let g = 1; g < 10; g++) lines.push(svgH * g / 10)
@@ -180,7 +199,7 @@ function grainLines(svgH: number): number[] {
 }
 
 function pieceIndex(source: CutPiece): number {
-  return pieces.findIndex(p => p.id === source.id) + 1
+  return pieceIndexById.value.get(source.id) ?? 0
 }
 
 function badgeWidth(idx: number): number {
@@ -237,6 +256,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
+  clearTimeout(saveTimer)
+  saveStateNow()
 })
 </script>
 
@@ -450,15 +471,15 @@ onUnmounted(() => {
               </div>
               <div class="sheet-svg-wrap" :id="`sheet-svg-${sheet.index}`">
                 <svg
-                  :width="(sheet.width * svgScale(sheet.width, sheet.height)).toFixed(0)"
-                  :height="(sheet.height * svgScale(sheet.width, sheet.height)).toFixed(0)"
-                  :viewBox="`0 0 ${(sheet.width * svgScale(sheet.width, sheet.height)).toFixed(0)} ${(sheet.height * svgScale(sheet.width, sheet.height)).toFixed(0)}`"
+                  :width="(sheet.width * sheetScale).toFixed(0)"
+                  :height="(sheet.height * sheetScale).toFixed(0)"
+                  :viewBox="`0 0 ${(sheet.width * sheetScale).toFixed(0)} ${(sheet.height * sheetScale).toFixed(0)}`"
                   style="display:block;margin:auto;"
                 >
                   <!-- Sheet background -->
                   <rect
-                    :width="(sheet.width * svgScale(sheet.width, sheet.height)).toFixed(0)"
-                    :height="(sheet.height * svgScale(sheet.width, sheet.height)).toFixed(0)"
+                    :width="(sheet.width * sheetScale).toFixed(0)"
+                    :height="(sheet.height * sheetScale).toFixed(0)"
                     fill="#f5f0e8"
                     stroke="#8B7355"
                     stroke-width="2"
@@ -466,11 +487,11 @@ onUnmounted(() => {
 
                   <!-- Wood grain lines -->
                   <line
-                    v-for="(gy, gi) in grainLines(sheet.height * svgScale(sheet.width, sheet.height))"
+                    v-for="(gy, gi) in grainLines(sheet.height * sheetScale)"
                     :key="'g' + gi"
                     x1="0"
                     :y1="gy.toFixed(1)"
-                    :x2="(sheet.width * svgScale(sheet.width, sheet.height)).toFixed(0)"
+                    :x2="(sheet.width * sheetScale).toFixed(0)"
                     :y2="gy.toFixed(1)"
                     stroke="#d4c9a8"
                     stroke-width="0.5"
@@ -480,10 +501,10 @@ onUnmounted(() => {
                   <template v-for="(pp, ppi) in sheet.placedPieces" :key="'p' + ppi">
                     <!-- Piece rect -->
                     <rect
-                      :x="(pp.x * svgScale(sheet.width, sheet.height)).toFixed(1)"
-                      :y="(pp.y * svgScale(sheet.width, sheet.height)).toFixed(1)"
-                      :width="(pp.width * svgScale(sheet.width, sheet.height)).toFixed(1)"
-                      :height="(pp.height * svgScale(sheet.width, sheet.height)).toFixed(1)"
+                      :x="(pp.x * sheetScale).toFixed(1)"
+                      :y="(pp.y * sheetScale).toFixed(1)"
+                      :width="(pp.width * sheetScale).toFixed(1)"
+                      :height="(pp.height * sheetScale).toFixed(1)"
                       :fill="pp.source.color"
                       fill-opacity="0.82"
                       stroke="#fff"
@@ -492,8 +513,8 @@ onUnmounted(() => {
 
                     <!-- Badge background -->
                     <rect
-                      :x="(pp.x * svgScale(sheet.width, sheet.height) + 3).toFixed(1)"
-                      :y="(pp.y * svgScale(sheet.width, sheet.height) + 3).toFixed(1)"
+                      :x="(pp.x * sheetScale + 3).toFixed(1)"
+                      :y="(pp.y * sheetScale + 3).toFixed(1)"
                       :width="badgeWidth(pieceIndex(pp.source))"
                       height="13"
                       rx="3"
@@ -502,8 +523,8 @@ onUnmounted(() => {
 
                     <!-- Badge text -->
                     <text
-                      :x="(pp.x * svgScale(sheet.width, sheet.height) + 3 + badgeWidth(pieceIndex(pp.source)) / 2).toFixed(1)"
-                      :y="(pp.y * svgScale(sheet.width, sheet.height) + 3 + 13 / 2).toFixed(1)"
+                      :x="(pp.x * sheetScale + 3 + badgeWidth(pieceIndex(pp.source)) / 2).toFixed(1)"
+                      :y="(pp.y * sheetScale + 3 + 13 / 2).toFixed(1)"
                       text-anchor="middle"
                       dominant-baseline="middle"
                       font-size="8"
@@ -514,35 +535,35 @@ onUnmounted(() => {
                     <!-- Rotation indicator -->
                     <text
                       v-if="pp.isRotated"
-                      :x="(pp.x * svgScale(sheet.width, sheet.height) + pp.width * svgScale(sheet.width, sheet.height) - 6).toFixed(1)"
-                      :y="(pp.y * svgScale(sheet.width, sheet.height) + 12).toFixed(1)"
+                      :x="(pp.x * sheetScale + pp.width * sheetScale - 6).toFixed(1)"
+                      :y="(pp.y * sheetScale + 12).toFixed(1)"
                       font-size="10"
                       fill="#fff"
                       opacity="0.9"
                     >&#8635;</text>
 
                     <!-- Label and dimensions (only if piece is big enough) -->
-                    <template v-if="pp.width * svgScale(sheet.width, sheet.height) > 40 && pp.height * svgScale(sheet.width, sheet.height) > 22">
+                    <template v-if="pp.width * sheetScale > 40 && pp.height * sheetScale > 22">
                       <!-- Label text -->
                       <text
                         v-if="pp.source.label?.trim()"
-                        :x="(pp.x * svgScale(sheet.width, sheet.height) + pp.width * svgScale(sheet.width, sheet.height) / 2).toFixed(1)"
-                        :y="(pp.y * svgScale(sheet.width, sheet.height) + pp.height * svgScale(sheet.width, sheet.height) / 2 - 5).toFixed(1)"
+                        :x="(pp.x * sheetScale + pp.width * sheetScale / 2).toFixed(1)"
+                        :y="(pp.y * sheetScale + pp.height * sheetScale / 2 - 5).toFixed(1)"
                         text-anchor="middle"
                         dominant-baseline="middle"
-                        :font-size="Math.min(13, pp.width * svgScale(sheet.width, sheet.height) / 6).toFixed(0)"
+                        :font-size="Math.min(13, pp.width * sheetScale / 6).toFixed(0)"
                         font-weight="600"
                         fill="#fff"
                         style="text-shadow:0 1px 2px rgba(0,0,0,.5)"
-                      >{{ truncate(pp.source.label.trim(), Math.floor(pp.width * svgScale(sheet.width, sheet.height) / 7)) }}</text>
+                      >{{ truncate(pp.source.label.trim(), Math.floor(pp.width * sheetScale / 7)) }}</text>
 
                       <!-- Dimensions text -->
                       <text
-                        :x="(pp.x * svgScale(sheet.width, sheet.height) + pp.width * svgScale(sheet.width, sheet.height) / 2).toFixed(1)"
-                        :y="(pp.y * svgScale(sheet.width, sheet.height) + pp.height * svgScale(sheet.width, sheet.height) / 2 + (pp.source.label?.trim() ? 9 : 0)).toFixed(1)"
+                        :x="(pp.x * sheetScale + pp.width * sheetScale / 2).toFixed(1)"
+                        :y="(pp.y * sheetScale + pp.height * sheetScale / 2 + (pp.source.label?.trim() ? 9 : 0)).toFixed(1)"
                         text-anchor="middle"
                         dominant-baseline="middle"
-                        :font-size="Math.min(11, pp.width * svgScale(sheet.width, sheet.height) / 7).toFixed(0)"
+                        :font-size="Math.min(11, pp.width * sheetScale / 7).toFixed(0)"
                         fill="#fff"
                         opacity="0.85"
                       >{{ pp.width.toFixed(0) }}&times;{{ pp.height.toFixed(0) }}</text>
@@ -551,8 +572,8 @@ onUnmounted(() => {
 
                   <!-- Bottom dimension label -->
                   <text
-                    :x="(sheet.width * svgScale(sheet.width, sheet.height) / 2).toFixed(0)"
-                    :y="(sheet.height * svgScale(sheet.width, sheet.height) - 4).toFixed(0)"
+                    :x="(sheet.width * sheetScale / 2).toFixed(0)"
+                    :y="(sheet.height * sheetScale - 4).toFixed(0)"
                     text-anchor="middle"
                     font-size="11"
                     fill="#8B7355"
@@ -561,12 +582,12 @@ onUnmounted(() => {
                   <!-- Left dimension label -->
                   <text
                     x="4"
-                    :y="(sheet.height * svgScale(sheet.width, sheet.height) / 2).toFixed(0)"
+                    :y="(sheet.height * sheetScale / 2).toFixed(0)"
                     text-anchor="middle"
                     dominant-baseline="middle"
                     font-size="11"
                     fill="#8B7355"
-                    :transform="`rotate(-90,4,${(sheet.height * svgScale(sheet.width, sheet.height) / 2).toFixed(0)})`"
+                    :transform="`rotate(-90,4,${(sheet.height * sheetScale / 2).toFixed(0)})`"
                   >{{ sheet.height.toFixed(0) }} mm</text>
                 </svg>
               </div>

@@ -320,6 +320,8 @@ let guidesGroup: THREE.Group | null = null
 let labelsGroup: THREE.Group | null = null
 let resizeObs: ResizeObserver | null = null
 let animFrameId = 0
+// Render-on-demand: frames are drawn only when something changed.
+let mainDirty = true
 
 function clearGroup(g: THREE.Group) {
   while (g.children.length) {
@@ -330,6 +332,7 @@ function clearGroup(g: THREE.Group) {
 }
 
 function disposeObj(obj: THREE.Object3D) {
+  if (obj.userData.noDispose) return
   if ('children' in obj) obj.children.forEach(disposeObj)
   if ('geometry' in obj && (obj as THREE.Mesh).geometry)
     (obj as THREE.Mesh).geometry.dispose()
@@ -340,25 +343,35 @@ function disposeObj(obj: THREE.Object3D) {
   }
 }
 
+// Canvas textures are expensive to create and upload, so label materials are
+// cached by content and never disposed (the set of labels is small).
+const labelMatCache = new Map<string, THREE.SpriteMaterial>()
+
 function makeLabel(text: string, color: string, sub?: string): THREE.Sprite {
-  const canvas = document.createElement('canvas')
-  const sz = 256
-  canvas.width = sz
-  canvas.height = sub ? 80 : 48
-  const ctx = canvas.getContext('2d')!
-  ctx.textAlign = 'center'
-  ctx.font = 'bold 26px sans-serif'
-  ctx.fillStyle = color
-  ctx.fillText(text, sz / 2, sub ? 24 : 28)
-  if (sub) {
-    ctx.font = '20px sans-serif'
-    ctx.fillStyle = '#999'
-    ctx.fillText(sub, sz / 2, 56)
+  const key = `${text}|${color}|${sub ?? ''}`
+  let mat = labelMatCache.get(key)
+  if (!mat) {
+    const canvas = document.createElement('canvas')
+    const sz = 256
+    canvas.width = sz
+    canvas.height = sub ? 80 : 48
+    const ctx = canvas.getContext('2d')!
+    ctx.textAlign = 'center'
+    ctx.font = 'bold 26px sans-serif'
+    ctx.fillStyle = color
+    ctx.fillText(text, sz / 2, sub ? 24 : 28)
+    if (sub) {
+      ctx.font = '20px sans-serif'
+      ctx.fillStyle = '#999'
+      ctx.fillText(sub, sz / 2, 56)
+    }
+    const tex = new THREE.CanvasTexture(canvas)
+    tex.minFilter = THREE.LinearFilter
+    mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false })
+    labelMatCache.set(key, mat)
   }
-  const tex = new THREE.CanvasTexture(canvas)
-  tex.minFilter = THREE.LinearFilter
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false })
   const sprite = new THREE.Sprite(mat)
+  sprite.userData.noDispose = true
   sprite.scale.set(110, sub ? 34 : 20, 1)
   sprite.renderOrder = 999
   return sprite
@@ -566,6 +579,7 @@ function initThree() {
   controls.dampingFactor = 0.12
   controls.zoomSpeed = 0.2
   controls.target.set(150, 100, 150)
+  controls.addEventListener('change', () => { mainDirty = true })
   controls.update()
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.5))
@@ -602,11 +616,15 @@ function initThree() {
       const easing = 1 - Math.pow(1 - 0.18, dt * 60)
       isoExplodeCurrent += delta * easing
       if (Math.abs(target - isoExplodeCurrent) < snapThreshold) isoExplodeCurrent = target
-      updateScene(false)
+      applyExplode()
+      mainDirty = true
     }
     ctrl.update()
-    lg.children.forEach(s => s.quaternion.copy(cam.quaternion))
-    rend.render(sc, cam)
+    if (mainDirty) {
+      mainDirty = false
+      lg.children.forEach(s => s.quaternion.copy(cam.quaternion))
+      rend.render(sc, cam)
+    }
   })()
 
   resizeObs = new ResizeObserver(() => {
@@ -616,9 +634,39 @@ function initThree() {
       cam.aspect = rw / rh
       cam.updateProjectionMatrix()
       rend.setSize(rw, rh)
+      mainDirty = true
     }
   })
   resizeObs.observe(c)
+}
+
+// Explode only translates objects, so geometry is built once at base
+// coordinates and these records say how each object moves with the slider.
+interface ExplodeRec { obj: THREE.Object3D; axis: number; sign: number }
+let explodePanels: ExplodeRec[] = []
+let explodeLabels: { sprite: THREE.Sprite; base: THREE.Vector3; axis: number; sign: number }[] = []
+let explodeGuides: { line: THREE.LineSegments; base: THREE.Vector3; axis: number; sign: number }[] = []
+
+function applyExplode() {
+  const explode = Math.max(isoExplodeCurrent, 0.001)
+  const e = [W.value * explode, D.value * explode, H.value * explode]
+  for (const r of explodePanels) {
+    r.obj.position.setComponent(r.axis, r.sign * e[r.axis])
+  }
+  for (const l of explodeLabels) {
+    l.sprite.position.copy(l.base)
+    if (l.axis >= 0)
+      l.sprite.position.setComponent(l.axis, l.base.getComponent(l.axis) + l.sign * e[l.axis])
+  }
+  for (const g of explodeGuides) {
+    const pos = g.line.geometry.attributes.position as THREE.BufferAttribute
+    pos.setXYZ(0, g.base.x, g.base.y, g.base.z)
+    const end = [g.base.x, g.base.y, g.base.z]
+    end[g.axis] += g.sign * e[g.axis]
+    pos.setXYZ(1, end[0], end[1], end[2])
+    pos.needsUpdate = true
+    g.line.computeLineDistances()
+  }
 }
 
 function updateScene(resetTarget = true) {
@@ -626,23 +674,24 @@ function updateScene(resetTarget = true) {
   clearGroup(panelGroup)
   clearGroup(guidesGroup)
   clearGroup(labelsGroup)
+  explodePanels = []
+  explodeLabels = []
+  explodeGuides = []
 
   const w = W.value, h = H.value, d = D.value, thick = T.value
-  const explode = Math.max(isoExplodeCurrent, 0.001)
-  const ex = w * explode, ey = d * explode, ez = h * explode
 
-  // Panels
-  const lh = sideHoles3D(-ex)
-  const rh = sideHoles3D(w + ex)
-  const bh = backHoles3D(d + ey)
+  // Panels (at base positions; explode offsets applied via applyExplode)
+  const lh = sideHoles3D(0)
+  const rh = sideHoles3D(w)
+  const bh = backHoles3D(d)
   const sel = galPieces.value[galIdx.value]?.id ?? null
-  type TaggedPanel = PanelData & { gid: string }
+  type TaggedPanel = PanelData & { gid: string; axis: number; sign: number }
   const panels: TaggedPanel[] = [
-    { c: sidePts3D(-ex), n: [1, 0, 0], t: thick, col: '#2980b9', ec: '#1a5276', h: lh.length > 0 ? lh : undefined, gid: 'side' },
-    { c: sidePts3D(w + ex), n: [-1, 0, 0], t: thick, col: '#2980b9', ec: '#1a5276', h: rh.length > 0 ? rh : undefined, gid: 'side' },
-    { c: horizPts3D(h + ez, TopD.value, Math.max(Bevel.value, 0)), n: [0, 0, -1], t: thick, col: '#27ae60', ec: '#1e8449', gid: 'top' },
-    { c: horizPts3D(-ez, BotD.value, Math.max(-Bevel.value, 0)), n: [0, 0, 1], t: thick, col: Bevel.value !== 0 ? '#1abc9c' : '#27ae60', ec: Bevel.value !== 0 ? '#27ae60' : '#1e8449', gid: 'bot' },
-    { c: backPts3D(d + ey), n: [0, -1, 0], t: thick, col: '#8e44ad', ec: '#5b2c6f', h: bh.length > 0 ? bh : undefined, gid: 'back' },
+    { c: sidePts3D(0), n: [1, 0, 0], t: thick, col: '#2980b9', ec: '#1a5276', h: lh.length > 0 ? lh : undefined, gid: 'side', axis: 0, sign: -1 },
+    { c: sidePts3D(w), n: [-1, 0, 0], t: thick, col: '#2980b9', ec: '#1a5276', h: rh.length > 0 ? rh : undefined, gid: 'side', axis: 0, sign: 1 },
+    { c: horizPts3D(h, TopD.value, Math.max(Bevel.value, 0)), n: [0, 0, -1], t: thick, col: '#27ae60', ec: '#1e8449', gid: 'top', axis: 2, sign: 1 },
+    { c: horizPts3D(0, BotD.value, Math.max(-Bevel.value, 0)), n: [0, 0, 1], t: thick, col: Bevel.value !== 0 ? '#1abc9c' : '#27ae60', ec: Bevel.value !== 0 ? '#27ae60' : '#1e8449', gid: 'bot', axis: 2, sign: -1 },
+    { c: backPts3D(d), n: [0, -1, 0], t: thick, col: '#8e44ad', ec: '#5b2c6f', h: bh.length > 0 ? bh : undefined, gid: 'back', axis: 1, sign: 1 },
   ]
   const clipTop = Math.max(Bevel.value, 0)
   const clipBot = Math.max(-Bevel.value, 0)
@@ -653,7 +702,7 @@ function updateScene(resetTarget = true) {
     const shelfDepth = d - shelfYOff
     const sc = Bevel.value !== 0 ? shelfColor(si) : '#e67e22'
     const sec = Bevel.value !== 0 ? shelfEdgeColor(si) : '#ca6f1e'
-    panels.push({ c: shelfPts3D(shSlots[si], shelfDepth, shelfYOff), n: [0, 0, 1], t: thick, col: sc, ec: sec, gid: `shelf${si}` })
+    panels.push({ c: shelfPts3D(shSlots[si], shelfDepth, shelfYOff), n: [0, 0, 1], t: thick, col: sc, ec: sec, gid: `shelf${si}`, axis: -1, sign: 0 })
   }
 
   for (const p of panels) {
@@ -668,54 +717,58 @@ function updateScene(resetTarget = true) {
         }
       })
     }
+    if (p.axis >= 0) explodePanels.push({ obj: mesh, axis: p.axis, sign: p.sign })
     panelGroup.add(mesh)
   }
 
-  // Guide lines
+  // Guide lines: each runs from a fixed corner outward along one axis
   const gMat = new THREE.LineDashedMaterial({
     color: 0xaaaaaa, dashSize: 4, gapSize: 4, transparent: true, opacity: 0.5,
   })
-  const addGuide = (x1: number, y1: number, z1: number, x2: number, y2: number, z2: number) => {
-    const gGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(x1, y1, z1), new THREE.Vector3(x2, y2, z2),
-    ])
+  const addGuide = (x: number, y: number, z: number, axis: number, sign: number) => {
+    const base = new THREE.Vector3(x, y, z)
+    const gGeo = new THREE.BufferGeometry().setFromPoints([base, base.clone()])
     const line = new THREE.LineSegments(gGeo, gMat)
-    line.computeLineDistances()
     guidesGroup!.add(line)
+    explodeGuides.push({ line, base, axis, sign })
   }
 
   // Top/bottom guides
   for (const [gx, gy] of [[0, 0], [w, 0], [w, d], [0, d]]) {
-    addGuide(gx, gy, -ez, gx, gy, 0)
-    addGuide(gx, gy, h + ez, gx, gy, h)
+    addGuide(gx, gy, 0, 2, -1)
+    addGuide(gx, gy, h, 2, 1)
   }
   // Side guides
   for (const [gy, gz] of [[0, 0], [d, 0], [d, h], [0, h]]) {
-    addGuide(-ex, gy, gz, 0, gy, gz)
-    addGuide(w + ex, gy, gz, w, gy, gz)
+    addGuide(0, gy, gz, 0, -1)
+    addGuide(w, gy, gz, 0, 1)
   }
   // Back guides
   for (const [gx, gz] of [[0, 0], [w, 0], [w, h], [0, h]])
-    addGuide(gx, d + ey, gz, gx, d, gz)
+    addGuide(gx, d, gz, 1, 1)
 
   // Labels
   const sz = (lw: number, lh: number) => `${lw.toFixed(0)}\u00D7${lh.toFixed(0)}`
-  const addLabel = (text: string, color: string, sub: string, x: number, y: number, z: number) => {
+  const addLabel = (text: string, color: string, sub: string, x: number, y: number, z: number, axis = -1, sign = 0) => {
     const sprite = makeLabel(text, color, sub)
     sprite.position.set(x, y, z)
     labelsGroup!.add(sprite)
+    explodeLabels.push({ sprite, base: new THREE.Vector3(x, y, z), axis, sign })
   }
 
-  addLabel(t('box.top_short'), '#a0e0a0', sz(w, d), w / 2, d / 2, h + ez)
-  addLabel(t('box.bottom_short'), '#a0e0a0', sz(w, d), w / 2, d / 2, -ez)
+  addLabel(t('box.top_short'), '#a0e0a0', sz(w, d), w / 2, d / 2, h, 2, 1)
+  addLabel(t('box.bottom_short'), '#a0e0a0', sz(w, d), w / 2, d / 2, 0, 2, -1)
   const bv = Bevel.value
-  addLabel(t('box.side_short'), '#80c0e0', sz(d + bv, h), -ex, d / 2, h / 2)
-  addLabel(t('box.side_short'), '#80c0e0', sz(d + bv, h), w + ex, d / 2, h / 2)
-  addLabel(t('box.back_short'), '#c0a0d0', sz(w, h), w / 2, d + ey, h / 2)
+  addLabel(t('box.side_short'), '#80c0e0', sz(d + bv, h), 0, d / 2, h / 2, 0, -1)
+  addLabel(t('box.side_short'), '#80c0e0', sz(d + bv, h), w, d / 2, h / 2, 0, 1)
+  addLabel(t('box.back_short'), '#c0a0d0', sz(w, h), w / 2, d, h / 2, 1, 1)
 
   const shYs = shelfSlotYs()
   for (let i = 0; i < shYs.length; i++)
     addLabel(`${t('box.shelf_short')}${i + 1}`, '#e0c080', sz(w, d), w / 2, d / 2, shYs[i])
+
+  applyExplode()
+  mainDirty = true
 
   if (resetTarget) {
     controls.target.set(w / 2, d / 2, h / 2)
@@ -743,6 +796,28 @@ let pControls: TrackballControls | null = null
 let pGroup: THREE.Group | null = null
 let pResizeObs: ResizeObserver | null = null
 let pAnimId = 0
+let pieceDirty = true
+
+// Active piece is opaque, the rest dimmed; applied on selection change
+// instead of every frame.
+function applyPieceOpacity() {
+  if (!pGroup) return
+  const activeIdx = galIdx.value
+  pGroup.children.forEach((sub, i) => {
+    const isActive = i === activeIdx
+    sub.traverse(child => {
+      if ('material' in child) {
+        const mat = (child as THREE.Mesh).material as THREE.Material
+        if (mat) {
+          mat.transparent = !isActive
+          mat.opacity = isActive ? 1 : 0.3
+          mat.depthWrite = isActive
+        }
+      }
+    })
+  })
+  pieceDirty = true
+}
 
 function initPieceThree() {
   const c = document.getElementById('piece3d-container')
@@ -770,6 +845,7 @@ function initPieceThree() {
   pControls.staticMoving = false
   pControls.noZoom = true
   pControls.noPan = true
+  pControls.addEventListener('change', () => { pieceDirty = true })
   const raycaster = new THREE.Raycaster()
   const mouse = new THREE.Vector2()
   let hitPiece = false
@@ -817,23 +893,7 @@ function initPieceThree() {
       cam.position.lerpVectors(pRing.camPos, p0, e)
       ctrl.target.lerpVectors(pRing.camTarget, t0, e)
       cam.up.lerpVectors(pRing.camUp, u0, e).normalize()
-    }
-    // set opacity: active piece = 1, others = 0.3
-    if (pGroup) {
-      const activeIdx = galIdx.value
-      pGroup.children.forEach((sub, i) => {
-        const isActive = i === activeIdx
-        sub.traverse(child => {
-          if ('material' in child) {
-            const mat = (child as THREE.Mesh).material as THREE.Material
-            if (mat) {
-              mat.transparent = !isActive
-              mat.opacity = isActive ? 1 : 0.3
-              mat.depthWrite = isActive
-            }
-          }
-        })
-      })
+      pieceDirty = true
     }
     if (pCamReset.active) {
       pCamReset.t += 0.04
@@ -848,9 +908,13 @@ function initPieceThree() {
       cam.position.lerpVectors(pCamReset.camPos, p0, e)
       ctrl.target.lerpVectors(pCamReset.camTarget, t0, e)
       cam.up.lerpVectors(pCamReset.camUp, u0, e).normalize()
+      pieceDirty = true
     }
     ctrl.update()
-    rend.render(sc, cam)
+    if (pieceDirty) {
+      pieceDirty = false
+      rend.render(sc, cam)
+    }
   })()
 
   pResizeObs = new ResizeObserver(() => {
@@ -859,6 +923,7 @@ function initPieceThree() {
       cam.aspect = rw / rh
       cam.updateProjectionMatrix()
       rend.setSize(rw, rh)
+      pieceDirty = true
     }
   })
   pResizeObs.observe(c)
@@ -990,6 +1055,7 @@ function updatePieceScene(animate = false) {
     rebuildAllPieces()
     positionRing(pieceAngle(galIdx.value))
     setupPieceCam()
+    applyPieceOpacity()
   } else {
     const target = pieceAngle(galIdx.value)
     let from = pGroup.userData.ringAngle ?? 0
@@ -1003,6 +1069,7 @@ function updatePieceScene(animate = false) {
     pRing.camUp.copy(pCamera!.up)
     pRing.active = true
     pRing.t = 0
+    applyPieceOpacity()
   }
 }
 
@@ -1021,27 +1088,34 @@ function disposePieceThree() {
 // ── Gallery ────────────────────────────────────────────────────────────────
 const galIdx = ref(0)
 
-const galPieces = computed(() => {
+interface GalPiece {
+  id: string; title: string; count: number; pw: number; ph: number
+  d: string; s: number; color: string; xOff: number
+}
+
+const galPieces = computed<GalPiece[]>(() => {
   const bv = Bevel.value
-  const list: { id: string; title: string; count: number; pw: number; ph: number; path: () => string; color: string; xOff: number }[] = [
-    { id: 'side', title: `${t('box.side_wall')}`, count: 2, pw: SideOW.value, ph: H.value, path: pathSide, color: 'var(--accent)', xOff: SideOff.value },
+  // Paths and thumb scales are computed eagerly so re-renders reuse them.
+  const thumb = (pw: number, ph: number) => svgScale(pw, ph) * 0.22
+  const list: GalPiece[] = [
+    { id: 'side', title: `${t('box.side_wall')}`, count: 2, pw: SideOW.value, ph: H.value, d: pathSide(), s: thumb(SideOW.value, H.value), color: 'var(--accent)', xOff: SideOff.value },
   ]
   if (bv === 0) {
-    list.push({ id: 'tb', title: `${t('box.top_bottom_wall')}`, count: 2, pw: W.value, ph: D.value, path: () => pathTopBottom(), color: '#27ae60', xOff: 0 })
+    list.push({ id: 'tb', title: `${t('box.top_bottom_wall')}`, count: 2, pw: W.value, ph: D.value, d: pathTopBottom(), s: thumb(W.value, D.value), color: '#27ae60', xOff: 0 })
   } else {
     const topOff = Math.max(bv, 0), botOff = Math.max(-bv, 0)
-    list.push({ id: 'top', title: `${t('box.top_short')}`, count: 1, pw: W.value, ph: TopD.value, path: () => pathTopBottom(TopD.value, topOff), color: '#27ae60', xOff: 0 })
-    list.push({ id: 'bot', title: `${t('box.bottom_short')}`, count: 1, pw: W.value, ph: BotD.value, path: () => pathTopBottom(BotD.value, botOff), color: '#1abc9c', xOff: 0 })
+    list.push({ id: 'top', title: `${t('box.top_short')}`, count: 1, pw: W.value, ph: TopD.value, d: pathTopBottom(TopD.value, topOff), s: thumb(W.value, TopD.value), color: '#27ae60', xOff: 0 })
+    list.push({ id: 'bot', title: `${t('box.bottom_short')}`, count: 1, pw: W.value, ph: BotD.value, d: pathTopBottom(BotD.value, botOff), s: thumb(W.value, BotD.value), color: '#1abc9c', xOff: 0 })
   }
-  list.push({ id: 'back', title: `${t('box.back_wall')}`, count: 1, pw: W.value, ph: H.value, path: pathBack, color: '#8e44ad', xOff: 0 })
+  list.push({ id: 'back', title: `${t('box.back_wall')}`, count: 1, pw: W.value, ph: H.value, d: pathBack(), s: thumb(W.value, H.value), color: '#8e44ad', xOff: 0 })
   const sys = shelfSlotYs()
   if (bv === 0 && sys.length > 0) {
-    list.push({ id: 'shelf', title: `${t('box.shelf')}`, count: sys.length, pw: W.value, ph: D.value, path: () => pathShelf(), color: '#e67e22', xOff: 0 })
+    list.push({ id: 'shelf', title: `${t('box.shelf')}`, count: sys.length, pw: W.value, ph: D.value, d: pathShelf(), s: thumb(W.value, D.value), color: '#e67e22', xOff: 0 })
   } else {
     for (let i = 0; i < sys.length; i++) {
       const sd = shelfDepthAt(sys[i])
       const sOff = shelfOffsetAt(sys[i])
-      list.push({ id: `shelf${i}`, title: `${t('box.shelf_short')}${i + 1}`, count: 1, pw: W.value, ph: sd, path: () => pathShelf(sd, sOff), color: shelfColor(i), xOff: 0 })
+      list.push({ id: `shelf${i}`, title: `${t('box.shelf_short')}${i + 1}`, count: 1, pw: W.value, ph: sd, d: pathShelf(sd, sOff), s: thumb(W.value, sd), color: shelfColor(i), xOff: 0 })
     }
   }
   return list
@@ -1057,7 +1131,7 @@ function galResetView() {
 
 function galDlSvg() {
   const p = galPieces.value[galIdx.value]
-  dlPiece(`${p.id}.svg`, p.path(), p.pw, p.ph, p.xOff)
+  dlPiece(`${p.id}.svg`, p.d, p.pw, p.ph, p.xOff)
 }
 
 // ── Lifecycle ───────────────────────────────────────────────────────────────
@@ -1103,8 +1177,18 @@ function dlPiece(name: string, path: string, pw: number, ph: number, xOff = 0) {
   downloadSvg(name, wrapCutSvg(path, pw, ph, xOff))
 }
 
+// pieceData rebuilds the full SVG path, so the cut-sheet template reads it
+// through this cache (one entry per label) instead of per piece per render.
+const pieceDataByLabel = computed(() => {
+  const m = new Map<string, ReturnType<typeof pieceData>>()
+  for (const p of cuttingPieces.value) {
+    if (!m.has(p.label)) m.set(p.label, pieceData(p.label))
+  }
+  return m
+})
+
 function getCutSheetTransform(p: LayoutPiece): string {
-  const pd = pieceData(p.label)
+  const pd = pieceDataByLabel.value.get(p.label) ?? pieceData(p.label)
   const rotated = Math.abs(p.w - pd.oh) < 1 && Math.abs(p.h - pd.ow) < 1
   const bvOff = pd.xOff
   return rotated
@@ -1113,7 +1197,7 @@ function getCutSheetTransform(p: LayoutPiece): string {
 }
 
 function getCutSheetPath(p: LayoutPiece): string {
-  return pieceData(p.label).path
+  return (pieceDataByLabel.value.get(p.label) ?? pieceData(p.label)).path
 }
 </script>
 
@@ -1191,12 +1275,12 @@ function getCutSheetPath(p: LayoutPiece): string {
               @click="galIdx = i"
             >
               <svg
-                :width="p.pw * svgScale(p.pw, p.ph) * 0.22 + 6"
-                :height="p.ph * svgScale(p.pw, p.ph) * 0.22 + 6"
-                :viewBox="`-3 -3 ${p.pw * svgScale(p.pw, p.ph) * 0.22 + 6} ${p.ph * svgScale(p.pw, p.ph) * 0.22 + 6}`"
+                :width="p.pw * p.s + 6"
+                :height="p.ph * p.s + 6"
+                :viewBox="`-3 -3 ${p.pw * p.s + 6} ${p.ph * p.s + 6}`"
               >
-                <g :transform="`translate(${(p.xOff * svgScale(p.pw, p.ph) * 0.22).toFixed(4)}, 0) scale(${(svgScale(p.pw, p.ph) * 0.22).toFixed(4)})`">
-                  <path :d="p.path()" :fill="p.color" fill-opacity="0.4" fill-rule="evenodd" stroke="var(--laser-cut)" :stroke-width="(2 / (svgScale(p.pw, p.ph) * 0.22)).toFixed(1)" stroke-linejoin="miter" />
+                <g :transform="`translate(${(p.xOff * p.s).toFixed(4)}, 0) scale(${p.s.toFixed(4)})`">
+                  <path :d="p.d" :fill="p.color" fill-opacity="0.4" fill-rule="evenodd" stroke="var(--laser-cut)" :stroke-width="(2 / p.s).toFixed(1)" stroke-linejoin="miter" />
                 </g>
               </svg>
               <span class="gallery-thumb-label">{{ p.title }}</span>
