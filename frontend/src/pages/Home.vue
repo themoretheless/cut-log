@@ -5,6 +5,7 @@ import { optimize } from '@/services/optimizer'
 import { type CutPiece, type CuttingResult, CuttingStrategy, newPiece } from '@/services/types'
 import { PIECE_COLORS, truncate, efficiencyClass } from '@/helpers/svg'
 import { HOME_STATE_KEY, serializeHomeState, parseHomeState } from '@/lib/homeState'
+import { validateNewPiece } from '@/lib/validatePiece'
 import { useL10n } from '@/stores/l10n'
 
 const { t } = useL10n()
@@ -98,13 +99,12 @@ function loadState() {
 
 // ── Actions ──────────────────────────────────────────────────────────────────
 function addPiece() {
+  const err = validateNewPiece(
+    { width: newWidth.value, height: newHeight.value, quantity: newQty.value },
+    { sheetWidth: sheetWidth.value, sheetHeight: sheetHeight.value },
+  )
+  if (err) { addError.value = t(err); return }
   addError.value = ''
-  if (newWidth.value <= 0 || newHeight.value <= 0) { addError.value = t('invalid_dims'); return }
-  if (
-    newWidth.value > sheetWidth.value && newHeight.value > sheetWidth.value &&
-    newWidth.value > sheetHeight.value && newHeight.value > sheetHeight.value
-  ) { addError.value = t('piece_larger'); return }
-  if (newQty.value <= 0) { addError.value = t('qty_min'); return }
 
   const color = PIECE_COLORS[colorIdx++ % PIECE_COLORS.length]
   pieces.push(newPiece(newLabel.value, newWidth.value, newHeight.value, newQty.value, newAllowRotation.value, color))
