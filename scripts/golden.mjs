@@ -1,8 +1,11 @@
-// Golden snapshot harness for the CURRENT TypeScript box geometry in
-// frontend/src/pages/BoxBuilder.vue. Function bodies below are copied
-// verbatim from that component (type annotations stripped) so the captured
-// fixtures faithfully reflect existing behaviour, including Bevel. The Rust
-// port is validated against these fixtures.
+// FROZEN baseline generator for the box geometry fixtures (scripts/golden.json).
+//
+// This is a verbatim snapshot of the ORIGINAL geometry (taken when it still
+// lived in BoxBuilder.vue, before it moved to frontend/src/box/geometry.ts). It
+// is intentionally NOT kept in sync with geometry.ts: golden.json pins the
+// behaviour, and frontend/src/box/geometry.golden.test.ts asserts geometry.ts
+// still matches it. If you deliberately change the geometry, regenerate the
+// fixtures from geometry.ts (e.g. via a tsx script) rather than from this file.
 //
 // Run: node scripts/golden.mjs > scripts/golden.json
 

@@ -197,19 +197,30 @@ function badgeWidth(idx: number): number {
 }
 
 // ── Strategy display ─────────────────────────────────────────────────────────
+// Single source for both the <select> groups and strategyDisplayName.
+const strategyGroups: { labelKey: string; items: { value: CuttingStrategy; sortKey: string }[] }[] = [
+  { labelKey: 'strategy.best_area', items: [
+    { value: CuttingStrategy.BestArea_AreaDesc, sortKey: 'sort.area' },
+    { value: CuttingStrategy.BestArea_MaxSideDesc, sortKey: 'sort.max_side' },
+    { value: CuttingStrategy.BestArea_PerimeterDesc, sortKey: 'sort.perimeter' },
+  ] },
+  { labelKey: 'strategy.best_short', items: [
+    { value: CuttingStrategy.BestShortSide_AreaDesc, sortKey: 'sort.area' },
+    { value: CuttingStrategy.BestShortSide_MaxSideDesc, sortKey: 'sort.max_side' },
+    { value: CuttingStrategy.BestShortSide_PerimeterDesc, sortKey: 'sort.perimeter' },
+  ] },
+  { labelKey: 'strategy.best_long', items: [
+    { value: CuttingStrategy.BestLongSide_AreaDesc, sortKey: 'sort.area' },
+    { value: CuttingStrategy.BestLongSide_MaxSideDesc, sortKey: 'sort.max_side' },
+    { value: CuttingStrategy.BestLongSide_PerimeterDesc, sortKey: 'sort.perimeter' },
+  ] },
+]
+
 function strategyDisplayName(s: CuttingStrategy): string {
-  const map: Record<number, string> = {
-    [CuttingStrategy.BestArea_AreaDesc]: `${t('strategy.best_area')} \u00b7 ${t('sort.area')}`,
-    [CuttingStrategy.BestArea_MaxSideDesc]: `${t('strategy.best_area')} \u00b7 ${t('sort.max_side')}`,
-    [CuttingStrategy.BestArea_PerimeterDesc]: `${t('strategy.best_area')} \u00b7 ${t('sort.perimeter')}`,
-    [CuttingStrategy.BestShortSide_AreaDesc]: `${t('strategy.best_short')} \u00b7 ${t('sort.area')}`,
-    [CuttingStrategy.BestShortSide_MaxSideDesc]: `${t('strategy.best_short')} \u00b7 ${t('sort.max_side')}`,
-    [CuttingStrategy.BestShortSide_PerimeterDesc]: `${t('strategy.best_short')} \u00b7 ${t('sort.perimeter')}`,
-    [CuttingStrategy.BestLongSide_AreaDesc]: `${t('strategy.best_long')} \u00b7 ${t('sort.area')}`,
-    [CuttingStrategy.BestLongSide_MaxSideDesc]: `${t('strategy.best_long')} \u00b7 ${t('sort.max_side')}`,
-    [CuttingStrategy.BestLongSide_PerimeterDesc]: `${t('strategy.best_long')} \u00b7 ${t('sort.perimeter')}`,
-  }
-  return map[s] ?? t('strategy.auto')
+  for (const g of strategyGroups)
+    for (const it of g.items)
+      if (it.value === s) return `${t(g.labelKey)} \u00b7 ${t(it.sortKey)}`
+  return t('strategy.auto')
 }
 
 // ── Keyboard shortcuts ───────────────────────────────────────────────────────
@@ -293,20 +304,8 @@ onUnmounted(() => {
             <label>{{ t('strategy') }}</label>
             <select class="form-select" v-model.number="selectedStrategy">
               <option :value="CuttingStrategy.Auto">{{ t('strategy.auto') }}</option>
-              <optgroup :label="t('strategy.best_area')">
-                <option :value="CuttingStrategy.BestArea_AreaDesc">{{ t('strategy.best_area') }} &middot; {{ t('sort.area') }}</option>
-                <option :value="CuttingStrategy.BestArea_MaxSideDesc">{{ t('strategy.best_area') }} &middot; {{ t('sort.max_side') }}</option>
-                <option :value="CuttingStrategy.BestArea_PerimeterDesc">{{ t('strategy.best_area') }} &middot; {{ t('sort.perimeter') }}</option>
-              </optgroup>
-              <optgroup :label="t('strategy.best_short')">
-                <option :value="CuttingStrategy.BestShortSide_AreaDesc">{{ t('strategy.best_short') }} &middot; {{ t('sort.area') }}</option>
-                <option :value="CuttingStrategy.BestShortSide_MaxSideDesc">{{ t('strategy.best_short') }} &middot; {{ t('sort.max_side') }}</option>
-                <option :value="CuttingStrategy.BestShortSide_PerimeterDesc">{{ t('strategy.best_short') }} &middot; {{ t('sort.perimeter') }}</option>
-              </optgroup>
-              <optgroup :label="t('strategy.best_long')">
-                <option :value="CuttingStrategy.BestLongSide_AreaDesc">{{ t('strategy.best_long') }} &middot; {{ t('sort.area') }}</option>
-                <option :value="CuttingStrategy.BestLongSide_MaxSideDesc">{{ t('strategy.best_long') }} &middot; {{ t('sort.max_side') }}</option>
-                <option :value="CuttingStrategy.BestLongSide_PerimeterDesc">{{ t('strategy.best_long') }} &middot; {{ t('sort.perimeter') }}</option>
+              <optgroup v-for="g in strategyGroups" :key="g.labelKey" :label="t(g.labelKey)">
+                <option v-for="it in g.items" :key="it.value" :value="it.value">{{ t(g.labelKey) }} &middot; {{ t(it.sortKey) }}</option>
               </optgroup>
             </select>
           </div>
