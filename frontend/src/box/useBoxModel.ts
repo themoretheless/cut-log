@@ -1,0 +1,217 @@
+/**
+ * Reactive model for the box builder page: parameters, derived dimensions,
+ * piece list, cutting layout, stats and gallery entries. Pure reactive state
+ * over src/box/geometry.ts — no Three.js, no DOM — so it is unit-testable.
+ * The translate function is injected to keep the model decoupled from the
+ * l10n store.
+ */
+import { ref, computed } from 'vue'
+import * as G from '@/box/geometry'
+
+export type Translate = (key: string) => string
+
+export interface PieceInfo { w: number; h: number; label: string; color: string }
+export interface LayoutPiece { x: number; y: number; w: number; h: number; label: string; color: string }
+export interface GalPiece {
+  id: string; title: string; count: number; pw: number; ph: number
+  d: string; s: number; color: string; xOff: number
+}
+
+const SHELF_COLORS = ['#e67e22', '#e74c3c', '#9b59b6', '#1abc9c', '#f1c40f', '#3498db']
+const SHELF_EDGE_COLORS = ['#ca6f1e', '#c0392b', '#7d3c98', '#148f77', '#d4ac0d', '#2471a3']
+
+export function useBoxModel(t: Translate) {
+  // ── Parameters ────────────────────────────────────────────────────────────
+  const W = ref(300)
+  const H = ref(400)
+  const D = ref(200)
+  const T = ref(6)
+  const Kerf = ref(0.1)
+  const TabH = ref(30)
+  const NTab = ref(1)
+  const NShelves = ref(0)
+  const Bevel = ref(0)
+
+  const SheetW = ref(1220)
+  const SheetH = ref(2440)
+  const CutGap = ref(5)
+
+  // Gallery selection, shared by the thumbnails, the piece ring and the
+  // assembly view (the selected piece is highlighted there).
+  const galIdx = ref(0)
+
+  // ── Derived dimensions ────────────────────────────────────────────────────
+  const TF = computed(() => T.value + Kerf.value)
+  const Wi = computed(() => W.value - 2 * T.value)
+  const Hi = computed(() => H.value - 2 * T.value)
+  const SideOW = computed(() => D.value)
+  const SideOff = computed(() => 0)
+  const TopD = computed(() => D.value - Math.max(Bevel.value, 0))
+  const BotD = computed(() => D.value - Math.max(-Bevel.value, 0))
+
+  // ── Geometry (thin wrappers over the pure module src/box/geometry.ts) ─────
+  function bp(): G.BoxParams {
+    return { w: W.value, h: H.value, d: D.value, t: T.value, kerf: Kerf.value, tabH: TabH.value, nTab: NTab.value, nShelves: NShelves.value, bevel: Bevel.value }
+  }
+  const tabPositions = (L: number) => G.tabPositions(bp(), L)
+  const shelfSlotYs = () => G.shelfSlotYs(bp())
+  const shelfOffsetAt = (sy: number) => G.shelfOffsetAt(bp(), sy)
+  const shelfDepthAt = (sy: number) => G.shelfDepthAt(bp(), sy)
+
+  const pathSide = () => G.pathSide(bp())
+  const pathTopBottom = (depth?: number, depthOff = 0) => G.pathTopBottom(bp(), depth, depthOff)
+  const pathBack = () => G.pathBack(bp())
+  const pathShelf = (depth?: number, depthOff = 0) => G.pathShelf(bp(), depth, depthOff)
+
+  const sidePts3D = (x0: number) => G.sidePts3D(bp(), x0)
+  const horizPts3D = (z0: number, depth?: number, yOff = 0) => G.horizPts3D(bp(), z0, depth, yOff)
+  const backPts3D = (y0: number) => G.backPts3D(bp(), y0)
+  const shelfPts3D = (z0: number, depth?: number, yOff = 0) => G.shelfPts3D(bp(), z0, depth, yOff)
+  const sideHoles3D = (x0: number) => G.sideHoles3D(bp(), x0)
+  const backHoles3D = (y0: number) => G.backHoles3D(bp(), y0)
+
+  function shelfColor(i: number) { return SHELF_COLORS[i % SHELF_COLORS.length] }
+  function shelfEdgeColor(i: number) { return SHELF_EDGE_COLORS[i % SHELF_EDGE_COLORS.length] }
+
+  // ── Piece data lookup by label ────────────────────────────────────────────
+  function pieceData(label: string): { ow: number; oh: number; path: string; xOff: number } {
+    const side = t('box.side_short')
+    const back = t('box.back_short')
+    if (label.startsWith(side)) return { ow: SideOW.value, oh: H.value, path: pathSide(), xOff: SideOff.value }
+    if (label === t('box.top_short')) return { ow: W.value, oh: TopD.value, path: pathTopBottom(TopD.value, Math.max(Bevel.value, 0)), xOff: 0 }
+    if (label === t('box.bottom_short')) return { ow: W.value, oh: BotD.value, path: pathTopBottom(BotD.value, Math.max(-Bevel.value, 0)), xOff: 0 }
+    if (label.startsWith(back)) return { ow: W.value, oh: H.value, path: pathBack(), xOff: 0 }
+    const shIdx = parseInt(label.replace(t('box.shelf_short'), '')) - 1
+    const sys = shelfSlotYs()
+    const sy = shIdx >= 0 && shIdx < sys.length ? sys[shIdx] : 0
+    const sd = shelfDepthAt(sy)
+    const sOff = shelfOffsetAt(sy)
+    return { ow: W.value, oh: sd, path: pathShelf(sd, sOff), xOff: 0 }
+  }
+
+  // ── Cutting layout (shelf-based FFD with rotation) ────────────────────────
+  function allPieces(): PieceInfo[] {
+    const side = t('box.side_short')
+    const list: PieceInfo[] = [
+      { w: SideOW.value, h: H.value, label: `${side}1`, color: 'var(--accent)' },
+      { w: SideOW.value, h: H.value, label: `${side}2`, color: 'var(--accent)' },
+      { w: W.value, h: TopD.value, label: t('box.top_short'), color: '#27ae60' },
+      { w: W.value, h: BotD.value, label: t('box.bottom_short'), color: Bevel.value !== 0 ? '#1abc9c' : '#27ae60' },
+      { w: W.value, h: H.value, label: t('box.back_short'), color: '#8e44ad' },
+    ]
+    const sys = shelfSlotYs()
+    for (let i = 0; i < sys.length; i++) {
+      const sd = shelfDepthAt(sys[i])
+      list.push({ w: W.value, h: sd, label: `${t('box.shelf_short')}${i + 1}`, color: Bevel.value !== 0 ? shelfColor(i) : '#e67e22' })
+    }
+    list.sort((a, b) => b.w * b.h - a.w * a.h)
+    return list
+  }
+
+  function computeLayout(): LayoutPiece[][] {
+    return G.computeLayout(allPieces(), SheetW.value, SheetH.value, CutGap.value)
+      .map(sheet => sheet.map(s => ({ x: s.x, y: s.y, w: s.w, h: s.h, label: s.piece.label, color: s.piece.color })))
+  }
+
+  const cuttingSheets = computed(() => computeLayout())
+  const cuttingPieces = computed(() => allPieces())
+
+  const cutStats = computed(() => {
+    const sheets = cuttingSheets.value
+    const all = cuttingPieces.value
+    const totalPieceArea = all.reduce((s, p) => s + p.w * p.h, 0)
+    const totalSheetArea = sheets.length * SheetW.value * SheetH.value
+    const util = totalSheetArea > 0 ? (totalPieceArea / totalSheetArea * 100) : 0
+    return {
+      sheets: sheets.length,
+      pieceArea: (totalPieceArea / 1e6).toFixed(4),
+      sheetArea: (totalSheetArea / 1e6).toFixed(4),
+      util: util.toFixed(1),
+    }
+  })
+
+  const cutScale = computed(() => Math.min(480 / SheetW.value, 480 / SheetH.value))
+
+  const tooBigPieces = computed(() => {
+    const all = cuttingPieces.value
+    const g = CutGap.value
+    const sw = SheetW.value
+    const sh = SheetH.value
+    return all.filter(p =>
+      (p.w > sw - 2 * g || p.h > sh - 2 * g) &&
+      (p.h > sw - 2 * g || p.w > sh - 2 * g)
+    )
+  })
+
+  // ── Gallery entries ───────────────────────────────────────────────────────
+  const galPieces = computed<GalPiece[]>(() => {
+    const bv = Bevel.value
+    // Paths and thumb scales are computed eagerly so re-renders reuse them.
+    const thumb = (pw: number, ph: number) => G.svgScale(pw, ph) * 0.22
+    const list: GalPiece[] = [
+      { id: 'side', title: `${t('box.side_wall')}`, count: 2, pw: SideOW.value, ph: H.value, d: pathSide(), s: thumb(SideOW.value, H.value), color: 'var(--accent)', xOff: SideOff.value },
+    ]
+    if (bv === 0) {
+      list.push({ id: 'tb', title: `${t('box.top_bottom_wall')}`, count: 2, pw: W.value, ph: D.value, d: pathTopBottom(), s: thumb(W.value, D.value), color: '#27ae60', xOff: 0 })
+    } else {
+      const topOff = Math.max(bv, 0), botOff = Math.max(-bv, 0)
+      list.push({ id: 'top', title: `${t('box.top_short')}`, count: 1, pw: W.value, ph: TopD.value, d: pathTopBottom(TopD.value, topOff), s: thumb(W.value, TopD.value), color: '#27ae60', xOff: 0 })
+      list.push({ id: 'bot', title: `${t('box.bottom_short')}`, count: 1, pw: W.value, ph: BotD.value, d: pathTopBottom(BotD.value, botOff), s: thumb(W.value, BotD.value), color: '#1abc9c', xOff: 0 })
+    }
+    list.push({ id: 'back', title: `${t('box.back_wall')}`, count: 1, pw: W.value, ph: H.value, d: pathBack(), s: thumb(W.value, H.value), color: '#8e44ad', xOff: 0 })
+    const sys = shelfSlotYs()
+    if (bv === 0 && sys.length > 0) {
+      list.push({ id: 'shelf', title: `${t('box.shelf')}`, count: sys.length, pw: W.value, ph: D.value, d: pathShelf(), s: thumb(W.value, D.value), color: '#e67e22', xOff: 0 })
+    } else {
+      for (let i = 0; i < sys.length; i++) {
+        const sd = shelfDepthAt(sys[i])
+        const sOff = shelfOffsetAt(sys[i])
+        list.push({ id: `shelf${i}`, title: `${t('box.shelf_short')}${i + 1}`, count: 1, pw: W.value, ph: sd, d: pathShelf(sd, sOff), s: thumb(W.value, sd), color: shelfColor(i), xOff: 0 })
+      }
+    }
+    return list
+  })
+
+  // pieceData rebuilds the full SVG path, so the cut-sheet template reads it
+  // through this cache (one entry per label) instead of per piece per render.
+  const pieceDataByLabel = computed(() => {
+    const m = new Map<string, ReturnType<typeof pieceData>>()
+    for (const p of cuttingPieces.value) {
+      if (!m.has(p.label)) m.set(p.label, pieceData(p.label))
+    }
+    return m
+  })
+
+  function getCutSheetTransform(p: LayoutPiece): string {
+    const pd = pieceDataByLabel.value.get(p.label) ?? pieceData(p.label)
+    const rotated = Math.abs(p.w - pd.oh) < 1 && Math.abs(p.h - pd.ow) < 1
+    const bvOff = pd.xOff
+    return rotated
+      ? `translate(${(p.x + bvOff).toFixed(2)},${(p.y + pd.ow).toFixed(2)}) rotate(90)`
+      : `translate(${(p.x + bvOff).toFixed(2)},${p.y.toFixed(2)})`
+  }
+
+  function getCutSheetPath(p: LayoutPiece): string {
+    return (pieceDataByLabel.value.get(p.label) ?? pieceData(p.label)).path
+  }
+
+  return {
+    // parameters
+    W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, SheetW, SheetH, CutGap, galIdx,
+    // derived dimensions
+    TF, Wi, Hi, SideOW, SideOff, TopD, BotD,
+    // geometry wrappers
+    tabPositions, shelfSlotYs, shelfOffsetAt, shelfDepthAt,
+    pathSide, pathTopBottom, pathBack, pathShelf,
+    sidePts3D, horizPts3D, backPts3D, shelfPts3D, sideHoles3D, backHoles3D,
+    shelfColor, shelfEdgeColor,
+    // pieces / layout / stats
+    pieceData, allPieces, cuttingSheets, cuttingPieces, cutStats, cutScale, tooBigPieces,
+    // gallery
+    galPieces,
+    // cut-sheet rendering helpers
+    getCutSheetTransform, getCutSheetPath,
+  }
+}
+
+export type BoxModel = ReturnType<typeof useBoxModel>
