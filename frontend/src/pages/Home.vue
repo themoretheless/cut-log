@@ -6,6 +6,7 @@ import { type CutPiece, type CuttingResult, CuttingStrategy, newPiece } from '@/
 import { PIECE_COLORS, truncate, efficiencyClass } from '@/helpers/svg'
 import { HOME_STATE_KEY, serializeHomeState, parseHomeState } from '@/lib/homeState'
 import { validateNewPiece } from '@/lib/validatePiece'
+import { buildLayoutSvg, buildLayoutDxf, buildPrintHtml } from '@/lib/exportLayout'
 import { useL10n } from '@/stores/l10n'
 
 const { t } = useL10n()
@@ -133,6 +134,36 @@ function clearAll() {
 async function calculate() {
   calculated.value = true
   result.value = await optimize(sheetWidth.value, sheetHeight.value, [...pieces], kerf.value, selectedStrategy.value)
+}
+
+// ── Export (cut-ready SVG / DXF / print) ───────────────────────────────────────
+function downloadFile(name: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function exportSvg() {
+  if (result.value) downloadFile('cutlog-layout.svg', buildLayoutSvg(result.value), 'image/svg+xml')
+}
+
+function exportDxf() {
+  if (result.value) downloadFile('cutlog-layout.dxf', buildLayoutDxf(result.value), 'application/dxf')
+}
+
+function printLayout() {
+  if (!result.value) return
+  const html = buildPrintHtml(result.value, {
+    title: t('app.title'),
+    layoutTitle: t('export.layout'),
+    cols: [t('name'), t('export.size'), t('quantity')],
+  })
+  const w = window.open('', '_blank')
+  if (w) { w.document.write(html); w.document.close() }
 }
 
 // ── Selection (sync between the piece list and the placed rects) ───────────────
@@ -462,6 +493,14 @@ onUnmounted(() => {
               <span class="stat-value stat-value-sm">{{ strategyDisplayName(result.autoPickedStrategy ?? result.strategy) }}</span>
               <span class="stat-label">{{ t('strategy.used') }}</span>
             </div>
+          </div>
+
+          <!-- Export -->
+          <div class="export-bar">
+            <span class="export-label">{{ t('export') }}</span>
+            <button class="btn btn-ghost btn-sm" @click="exportSvg">SVG</button>
+            <button class="btn btn-ghost btn-sm" @click="exportDxf">DXF</button>
+            <button class="btn btn-ghost btn-sm" @click="printLayout">{{ t('export.print') }}</button>
           </div>
 
           <!-- Unplaced warnings -->
