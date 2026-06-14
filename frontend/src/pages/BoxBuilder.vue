@@ -22,15 +22,32 @@ const assembly = useAssemblyScene(model, t)
 const { isoExplode } = assembly
 const gallery = usePieceGallery(model)
 
+// ── Gallery navigation ───────────────────────────────────────────────────────
+function galPrev() { galIdx.value = (galIdx.value - 1 + galPieces.value.length) % galPieces.value.length }
+function galNext() { galIdx.value = (galIdx.value + 1) % galPieces.value.length }
+
+// ── Keyboard shortcuts ───────────────────────────────────────────────────────
+function onKeydown(e: KeyboardEvent) {
+  const tag = (e.target as HTMLElement)?.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+  if (e.ctrlKey || e.metaKey || e.altKey) return
+  if (e.key === 'ArrowLeft') { e.preventDefault(); galPrev() }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); galNext() }
+  else if (e.key === 'd' || e.key === 'D') { e.preventDefault(); galDlSvg() }
+  else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); gallery.resetView() }
+}
+
 // ── Lifecycle ───────────────────────────────────────────────────────────────
 onMounted(() => {
   assembly.init('box3d-container')
   assembly.update()
   gallery.init('piece3d-container')
   gallery.update()
+  window.addEventListener('keydown', onKeydown)
 })
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown)
   assembly.dispose()
   gallery.dispose()
 })
@@ -66,6 +83,12 @@ function galDlSvg() {
       <h1>{{ t('box.title') }}</h1>
       <p class="subtitle">{{ t('box.subtitle') }}</p>
     </header>
+
+    <div class="hotkey-bar">
+      <span><kbd>&larr;</kbd><kbd>&rarr;</kbd> {{ t('box.hotkey.nav') }}</span>
+      <span><kbd>D</kbd> {{ t('box.hotkey.download') }}</span>
+      <span><kbd>R</kbd> {{ t('box.hotkey.reset') }}</span>
+    </div>
 
     <div class="main-layout">
       <aside class="panel panel-input">
@@ -118,9 +141,9 @@ function galDlSvg() {
         <!-- Pieces gallery + 3D -->
         <section class="card gallery">
           <div class="piece3d-wrap">
-            <button class="piece3d-nav piece3d-prev" @click="galIdx = (galIdx - 1 + galPieces.length) % galPieces.length">&lsaquo;</button>
+            <button class="piece3d-nav piece3d-prev" @click="galPrev">&lsaquo;</button>
             <div id="piece3d-container" style="width:100%;height:350px;border-radius:8px;overflow:hidden;"></div>
-            <button class="piece3d-nav piece3d-next" @click="galIdx = (galIdx + 1) % galPieces.length">&rsaquo;</button>
+            <button class="piece3d-nav piece3d-next" @click="galNext">&rsaquo;</button>
             <button class="piece3d-nav piece3d-reset" @click="gallery.resetView()" title="Reset view">&#x21ba;</button>
           </div>
           <div class="gallery-3d-bar">

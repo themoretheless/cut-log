@@ -273,7 +273,7 @@ onUnmounted(() => {
       <span><kbd>Enter</kbd> {{ t('hotkey.add') }}</span>
       <span><kbd>Ctrl</kbd>+<kbd>Enter</kbd> {{ t('hotkey.calculate') }}</span>
       <span><kbd>Ctrl</kbd>+<kbd>Z</kbd> {{ t('hotkey.undo') }}</span>
-      <span><kbd>Esc</kbd> {{ t('hotkey.export') }}</span>
+      <span><kbd>Esc</kbd> {{ t('hotkey.clear') }}</span>
     </div>
 
     <div class="main-layout">
