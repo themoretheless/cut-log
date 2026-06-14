@@ -8,6 +8,7 @@ import { type HomeState, HOME_STATE_KEY, serializeHomeState, parseHomeState } fr
 import { validateNewPiece } from '@/lib/validatePiece'
 import { buildLayoutSvg, buildLayoutDxf, buildPrintHtml } from '@/lib/exportLayout'
 import { buildShareUrl, readShareFromHash } from '@/lib/shareLink'
+import { parsePieceList } from '@/lib/parsePieceList'
 import { useL10n } from '@/stores/l10n'
 
 const { t } = useL10n()
@@ -132,6 +133,30 @@ function addPiece() {
   newHeight.value = 300
   newQty.value = 1
   saveState()
+}
+
+// ── Bulk import (paste a cut list from a spreadsheet) ──────────────────────────
+const showImport = ref(false)
+const importText = ref('')
+
+function importPieces() {
+  const { rows, skipped } = parsePieceList(importText.value)
+  if (!rows.length) {
+    addError.value = t('import_none')
+    return
+  }
+  addError.value = ''
+  for (const r of rows) {
+    const color = PIECE_COLORS[colorIdx++ % PIECE_COLORS.length]
+    pieces.push(newPiece(r.label, r.width, r.height, r.quantity, true, color))
+  }
+  importText.value = ''
+  showImport.value = false
+  saveState()
+  const msg = skipped
+    ? t('import_added_skipped').replace('{0}', String(rows.length)).replace('{1}', String(skipped))
+    : t('import_added').replace('{0}', String(rows.length))
+  showToast(msg)
 }
 
 function removePiece(p: CutPiece) {
@@ -434,7 +459,24 @@ onUnmounted(() => {
             </label>
           </div>
           <p v-if="addError" class="error">{{ addError }}</p>
-          <button class="btn btn-primary" @click="addPiece">+ {{ t('add') }}</button>
+          <div class="card-actions">
+            <button class="btn btn-primary" @click="addPiece">+ {{ t('add') }}</button>
+            <button class="btn btn-ghost" @click="showImport = !showImport" :class="{ active: showImport }">{{ t('import') }}</button>
+          </div>
+
+          <!-- Bulk import: paste a cut list from a spreadsheet -->
+          <div v-if="showImport" class="import-box">
+            <textarea
+              v-model="importText"
+              class="import-textarea"
+              rows="5"
+              :placeholder="t('import_placeholder')"
+            ></textarea>
+            <p class="import-hint">{{ t('import_hint') }}</p>
+            <button class="btn btn-primary btn-sm" @click="importPieces" :disabled="!importText.trim()">
+              {{ t('import_add_all') }}
+            </button>
+          </div>
         </section>
       </aside>
 
@@ -712,6 +754,30 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.import-box {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.import-textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #d0d0d0);
+  border-radius: 6px;
+  background: var(--input-bg, #fff);
+  color: inherit;
+  box-sizing: border-box;
+}
+.import-hint {
+  margin: 0;
+  font-size: 11px;
+  opacity: 0.7;
+}
 .toast {
   position: fixed;
   left: 50%;
