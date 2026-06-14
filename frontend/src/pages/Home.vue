@@ -135,6 +135,27 @@ async function calculate() {
   result.value = await optimize(sheetWidth.value, sheetHeight.value, [...pieces], kerf.value, selectedStrategy.value)
 }
 
+// ── Selection (sync between the piece list and the placed rects) ───────────────
+const selectedPieceId = ref<string | null>(null)
+function toggleSelect(id: string) {
+  selectedPieceId.value = selectedPieceId.value === id ? null : id
+}
+
+// ── Example project (one-click starter for the empty state) ────────────────────
+function loadExample() {
+  const ex = [
+    { label: t('example.side'), w: 1800, h: 300, q: 2 },
+    { label: t('example.shelf'), w: 760, h: 300, q: 4 },
+    { label: t('example.back'), w: 1800, h: 800, q: 1 },
+  ]
+  for (const e of ex) {
+    const color = PIECE_COLORS[colorIdx++ % PIECE_COLORS.length]
+    pieces.push(newPiece(e.label, e.w, e.h, e.q, true, color))
+  }
+  saveState()
+  calculate()
+}
+
 // ── Drag & drop ──────────────────────────────────────────────────────────────
 function onDragStart(idx: number) {
   dragStartIdx.value = idx
@@ -241,6 +262,7 @@ function onKeydown(e: KeyboardEvent) {
       saveState()
     }
   } else if (e.key === 'Escape') {
+    if (selectedPieceId.value !== null) { selectedPieceId.value = null; return }
     result.value = null
     calculated.value = false
   }
@@ -354,7 +376,7 @@ onUnmounted(() => {
               v-for="(piece, i) in pieces"
               :key="piece.id"
               class="piece-item piece-item-editing"
-              :class="{ 'drag-over': dragOverIdx === i, 'is-dragging-item': dragStartIdx === i }"
+              :class="{ 'drag-over': dragOverIdx === i, 'is-dragging-item': dragStartIdx === i, selected: selectedPieceId === piece.id }"
               draggable="true"
               @dragstart="onDragStart(i)"
               @dragover.prevent="onDragOver(i)"
@@ -368,7 +390,7 @@ onUnmounted(() => {
                   <circle cx="9" cy="18" r="2"/><circle cx="15" cy="18" r="2"/>
                 </svg>
               </span>
-              <span class="piece-color" :style="{ background: piece.color }">{{ i + 1 }}</span>
+              <span class="piece-color" :style="{ background: piece.color, cursor: 'pointer' }" :title="t('highlight_hint')" @click="toggleSelect(piece.id)">{{ i + 1 }}</span>
               <div class="piece-edit-fields">
                 <input class="piece-edit-label" type="text" v-model="piece.label" :placeholder="t('name')" />
                 <div class="piece-edit-dims">
@@ -418,6 +440,7 @@ onUnmounted(() => {
         <div v-if="!result && !calculated" class="empty-state">
           <div class="empty-icon">&#129690;</div>
           <p>{{ t('empty_hint') }}</p>
+          <button class="btn btn-ghost" @click="loadExample">{{ t('load_example') }}</button>
         </div>
 
         <!-- Results -->
@@ -497,9 +520,11 @@ onUnmounted(() => {
                       :width="(pp.width * sheetScale).toFixed(1)"
                       :height="(pp.height * sheetScale).toFixed(1)"
                       :fill="pp.source.color"
-                      fill-opacity="0.82"
-                      stroke="#fff"
-                      stroke-width="0.1"
+                      :fill-opacity="selectedPieceId === null ? 0.82 : (pp.source.id === selectedPieceId ? 0.95 : 0.2)"
+                      :stroke="pp.source.id === selectedPieceId ? '#4a90d9' : '#fff'"
+                      :stroke-width="pp.source.id === selectedPieceId ? 2 : 0.1"
+                      style="cursor:pointer"
+                      @click="toggleSelect(pp.source.id)"
                     />
 
                     <!-- Badge background -->

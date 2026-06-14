@@ -37,6 +37,7 @@
     --nav-border:     #333333;
     --nav-active:     #4a90d9;
     --nav-active-bg:  rgba(74,144,217,0.12);
+    --focus-ring:     #6aa8e8;
 }
 
 [data-theme="light"] {
@@ -77,6 +78,7 @@
     --nav-border:     #ccd6e8;
     --nav-active:     #2c6faf;
     --nav-active-bg:  rgba(44,111,175,0.10);
+    --focus-ring:     #1f5c9e;
 }
 
 /* ── Page Navigation ──────────────────────────────────────────────────── */
@@ -132,7 +134,16 @@ html, body {
     transition: background .2s, color .2s;
 }
 
-h1:focus { outline: none; }
+/* Keyboard focus is clearly visible; mouse users stay ring-free via :focus-visible. */
+:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+.btn-primary:focus-visible {
+    outline-color: #fff;
+    box-shadow: 0 0 0 2px var(--accent);
+}
 
 /* ── Theme Toggle ─────────────────────────────────────────────────────── */
 .top-controls {
@@ -655,6 +666,11 @@ input[type="number"] { -moz-appearance: textfield; }
 .piece-item.is-dragging-item {
     opacity: 1 !important;
     background: var(--piece-bg) !important;
+}
+
+.piece-item.selected {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
 }
 
 .drag-handle {
