@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, watch, onMounted, onUnmounted, computed } from 'vue'
+import { ref, reactive, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import NumberField from '@/components/NumberField.vue'
 import { optimize } from '@/services/optimizer'
 import { type CutPiece, type CuttingResult, CuttingStrategy, newPiece } from '@/services/types'
@@ -9,6 +9,7 @@ import { validateNewPiece } from '@/lib/validatePiece'
 import { buildLayoutSvg, buildLayoutDxf, buildPrintHtml } from '@/lib/exportLayout'
 import { buildShareUrl, readShareFromHash } from '@/lib/shareLink'
 import { parsePieceList } from '@/lib/parsePieceList'
+import { createHistory } from '@/lib/history'
 import { useL10n } from '@/stores/l10n'
 
 const { t } = useL10n()
@@ -79,28 +80,64 @@ function saveState() {
 
 function saveStateNow() {
   try {
-    localStorage.setItem(HOME_STATE_KEY, serializeHomeState({
-      sheetWidth: sheetWidth.value,
-      sheetHeight: sheetHeight.value,
-      kerf: kerf.value,
-      pieces: [...pieces],
-    }))
+    localStorage.setItem(HOME_STATE_KEY, serializeHomeState(currentState()))
   } catch { /* ignore */ }
+}
+
+function currentState(): HomeState {
+  return {
+    sheetWidth: sheetWidth.value,
+    sheetHeight: sheetHeight.value,
+    kerf: kerf.value,
+    pieces: [...pieces],
+  }
 }
 
 function applyState(saved: HomeState) {
   sheetWidth.value = saved.sheetWidth
   sheetHeight.value = saved.sheetHeight
   kerf.value = saved.kerf
-  if (saved.pieces.length) {
-    pieces.splice(0, pieces.length, ...saved.pieces)
-    colorIdx = pieces.length
-  }
+  pieces.splice(0, pieces.length, ...saved.pieces)
+  colorIdx = pieces.length
 }
 
 function loadState() {
   const saved = parseHomeState(localStorage.getItem(HOME_STATE_KEY))
   if (saved) applyState(saved)
+}
+
+// ── Undo / redo (snapshot-based, matches how editors model history) ────────────
+const undoHistory = createHistory<string>(serializeHomeState(currentState()))
+let restoring = false
+let recordTimer: ReturnType<typeof setTimeout> | undefined
+
+// Coalesce bursts of edits (e.g. typing in a number field) into one entry.
+function recordHistory() {
+  if (restoring) return
+  clearTimeout(recordTimer)
+  recordTimer = setTimeout(() => undoHistory.snapshot(serializeHomeState(currentState())), 350)
+}
+
+function restoreSnapshot(snap: string) {
+  const st = parseHomeState(snap)
+  if (!st) return
+  restoring = true
+  clearTimeout(recordTimer)
+  applyState(st)
+  saveStateNow()
+  // Release the guard after the watchers triggered by applyState have flushed,
+  // so the restore itself isn't recorded as a new history entry.
+  nextTick(() => { restoring = false })
+}
+
+function doUndo() {
+  const snap = undoHistory.undo()
+  if (snap !== undefined) restoreSnapshot(snap)
+}
+
+function doRedo() {
+  const snap = undoHistory.redo()
+  if (snap !== undefined) restoreSnapshot(snap)
 }
 
 // A shared link wins over saved state: open the linked project, then strip the
@@ -218,12 +255,7 @@ function showToast(msg: string) {
 }
 
 async function copyShareLink() {
-  const url = buildShareUrl(location.origin, location.pathname, {
-    sheetWidth: sheetWidth.value,
-    sheetHeight: sheetHeight.value,
-    kerf: kerf.value,
-    pieces: [...pieces],
-  })
+  const url = buildShareUrl(location.origin, location.pathname, currentState())
   try {
     await navigator.clipboard.writeText(url)
   } catch {
@@ -354,12 +386,13 @@ function onKeydown(e: KeyboardEvent) {
   } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault()
     if (pieces.length) calculate()
-  } else if (e.key === 'z' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+  } else if (e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
     e.preventDefault()
-    if (pieces.length) {
-      pieces.splice(pieces.length - 1, 1)
-      saveState()
-    }
+    doUndo()
+  } else if ((e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey) && e.shiftKey)
+    || (e.key.toLowerCase() === 'y' && (e.ctrlKey || e.metaKey))) {
+    e.preventDefault()
+    doRedo()
   } else if (e.key === 'Escape') {
     if (selectedPieceId.value !== null) { selectedPieceId.value = null; return }
     result.value = null
@@ -368,11 +401,17 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
-// Auto-save on any piece edit
-watch(pieces, () => saveState(), { deep: true })
+// Persist and record history on any sheet/kerf/piece edit.
+watch([sheetWidth, sheetHeight, kerf, pieces], () => {
+  saveState()
+  recordHistory()
+}, { deep: true })
 
 onMounted(() => {
   loadInitialState()
+  // Baseline the history on whatever was actually loaded (link/localStorage),
+  // so the first undo can't step back into the pre-load default.
+  undoHistory.reset(serializeHomeState(currentState()))
   window.addEventListener('keydown', onKeydown)
 })
 
@@ -380,6 +419,7 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
   clearTimeout(saveTimer)
   clearTimeout(toastTimer)
+  clearTimeout(recordTimer)
   saveStateNow()
 })
 </script>
@@ -395,6 +435,7 @@ onUnmounted(() => {
       <span><kbd>Enter</kbd> {{ t('hotkey.add') }}</span>
       <span><kbd>Ctrl</kbd>+<kbd>Enter</kbd> {{ t('hotkey.calculate') }}</span>
       <span><kbd>Ctrl</kbd>+<kbd>Z</kbd> {{ t('hotkey.undo') }}</span>
+      <span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> {{ t('hotkey.redo') }}</span>
       <span><kbd>Esc</kbd> {{ t('hotkey.clear') }}</span>
     </div>
 
