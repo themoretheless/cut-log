@@ -4,9 +4,10 @@ import NumberField from '@/components/NumberField.vue'
 import { optimize } from '@/services/optimizer'
 import { type CutPiece, type CuttingResult, CuttingStrategy, newPiece } from '@/services/types'
 import { PIECE_COLORS, truncate, efficiencyClass } from '@/helpers/svg'
-import { HOME_STATE_KEY, serializeHomeState, parseHomeState } from '@/lib/homeState'
+import { type HomeState, HOME_STATE_KEY, serializeHomeState, parseHomeState } from '@/lib/homeState'
 import { validateNewPiece } from '@/lib/validatePiece'
 import { buildLayoutSvg, buildLayoutDxf, buildPrintHtml } from '@/lib/exportLayout'
+import { buildShareUrl, readShareFromHash } from '@/lib/shareLink'
 import { useL10n } from '@/stores/l10n'
 
 const { t } = useL10n()
@@ -86,9 +87,7 @@ function saveStateNow() {
   } catch { /* ignore */ }
 }
 
-function loadState() {
-  const saved = parseHomeState(localStorage.getItem(HOME_STATE_KEY))
-  if (!saved) return
+function applyState(saved: HomeState) {
   sheetWidth.value = saved.sheetWidth
   sheetHeight.value = saved.sheetHeight
   kerf.value = saved.kerf
@@ -96,6 +95,24 @@ function loadState() {
     pieces.splice(0, pieces.length, ...saved.pieces)
     colorIdx = pieces.length
   }
+}
+
+function loadState() {
+  const saved = parseHomeState(localStorage.getItem(HOME_STATE_KEY))
+  if (saved) applyState(saved)
+}
+
+// A shared link wins over saved state: open the linked project, then strip the
+// hash so a later edit + reload doesn't silently re-apply the old link.
+function loadInitialState() {
+  const shared = readShareFromHash(location.hash)
+  if (shared) {
+    applyState(shared)
+    history.replaceState(null, '', location.pathname + location.search)
+    showToast(t('link_loaded'))
+    return
+  }
+  loadState()
 }
 
 // ── Actions ──────────────────────────────────────────────────────────────────
@@ -164,6 +181,32 @@ function printLayout() {
   })
   const w = window.open('', '_blank')
   if (w) { w.document.write(html); w.document.close() }
+}
+
+// ── Share link (encode the project into a copyable URL hash) ───────────────────
+const toast = ref('')
+let toastTimer: ReturnType<typeof setTimeout> | undefined
+function showToast(msg: string) {
+  toast.value = msg
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toast.value = '' }, 2200)
+}
+
+async function copyShareLink() {
+  const url = buildShareUrl(location.origin, location.pathname, {
+    sheetWidth: sheetWidth.value,
+    sheetHeight: sheetHeight.value,
+    kerf: kerf.value,
+    pieces: [...pieces],
+  })
+  try {
+    await navigator.clipboard.writeText(url)
+  } catch {
+    // Fallback for browsers/contexts without clipboard access: drop the link
+    // into the address bar so the user can copy it manually.
+    history.replaceState(null, '', url)
+  }
+  showToast(t('link_copied'))
 }
 
 // ── Selection (sync between the piece list and the placed rects) ───────────────
@@ -304,13 +347,14 @@ function onKeydown(e: KeyboardEvent) {
 watch(pieces, () => saveState(), { deep: true })
 
 onMounted(() => {
-  loadState()
+  loadInitialState()
   window.addEventListener('keydown', onKeydown)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
   clearTimeout(saveTimer)
+  clearTimeout(toastTimer)
   saveStateNow()
 })
 </script>
@@ -457,6 +501,12 @@ onUnmounted(() => {
                 <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
               </svg>
               {{ t('clear_all') }}
+            </button>
+            <button class="btn btn-ghost" @click="copyShareLink" :title="t('share')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px">
+                <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>
+              </svg>
+              {{ t('share') }}
             </button>
             <button class="btn btn-primary" @click="calculate">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px">
@@ -654,5 +704,36 @@ onUnmounted(() => {
         </template>
       </main>
     </div>
+
+    <transition name="toast-fade">
+      <div v-if="toast" class="toast" role="status">{{ toast }}</div>
+    </transition>
   </div>
 </template>
+
+<style scoped>
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  background: rgba(20, 20, 22, 0.92);
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
+  z-index: 1000;
+  pointer-events: none;
+}
+.toast-fade-enter-active,
+.toast-fade-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.toast-fade-enter-from,
+.toast-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
+}
+</style>
