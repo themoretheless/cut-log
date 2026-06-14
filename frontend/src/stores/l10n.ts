@@ -1,6 +1,10 @@
 import { ref, computed } from 'vue'
 
-const lang = ref<'ru' | 'en'>('ru')
+function initialLang(): 'ru' | 'en' {
+  try { return localStorage.getItem('lang') === 'en' ? 'en' : 'ru' } catch { return 'ru' }
+}
+
+const lang = ref<'ru' | 'en'>(initialLang())
 
 const ru: Record<string, string> = {
   'app.title': 'CutLog — Оптимизатор раскроя фанеры',
@@ -12,9 +16,10 @@ const ru: Record<string, string> = {
   empty_hint: 'Добавьте детали и нажмите «Рассчитать»',
   unplaced_warn: 'Не удалось разместить:', piece_larger: 'Деталь больше листа.',
   invalid_dims: 'Введите корректные размеры.', qty_min: 'Количество должно быть ≥ 1.',
-  drag_hint: 'Перетащить', rotation: 'Поворот', 'export.all_pdf': 'Скачать всё PDF',
+  drag_hint: 'Перетащить', rotation: 'Поворот',
   'hotkey.add': 'Добавить', 'hotkey.calculate': 'Рассчитать',
-  'hotkey.undo': 'Отмена', 'hotkey.export': 'PDF',
+  'hotkey.undo': 'Отмена', 'hotkey.clear': 'Сбросить результаты',
+  'box.hotkey.nav': 'Деталь', 'box.hotkey.download': 'Скачать SVG', 'box.hotkey.reset': 'Сбросить вид',
   sheet_params: 'Параметры листа', sheet_preset: 'Стандартный размер',
   'preset.custom': 'Свой размер',
   'preset.2440x1220': '2440 × 1220 — Фанера стандарт',
@@ -71,8 +76,9 @@ const en: Record<string, string> = {
   empty_hint: 'Add pieces and click "Calculate"',
   unplaced_warn: 'Could not place:', piece_larger: 'Piece is larger than the sheet.',
   invalid_dims: 'Enter valid dimensions.', qty_min: 'Quantity must be ≥ 1.',
-  drag_hint: 'Drag', rotation: 'Rotation', 'export.all_pdf': 'Download all PDF',
-  'hotkey.add': 'Add', 'hotkey.calculate': 'Calculate', 'hotkey.undo': 'Undo', 'hotkey.export': 'PDF',
+  drag_hint: 'Drag', rotation: 'Rotation',
+  'hotkey.add': 'Add', 'hotkey.calculate': 'Calculate', 'hotkey.undo': 'Undo', 'hotkey.clear': 'Clear results',
+  'box.hotkey.nav': 'Piece', 'box.hotkey.download': 'Download SVG', 'box.hotkey.reset': 'Reset view',
   sheet_params: 'Sheet parameters', sheet_preset: 'Standard size', 'preset.custom': 'Custom size',
   'preset.2440x1220': '2440 × 1220 — Standard plywood', 'preset.2500x1250': '2500 × 1250 — Large plywood',
   'preset.1525x1525': '1525 × 1525 — Square plywood', 'preset.2800x2070': '2800 × 2070 — Laminated board / MDF',
@@ -112,6 +118,9 @@ export function useL10n() {
     if (lang.value === 'en' && en[key]) return en[key]
     return ru[key] ?? key
   }
-  const toggleLang = () => { lang.value = lang.value === 'ru' ? 'en' : 'ru' }
+  const toggleLang = () => {
+    lang.value = lang.value === 'ru' ? 'en' : 'ru'
+    try { localStorage.setItem('lang', lang.value) } catch { /* ignore */ }
+  }
   return { lang, t, toggleLang }
 }
