@@ -10,6 +10,15 @@ import { buildLayoutSvg, buildLayoutDxf, buildPrintHtml } from '@/lib/exportLayo
 import { buildShareUrl, readShareFromHash } from '@/lib/shareLink'
 import { parsePieceList } from '@/lib/parsePieceList'
 import { createHistory } from '@/lib/history'
+import {
+  type PieceSortMode,
+  findOversizedPieces,
+  pieceArea,
+  pieceMatchesQuery,
+  pieceTotalArea,
+  sortPiecesForEditor,
+  summarizePieces,
+} from '@/lib/pieceEditor'
 import { useL10n } from '@/stores/l10n'
 
 const { t } = useL10n()
@@ -61,6 +70,28 @@ const result = ref<CuttingResult | null>(null)
 const calculated = ref(false)
 let colorIdx = 0
 
+// ── Editor controls ──────────────────────────────────────────────────────────
+const pieceQuery = ref('')
+const pieceSortMode = ref<PieceSortMode>('manual')
+const commandPaletteOpen = ref(false)
+const commandQuery = ref('')
+const commandInputRef = ref<HTMLInputElement | null>(null)
+
+interface PaletteCommand {
+  id: string
+  label: string
+  shortcut?: string
+  disabled?: boolean
+  run: () => void | Promise<void>
+}
+
+interface PreflightCheck {
+  id: string
+  label: string
+  value: string
+  status: 'ok' | 'warn' | 'idle'
+}
+
 // ── Drag state ───────────────────────────────────────────────────────────────
 const dragStartIdx = ref(-1)
 const dragOverIdx = ref(-1)
@@ -108,14 +139,32 @@ function loadState() {
 
 // ── Undo / redo (snapshot-based, matches how editors model history) ────────────
 const undoHistory = createHistory<string>(serializeHomeState(currentState()))
+const historyTick = ref(0)
 let restoring = false
 let recordTimer: ReturnType<typeof setTimeout> | undefined
+
+function refreshHistoryState() {
+  historyTick.value++
+}
+
+const canUndo = computed(() => {
+  historyTick.value
+  return undoHistory.canUndo()
+})
+
+const canRedo = computed(() => {
+  historyTick.value
+  return undoHistory.canRedo()
+})
 
 // Coalesce bursts of edits (e.g. typing in a number field) into one entry.
 function recordHistory() {
   if (restoring) return
   clearTimeout(recordTimer)
-  recordTimer = setTimeout(() => undoHistory.snapshot(serializeHomeState(currentState())), 350)
+  recordTimer = setTimeout(() => {
+    undoHistory.snapshot(serializeHomeState(currentState()))
+    refreshHistoryState()
+  }, 350)
 }
 
 function restoreSnapshot(snap: string) {
@@ -132,12 +181,18 @@ function restoreSnapshot(snap: string) {
 
 function doUndo() {
   const snap = undoHistory.undo()
-  if (snap !== undefined) restoreSnapshot(snap)
+  if (snap !== undefined) {
+    restoreSnapshot(snap)
+    refreshHistoryState()
+  }
 }
 
 function doRedo() {
   const snap = undoHistory.redo()
-  if (snap !== undefined) restoreSnapshot(snap)
+  if (snap !== undefined) {
+    restoreSnapshot(snap)
+    refreshHistoryState()
+  }
 }
 
 // A shared link wins over saved state: open the linked project, then strip the
@@ -199,6 +254,7 @@ function importPieces() {
 function removePiece(p: CutPiece) {
   const idx = pieces.indexOf(p)
   if (idx >= 0) pieces.splice(idx, 1)
+  if (selectedPieceId.value === p.id) selectedPieceId.value = null
   saveState()
 }
 
@@ -206,6 +262,9 @@ function clearAll() {
   pieces.splice(0, pieces.length)
   result.value = null
   calculated.value = false
+  selectedPieceId.value = null
+  pieceQuery.value = ''
+  pieceSortMode.value = 'manual'
   colorIdx = 0
   saveState()
 }
@@ -268,8 +327,169 @@ async function copyShareLink() {
 
 // ── Selection (sync between the piece list and the placed rects) ───────────────
 const selectedPieceId = ref<string | null>(null)
+const selectedPiece = computed(() => pieces.find(p => p.id === selectedPieceId.value) ?? null)
 function toggleSelect(id: string) {
   selectedPieceId.value = selectedPieceId.value === id ? null : id
+}
+
+const pieceSummary = computed(() => summarizePieces(pieces))
+const oversizedPieces = computed(() => findOversizedPieces(pieces, sheetWidth.value, sheetHeight.value))
+const visiblePieces = computed(() => pieces
+  .map((piece, index) => ({ piece, index }))
+  .filter(({ piece }) => pieceMatchesQuery(piece, pieceQuery.value)))
+const hasPieceFilter = computed(() => pieceQuery.value.trim().length > 0)
+const unnamedPiecesCount = computed(() => pieces.filter(piece => !piece.label.trim()).length)
+const rotationLockedCount = computed(() => pieces.filter(piece => !piece.allowRotation).length)
+const preflightChecks = computed<PreflightCheck[]>(() => [
+  {
+    id: 'oversized',
+    label: t('preflight.oversized'),
+    value: String(oversizedPieces.value.length),
+    status: oversizedPieces.value.length ? 'warn' : 'ok',
+  },
+  {
+    id: 'unnamed',
+    label: t('preflight.unnamed'),
+    value: String(unnamedPiecesCount.value),
+    status: unnamedPiecesCount.value ? 'warn' : 'ok',
+  },
+  {
+    id: 'rotation',
+    label: t('preflight.rotation_locked'),
+    value: String(rotationLockedCount.value),
+    status: rotationLockedCount.value ? 'idle' : 'ok',
+  },
+  {
+    id: 'layout',
+    label: t('preflight.layout'),
+    value: result.value ? `${result.value.totalSheets} ${t('sheets')}` : t('preflight.not_calculated'),
+    status: result.value ? 'ok' : 'idle',
+  },
+])
+const selectedPiecePlacements = computed(() => {
+  if (!result.value || !selectedPieceId.value) return []
+  return result.value.sheets.flatMap(sheet =>
+    sheet.placedPieces
+      .filter(pp => pp.source.id === selectedPieceId.value)
+      .map(pp => ({
+        sheetIndex: sheet.index,
+        x: pp.x,
+        y: pp.y,
+        width: pp.width,
+        height: pp.height,
+        isRotated: pp.isRotated,
+      })),
+  )
+})
+const selectedPieceStats = computed(() => {
+  const piece = selectedPiece.value
+  if (!piece) return null
+  const placements = selectedPiecePlacements.value
+  return {
+    area: pieceArea(piece),
+    totalArea: pieceTotalArea(piece),
+    placements,
+    firstPlacement: placements[0],
+  }
+})
+
+function areaM2(areaMm2: number): string {
+  return (areaMm2 / 1_000_000).toFixed(2)
+}
+
+function setPieceSortMode(mode: PieceSortMode) {
+  pieceSortMode.value = mode
+  applyPieceSort()
+}
+
+function duplicatePiece(source = selectedPiece.value) {
+  if (!source) return
+  const idx = pieces.indexOf(source)
+  if (idx < 0) return
+  const color = PIECE_COLORS[colorIdx++ % PIECE_COLORS.length]
+  const copy = newPiece(source.label, source.width, source.height, source.quantity, source.allowRotation, color)
+  pieces.splice(idx + 1, 0, copy)
+  selectedPieceId.value = copy.id
+  saveState()
+  showToast(t('piece_duplicated'))
+}
+
+function deleteSelectedPiece() {
+  if (selectedPiece.value) removePiece(selectedPiece.value)
+}
+
+function clearSelection() {
+  selectedPieceId.value = null
+}
+
+function setVisibleRotation(allowRotation: boolean) {
+  if (!visiblePieces.value.length) return
+  for (const { piece } of visiblePieces.value) piece.allowRotation = allowRotation
+  saveState()
+  showToast(allowRotation ? t('rotation_enabled') : t('rotation_disabled'))
+}
+
+function applyPieceSort() {
+  if (pieceSortMode.value === 'manual') return
+  const sorted = sortPiecesForEditor(pieces, pieceSortMode.value)
+  pieces.splice(0, pieces.length, ...sorted)
+  saveState()
+  showToast(t('pieces_sorted'))
+}
+
+const paletteCommands = computed<PaletteCommand[]>(() => [
+  { id: 'calculate', label: t('calculate'), shortcut: 'Ctrl+Enter', disabled: !pieces.length, run: calculate },
+  { id: 'add', label: t('add_piece'), shortcut: 'Enter', run: addPiece },
+  { id: 'duplicate', label: t('duplicate_selected'), disabled: !selectedPiece.value, run: () => duplicatePiece() },
+  { id: 'delete', label: t('delete'), disabled: !selectedPiece.value, run: deleteSelectedPiece },
+  { id: 'import', label: t('command.open_import'), disabled: showImport.value, run: () => { showImport.value = true } },
+  { id: 'share', label: t('command.copy_share'), disabled: !pieces.length, run: copyShareLink },
+  { id: 'undo', label: t('hotkey.undo'), shortcut: 'Ctrl+Z', disabled: !canUndo.value, run: doUndo },
+  { id: 'redo', label: t('hotkey.redo'), shortcut: 'Ctrl+Shift+Z', disabled: !canRedo.value, run: doRedo },
+  { id: 'clear-filter', label: t('command.clear_filter'), disabled: !hasPieceFilter.value, run: () => { pieceQuery.value = '' } },
+  { id: 'sort-area', label: t('command.sort_area'), run: () => setPieceSortMode('area_desc') },
+  { id: 'sort-name', label: t('command.sort_name'), run: () => setPieceSortMode('name_asc') },
+  { id: 'sort-quantity', label: t('command.sort_quantity'), run: () => setPieceSortMode('quantity_desc') },
+  { id: 'rotation-on', label: t('command.rotation_visible_on'), disabled: !visiblePieces.value.length, run: () => setVisibleRotation(true) },
+  { id: 'rotation-off', label: t('command.rotation_visible_off'), disabled: !visiblePieces.value.length, run: () => setVisibleRotation(false) },
+  { id: 'clear-all', label: t('command.clear_all'), disabled: !pieces.length, run: clearAll },
+])
+
+const visiblePaletteCommands = computed(() => {
+  const q = commandQuery.value.trim().toLocaleLowerCase()
+  if (!q) return paletteCommands.value
+  return paletteCommands.value.filter(command => command.label.toLocaleLowerCase().includes(q))
+})
+
+function openCommandPalette() {
+  commandPaletteOpen.value = true
+  commandQuery.value = ''
+  nextTick(() => commandInputRef.value?.focus())
+}
+
+function closeCommandPalette() {
+  commandPaletteOpen.value = false
+}
+
+async function runPaletteCommand(command: PaletteCommand) {
+  if (command.disabled) return
+  closeCommandPalette()
+  await command.run()
+}
+
+function runFirstPaletteCommand() {
+  const command = visiblePaletteCommands.value.find(c => !c.disabled)
+  if (command) runPaletteCommand(command)
+}
+
+function onPaletteKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    runFirstPaletteCommand()
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    closeCommandPalette()
+  }
 }
 
 // ── Example project (one-click starter for the empty state) ────────────────────
@@ -306,6 +526,7 @@ function dropPiece(targetIdx: number) {
   const item = pieces[dragStartIdx.value]
   pieces.splice(dragStartIdx.value, 1)
   pieces.splice(Math.min(targetIdx, pieces.length), 0, item)
+  pieceSortMode.value = 'manual'
   dragStartIdx.value = -1
   dragOverIdx.value = -1
   saveState()
@@ -377,7 +598,13 @@ function strategyDisplayName(s: CuttingStrategy): string {
 
 // ── Keyboard shortcuts ───────────────────────────────────────────────────────
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
+  if (e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault()
+    openCommandPalette()
+  } else if (commandPaletteOpen.value && e.key === 'Escape') {
+    e.preventDefault()
+    closeCommandPalette()
+  } else if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
     // Only fire if not focused on an input that should handle Enter natively
     const tag = (e.target as HTMLElement)?.tagName
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
@@ -412,6 +639,7 @@ onMounted(() => {
   // Baseline the history on whatever was actually loaded (link/localStorage),
   // so the first undo can't step back into the pre-load default.
   undoHistory.reset(serializeHomeState(currentState()))
+  refreshHistoryState()
   window.addEventListener('keydown', onKeydown)
 })
 
@@ -434,6 +662,7 @@ onUnmounted(() => {
     <div class="hotkey-bar">
       <span><kbd>Enter</kbd> {{ t('hotkey.add') }}</span>
       <span><kbd>Ctrl</kbd>+<kbd>Enter</kbd> {{ t('hotkey.calculate') }}</span>
+      <span><kbd>Ctrl</kbd>+<kbd>K</kbd> {{ t('command_palette') }}</span>
       <span><kbd>Ctrl</kbd>+<kbd>Z</kbd> {{ t('hotkey.undo') }}</span>
       <span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> {{ t('hotkey.redo') }}</span>
       <span><kbd>Esc</kbd> {{ t('hotkey.clear') }}</span>
@@ -514,7 +743,7 @@ onUnmounted(() => {
               :placeholder="t('import_placeholder')"
             ></textarea>
             <p class="import-hint">{{ t('import_hint') }}</p>
-            <button class="btn btn-primary btn-sm" @click="importPieces" :disabled="!importText.trim()">
+            <button class="btn btn-primary btn-compact" @click="importPieces" :disabled="!importText.trim()">
               {{ t('import_add_all') }}
             </button>
           </div>
@@ -524,21 +753,122 @@ onUnmounted(() => {
       <main class="panel panel-result">
         <!-- Piece list -->
         <section v-if="pieces.length" class="card piece-list-top">
-          <h2>{{ t('piece_list') }}</h2>
+          <div class="piece-list-top-header">
+            <div>
+              <h2>{{ t('piece_list') }}</h2>
+              <p class="editor-subtitle">{{ pieceSummary.totalTypes }} {{ t('piece_types') }} · {{ pieceSummary.totalQuantity }} {{ t('pieces_short') }}</p>
+            </div>
+            <div class="history-actions">
+              <button class="btn btn-ghost btn-square" @click="openCommandPalette" :title="t('command_palette')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <path d="M4 7h16"/><path d="M4 12h10"/><path d="M4 17h7"/>
+                </svg>
+              </button>
+              <button class="btn btn-ghost btn-square" @click="doUndo" :disabled="!canUndo" :title="t('hotkey.undo')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 14 4 9l5-5"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/>
+                </svg>
+              </button>
+              <button class="btn btn-ghost btn-square" @click="doRedo" :disabled="!canRedo" :title="t('hotkey.redo')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m15 14 5-5-5-5"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="editor-summary">
+            <span class="metric-pill"><strong>{{ areaM2(pieceSummary.totalArea) }}</strong> {{ t('material_area') }}</span>
+            <span class="metric-pill"><strong>{{ areaM2(pieceSummary.largestPieceArea) }}</strong> {{ t('largest_piece') }}</span>
+            <span class="metric-pill"><strong>{{ pieceSummary.rotationEnabled }}/{{ pieceSummary.totalTypes }}</strong> {{ t('rotation') }}</span>
+          </div>
+
+          <div class="preflight-strip">
+            <span
+              v-for="check in preflightChecks"
+              :key="check.id"
+              class="preflight-item"
+              :class="`is-${check.status}`"
+            >
+              <strong>{{ check.value }}</strong>
+              {{ check.label }}
+            </span>
+          </div>
+
+          <div class="editor-toolbar">
+            <label class="toolbar-search">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
+              </svg>
+              <input v-model="pieceQuery" type="search" :placeholder="t('search_pieces')" />
+            </label>
+            <select class="form-select toolbar-select" v-model="pieceSortMode" @change="applyPieceSort">
+              <option value="manual">{{ t('sort.manual') }}</option>
+              <option value="area_desc">{{ t('sort.area_desc') }}</option>
+              <option value="name_asc">{{ t('sort.name_asc') }}</option>
+              <option value="quantity_desc">{{ t('sort.quantity_desc') }}</option>
+            </select>
+            <div class="toolbar-actions">
+              <button class="btn btn-ghost btn-tool" @click="duplicatePiece()" :disabled="!selectedPiece" :title="t('duplicate_selected')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
+                  <rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 0 1 2-2h10"/>
+                </svg>
+                {{ t('duplicate') }}
+              </button>
+              <button class="btn btn-ghost btn-square" @click="setVisibleRotation(true)" :disabled="!visiblePieces.length" :title="t('rotate_visible_on')">&#8635;</button>
+              <button class="btn btn-ghost btn-square" @click="setVisibleRotation(false)" :disabled="!visiblePieces.length" :title="t('rotate_visible_off')">&#8634;</button>
+            </div>
+          </div>
+
+          <div v-if="selectedPiece && selectedPieceStats" class="selected-inspector">
+            <div class="selected-inspector-main">
+              <span class="piece-color inspector-color" :style="{ background: selectedPiece.color }">{{ pieceIndex(selectedPiece) }}</span>
+              <div class="selected-inspector-title">
+                <strong>{{ selectedPiece.label.trim() || t('unnamed_piece') }}</strong>
+                <span>{{ selectedPiece.width.toFixed(0) }}&times;{{ selectedPiece.height.toFixed(0) }} mm · {{ selectedPiece.quantity }} {{ t('pieces_short') }}</span>
+              </div>
+            </div>
+            <div class="selected-inspector-metrics">
+              <span><strong>{{ areaM2(selectedPieceStats.area) }}</strong> {{ t('piece_area') }}</span>
+              <span><strong>{{ areaM2(selectedPieceStats.totalArea) }}</strong> {{ t('total_piece_area') }}</span>
+              <span><strong>{{ selectedPieceStats.placements.length }}/{{ selectedPiece.quantity }}</strong> {{ t('placed_count') }}</span>
+              <span v-if="selectedPieceStats.firstPlacement">
+                <strong>{{ t('sheet') }} {{ selectedPieceStats.firstPlacement.sheetIndex + 1 }}</strong>
+                {{ t('first_position') }}: {{ selectedPieceStats.firstPlacement.x.toFixed(0) }}, {{ selectedPieceStats.firstPlacement.y.toFixed(0) }}
+              </span>
+            </div>
+            <div class="selected-inspector-actions">
+              <button class="btn btn-ghost btn-compact" @click="duplicatePiece()">{{ t('duplicate') }}</button>
+              <button class="btn btn-danger btn-compact" @click="deleteSelectedPiece">{{ t('delete') }}</button>
+              <button class="btn btn-ghost btn-compact" @click="clearSelection">{{ t('clear_selection') }}</button>
+            </div>
+          </div>
+
+          <div v-if="oversizedPieces.length" class="alert alert-warn editor-alert">
+            <strong>{{ t('oversized_existing_warn') }}</strong>
+            <ul>
+              <li v-for="p in oversizedPieces" :key="p.id">
+                <template v-if="p.label.trim()">{{ p.label.trim() }} </template>({{ p.width.toFixed(0) }}&times;{{ p.height.toFixed(0) }})
+              </li>
+            </ul>
+          </div>
+
+          <p v-if="hasPieceFilter && !visiblePieces.length" class="piece-filter-empty">{{ t('no_matching_pieces') }}</p>
           <div
+            v-else
             class="piece-list piece-list-horizontal"
             :class="{ 'is-dragging': isDragging }"
             @dragleave="onDragLeave"
           >
             <div
-              v-for="(piece, i) in pieces"
-              :key="piece.id"
+              v-for="entry in visiblePieces"
+              :key="entry.piece.id"
               class="piece-item piece-item-editing"
-              :class="{ 'drag-over': dragOverIdx === i, 'is-dragging-item': dragStartIdx === i, selected: selectedPieceId === piece.id }"
+              :class="{ 'drag-over': dragOverIdx === entry.index, 'is-dragging-item': dragStartIdx === entry.index, selected: selectedPieceId === entry.piece.id }"
               draggable="true"
-              @dragstart="onDragStart(i)"
-              @dragover.prevent="onDragOver(i)"
-              @drop="dropPiece(i)"
+              @dragstart="onDragStart(entry.index)"
+              @dragover.prevent="onDragOver(entry.index)"
+              @drop="dropPiece(entry.index)"
               @dragend="onDragEnd"
             >
               <span class="drag-handle" :title="t('drag_hint')">
@@ -548,30 +878,30 @@ onUnmounted(() => {
                   <circle cx="9" cy="18" r="2"/><circle cx="15" cy="18" r="2"/>
                 </svg>
               </span>
-              <span class="piece-color" :style="{ background: piece.color, cursor: 'pointer' }" :title="t('highlight_hint')" @click="toggleSelect(piece.id)">{{ i + 1 }}</span>
+              <span class="piece-color" :style="{ background: entry.piece.color, cursor: 'pointer' }" :title="t('highlight_hint')" @click="toggleSelect(entry.piece.id)">{{ entry.index + 1 }}</span>
               <div class="piece-edit-fields">
-                <input class="piece-edit-label" type="text" v-model="piece.label" :placeholder="t('name')" />
+                <input class="piece-edit-label" type="text" v-model="entry.piece.label" :placeholder="t('name')" />
                 <div class="piece-edit-dims">
-                  <NumberField v-model="piece.width" :min="1" :step="1" />
+                  <NumberField v-model="entry.piece.width" :min="1" :step="1" />
                   <span class="unit">&times;</span>
-                  <NumberField v-model="piece.height" :min="1" :step="1" />
+                  <NumberField v-model="entry.piece.height" :min="1" :step="1" />
                   <span class="unit">mm</span>
                   <NumberField
-                    :model-value="piece.quantity"
-                    @update:model-value="v => piece.quantity = Math.max(1, Math.round(v))"
+                    :model-value="entry.piece.quantity"
+                    @update:model-value="v => entry.piece.quantity = Math.max(1, Math.round(v))"
                     :min="1"
                     :step="1"
                   />
                   <button
                     type="button"
                     class="btn btn-primary btn-sm piece-edit-rot"
-                    :class="{ 'rot-on': piece.allowRotation }"
+                    :class="{ 'rot-on': entry.piece.allowRotation }"
                     :title="t('rotation')"
-                    @click="piece.allowRotation = !piece.allowRotation"
+                    @click="entry.piece.allowRotation = !entry.piece.allowRotation"
                   >&#8635;</button>
                 </div>
               </div>
-              <button class="btn btn-danger btn-sm" @click="removePiece(piece)" :title="t('delete')">
+              <button class="btn btn-danger btn-sm" @click="removePiece(entry.piece)" :title="t('delete')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
                 </svg>
@@ -631,9 +961,9 @@ onUnmounted(() => {
           <!-- Export -->
           <div class="export-bar">
             <span class="export-label">{{ t('export') }}</span>
-            <button class="btn btn-ghost btn-sm" @click="exportSvg">SVG</button>
-            <button class="btn btn-ghost btn-sm" @click="exportDxf">DXF</button>
-            <button class="btn btn-ghost btn-sm" @click="printLayout">{{ t('export.print') }}</button>
+            <button class="btn btn-ghost btn-export" @click="exportSvg">SVG</button>
+            <button class="btn btn-ghost btn-export" @click="exportDxf">DXF</button>
+            <button class="btn btn-ghost btn-export" @click="printLayout">{{ t('export.print') }}</button>
           </div>
 
           <!-- Unplaced warnings -->
@@ -787,6 +1117,38 @@ onUnmounted(() => {
         </template>
       </main>
     </div>
+
+    <transition name="palette-fade">
+      <div v-if="commandPaletteOpen" class="command-palette-backdrop" @click.self="closeCommandPalette">
+        <div class="command-palette" role="dialog" aria-modal="true" :aria-label="t('command_palette')">
+          <label class="command-search">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
+            </svg>
+            <input
+              ref="commandInputRef"
+              v-model="commandQuery"
+              type="search"
+              :placeholder="t('command_search')"
+              @keydown="onPaletteKeydown"
+            />
+          </label>
+          <div class="command-list">
+            <button
+              v-for="command in visiblePaletteCommands"
+              :key="command.id"
+              class="command-item"
+              :disabled="command.disabled"
+              @click="runPaletteCommand(command)"
+            >
+              <span>{{ command.label }}</span>
+              <kbd v-if="command.shortcut">{{ command.shortcut }}</kbd>
+            </button>
+            <p v-if="!visiblePaletteCommands.length" class="command-empty">{{ t('command_no_results') }}</p>
+          </div>
+        </div>
+      </div>
+    </transition>
 
     <transition name="toast-fade">
       <div v-if="toast" class="toast" role="status">{{ toast }}</div>
