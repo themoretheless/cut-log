@@ -181,7 +181,7 @@ export function usePieceGallery(model: BoxModel) {
       } else if (gp.id === 'bot') {
         panels.push({ c: model.horizPts3D(0, model.BotD.value, Math.max(-Bevel, 0)), n: [0, 0, 1], t: thick, col: '#1abc9c', ec: '#148f77' })
       } else if (gp.id === 'back') {
-        panels.push({ c: model.backPts3D(0), n: [0, -1, 0], t: thick, col: '#8e44ad', ec: '#5b2c6f', h: model.backHoles3D(0).length > 0 ? model.backHoles3D(0) : undefined })
+        panels.push({ c: model.backPts3D(0), n: [0, -1, 0], t: thick, col: '#a855f7', ec: '#7d3c98', h: model.backHoles3D(0).length > 0 ? model.backHoles3D(0) : undefined })
       } else if (gp.id.startsWith('shelf')) {
         const si = parseInt(gp.id.replace('shelf', '')) || 0
         const sys = model.shelfSlotYs()
