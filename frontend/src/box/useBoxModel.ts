@@ -97,7 +97,7 @@ export function useBoxModel(t: Translate) {
       { w: SideOW.value, h: H.value, label: `${side}2`, color: 'var(--accent)' },
       { w: W.value, h: TopD.value, label: t('box.top_short'), color: '#27ae60' },
       { w: W.value, h: BotD.value, label: t('box.bottom_short'), color: Bevel.value !== 0 ? '#1abc9c' : '#27ae60' },
-      { w: W.value, h: H.value, label: t('box.back_short'), color: '#8e44ad' },
+      { w: W.value, h: H.value, label: t('box.back_short'), color: '#a855f7' },
     ]
     const sys = shelfSlotYs()
     for (let i = 0; i < sys.length; i++) {
@@ -158,7 +158,7 @@ export function useBoxModel(t: Translate) {
       list.push({ id: 'top', title: `${t('box.top_short')}`, count: 1, pw: W.value, ph: TopD.value, d: pathTopBottom(TopD.value, topOff), s: thumb(W.value, TopD.value), color: '#27ae60', xOff: 0 })
       list.push({ id: 'bot', title: `${t('box.bottom_short')}`, count: 1, pw: W.value, ph: BotD.value, d: pathTopBottom(BotD.value, botOff), s: thumb(W.value, BotD.value), color: '#1abc9c', xOff: 0 })
     }
-    list.push({ id: 'back', title: `${t('box.back_wall')}`, count: 1, pw: W.value, ph: H.value, d: pathBack(), s: thumb(W.value, H.value), color: '#8e44ad', xOff: 0 })
+    list.push({ id: 'back', title: `${t('box.back_wall')}`, count: 1, pw: W.value, ph: H.value, d: pathBack(), s: thumb(W.value, H.value), color: '#a855f7', xOff: 0 })
     const sys = shelfSlotYs()
     if (bv === 0 && sys.length > 0) {
       list.push({ id: 'shelf', title: `${t('box.shelf')}`, count: sys.length, pw: W.value, ph: D.value, d: pathShelf(), s: thumb(W.value, D.value), color: '#e67e22', xOff: 0 })
