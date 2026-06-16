@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import type { CutPiece } from '@/services/types'
 import {
+  addDimensionDelta,
   findOversizedPieces,
   pieceFitsSheet,
   pieceMatchesQuery,
+  roundDimensionsUp,
   sortPiecesForEditor,
   summarizePieces,
+  swapDimensions,
 } from './pieceEditor'
 
 function piece(overrides: Partial<CutPiece>): CutPiece {
@@ -62,5 +65,12 @@ describe('piece editor helpers', () => {
     expect(sortPiecesForEditor(source, 'name_asc').map(p => p.id)).toEqual(['b', 'a'])
     expect(sortPiecesForEditor(source, 'quantity_desc').map(p => p.id)).toEqual(['b', 'a'])
     expect(source.map(p => p.id)).toEqual(['a', 'b'])
+  })
+
+  it('transforms dimensions for quick editor actions', () => {
+    expect(addDimensionDelta({ width: 100, height: 50 }, 2)).toEqual({ width: 102, height: 52 })
+    expect(addDimensionDelta({ width: 2, height: 1 }, -5)).toEqual({ width: 1, height: 1 })
+    expect(swapDimensions({ width: 100, height: 50 })).toEqual({ width: 50, height: 100 })
+    expect(roundDimensionsUp({ width: 101, height: 50 }, 5)).toEqual({ width: 105, height: 50 })
   })
 })

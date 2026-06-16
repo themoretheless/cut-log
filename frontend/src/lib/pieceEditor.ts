@@ -10,8 +10,17 @@ export interface PieceSummary {
   rotationEnabled: number
 }
 
+export interface PieceDimensions {
+  width: number
+  height: number
+}
+
 function normalized(value: string): string {
   return value.trim().toLocaleLowerCase()
+}
+
+function cleanDimension(value: number): number {
+  return Math.max(1, Math.round(value))
 }
 
 export function pieceArea(piece: CutPiece): number {
@@ -84,4 +93,26 @@ export function sortPiecesForEditor(pieces: readonly CutPiece[], mode: PieceSort
   })
 
   return sorted
+}
+
+export function addDimensionDelta(dimensions: PieceDimensions, delta: number): PieceDimensions {
+  return {
+    width: cleanDimension(dimensions.width + delta),
+    height: cleanDimension(dimensions.height + delta),
+  }
+}
+
+export function swapDimensions(dimensions: PieceDimensions): PieceDimensions {
+  return {
+    width: cleanDimension(dimensions.height),
+    height: cleanDimension(dimensions.width),
+  }
+}
+
+export function roundDimensionsUp(dimensions: PieceDimensions, step: number): PieceDimensions {
+  const cleanStep = Math.max(1, Math.round(step))
+  return {
+    width: cleanDimension(Math.ceil(dimensions.width / cleanStep) * cleanStep),
+    height: cleanDimension(Math.ceil(dimensions.height / cleanStep) * cleanStep),
+  }
 }

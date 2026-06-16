@@ -11,13 +11,25 @@ import { buildShareUrl, readShareFromHash } from '@/lib/shareLink'
 import { parsePieceList } from '@/lib/parsePieceList'
 import { createHistory } from '@/lib/history'
 import {
+  type ProjectSnapshot,
+  PROJECT_SNAPSHOTS_KEY,
+  createProjectSnapshot,
+  parseProjectSnapshots,
+  removeProjectSnapshot,
+  serializeProjectSnapshots,
+  upsertProjectSnapshot,
+} from '@/lib/projectSnapshots'
+import {
   type PieceSortMode,
+  addDimensionDelta,
   findOversizedPieces,
   pieceArea,
   pieceMatchesQuery,
   pieceTotalArea,
+  roundDimensionsUp,
   sortPiecesForEditor,
   summarizePieces,
+  swapDimensions,
 } from '@/lib/pieceEditor'
 import { useL10n } from '@/stores/l10n'
 
@@ -76,6 +88,10 @@ const pieceSortMode = ref<PieceSortMode>('manual')
 const commandPaletteOpen = ref(false)
 const commandQuery = ref('')
 const commandInputRef = ref<HTMLInputElement | null>(null)
+const projectSnapshots = ref<ProjectSnapshot[]>([])
+const snapshotName = ref('')
+const transformStep = ref(2)
+const roundStep = ref(5)
 
 interface PaletteCommand {
   id: string
@@ -135,6 +151,16 @@ function applyState(saved: HomeState) {
 function loadState() {
   const saved = parseHomeState(localStorage.getItem(HOME_STATE_KEY))
   if (saved) applyState(saved)
+}
+
+function loadProjectSnapshots() {
+  projectSnapshots.value = parseProjectSnapshots(localStorage.getItem(PROJECT_SNAPSHOTS_KEY))
+}
+
+function saveProjectSnapshotsNow() {
+  try {
+    localStorage.setItem(PROJECT_SNAPSHOTS_KEY, serializeProjectSnapshots(projectSnapshots.value))
+  } catch { /* ignore */ }
 }
 
 // ── Undo / redo (snapshot-based, matches how editors model history) ────────────
@@ -397,6 +423,62 @@ function areaM2(areaMm2: number): string {
   return (areaMm2 / 1_000_000).toFixed(2)
 }
 
+function snapshotSummaryText(): string {
+  return `${pieceSummary.value.totalTypes} ${t('piece_types')} · ${pieceSummary.value.totalQuantity} ${t('pieces_short')} · ${areaM2(pieceSummary.value.totalArea)} ${t('material_area')}`
+}
+
+function formatSnapshotDate(createdAt: string): string {
+  const date = new Date(createdAt)
+  return Number.isNaN(date.getTime()) ? createdAt : date.toLocaleString()
+}
+
+function saveProjectSnapshot() {
+  if (!pieces.length) return
+  const snapshot = createProjectSnapshot({
+    id: crypto.randomUUID(),
+    name: snapshotName.value.trim() || `${t('snapshot.default_name')} ${projectSnapshots.value.length + 1}`,
+    createdAt: new Date().toISOString(),
+    summary: snapshotSummaryText(),
+    state: currentState(),
+  })
+  projectSnapshots.value = upsertProjectSnapshot(projectSnapshots.value, snapshot)
+  snapshotName.value = ''
+  saveProjectSnapshotsNow()
+  showToast(t('snapshot_saved'))
+}
+
+function saveAutoProjectSnapshot(name: string) {
+  if (!pieces.length) return
+  const snapshot = createProjectSnapshot({
+    id: crypto.randomUUID(),
+    name,
+    createdAt: new Date().toISOString(),
+    summary: snapshotSummaryText(),
+    state: currentState(),
+  })
+  projectSnapshots.value = upsertProjectSnapshot(projectSnapshots.value, snapshot)
+  saveProjectSnapshotsNow()
+}
+
+function restoreProjectSnapshot(snapshot: ProjectSnapshot) {
+  applyState(snapshot.state)
+  selectedPieceId.value = null
+  pieceQuery.value = ''
+  pieceSortMode.value = 'manual'
+  result.value = null
+  calculated.value = false
+  undoHistory.reset(serializeHomeState(currentState()))
+  refreshHistoryState()
+  saveStateNow()
+  showToast(t('snapshot_restored'))
+}
+
+function deleteProjectSnapshot(snapshot: ProjectSnapshot) {
+  projectSnapshots.value = removeProjectSnapshot(projectSnapshots.value, snapshot.id)
+  saveProjectSnapshotsNow()
+  showToast(t('snapshot_deleted'))
+}
+
 function setPieceSortMode(mode: PieceSortMode) {
   pieceSortMode.value = mode
   applyPieceSort()
@@ -429,6 +511,37 @@ function setVisibleRotation(allowRotation: boolean) {
   showToast(allowRotation ? t('rotation_enabled') : t('rotation_disabled'))
 }
 
+function mutateVisibleDimensions(
+  transform: (piece: CutPiece) => { width: number; height: number },
+  toastKey: string,
+) {
+  if (!visiblePieces.value.length) return
+  saveAutoProjectSnapshot(t('snapshot.auto_before_transform'))
+  for (const { piece } of visiblePieces.value) {
+    const next = transform(piece)
+    piece.width = next.width
+    piece.height = next.height
+  }
+  result.value = null
+  calculated.value = false
+  saveState()
+  showToast(t(toastKey))
+}
+
+function addVisibleAllowance(sign = 1) {
+  const delta = Math.max(1, Math.round(transformStep.value)) * sign
+  mutateVisibleDimensions(piece => addDimensionDelta(piece, delta), 'transform_done')
+}
+
+function swapVisibleDimensions() {
+  mutateVisibleDimensions(piece => swapDimensions(piece), 'transform_done')
+}
+
+function roundVisibleDimensions() {
+  const step = Math.max(1, Math.round(roundStep.value))
+  mutateVisibleDimensions(piece => roundDimensionsUp(piece, step), 'transform_done')
+}
+
 function applyPieceSort() {
   if (pieceSortMode.value === 'manual') return
   const sorted = sortPiecesForEditor(pieces, pieceSortMode.value)
@@ -444,6 +557,8 @@ const paletteCommands = computed<PaletteCommand[]>(() => [
   { id: 'delete', label: t('delete'), disabled: !selectedPiece.value, run: deleteSelectedPiece },
   { id: 'import', label: t('command.open_import'), disabled: showImport.value, run: () => { showImport.value = true } },
   { id: 'share', label: t('command.copy_share'), disabled: !pieces.length, run: copyShareLink },
+  { id: 'snapshot-save', label: t('command.snapshot_save'), disabled: !pieces.length, run: saveProjectSnapshot },
+  { id: 'snapshot-restore', label: t('command.snapshot_restore_latest'), disabled: !projectSnapshots.value.length, run: () => restoreProjectSnapshot(projectSnapshots.value[0]) },
   { id: 'undo', label: t('hotkey.undo'), shortcut: 'Ctrl+Z', disabled: !canUndo.value, run: doUndo },
   { id: 'redo', label: t('hotkey.redo'), shortcut: 'Ctrl+Shift+Z', disabled: !canRedo.value, run: doRedo },
   { id: 'clear-filter', label: t('command.clear_filter'), disabled: !hasPieceFilter.value, run: () => { pieceQuery.value = '' } },
@@ -452,6 +567,10 @@ const paletteCommands = computed<PaletteCommand[]>(() => [
   { id: 'sort-quantity', label: t('command.sort_quantity'), run: () => setPieceSortMode('quantity_desc') },
   { id: 'rotation-on', label: t('command.rotation_visible_on'), disabled: !visiblePieces.value.length, run: () => setVisibleRotation(true) },
   { id: 'rotation-off', label: t('command.rotation_visible_off'), disabled: !visiblePieces.value.length, run: () => setVisibleRotation(false) },
+  { id: 'transform-add', label: t('command.transform_add'), disabled: !visiblePieces.value.length, run: () => addVisibleAllowance(1) },
+  { id: 'transform-sub', label: t('command.transform_sub'), disabled: !visiblePieces.value.length, run: () => addVisibleAllowance(-1) },
+  { id: 'transform-swap', label: t('command.transform_swap'), disabled: !visiblePieces.value.length, run: swapVisibleDimensions },
+  { id: 'transform-round', label: t('command.transform_round'), disabled: !visiblePieces.value.length, run: roundVisibleDimensions },
   { id: 'clear-all', label: t('command.clear_all'), disabled: !pieces.length, run: clearAll },
 ])
 
@@ -636,6 +755,7 @@ watch([sheetWidth, sheetHeight, kerf, pieces], () => {
 
 onMounted(() => {
   loadInitialState()
+  loadProjectSnapshots()
   // Baseline the history on whatever was actually loaded (link/localStorage),
   // so the first undo can't step back into the pre-load default.
   undoHistory.reset(serializeHomeState(currentState()))
@@ -748,6 +868,40 @@ onUnmounted(() => {
             </button>
           </div>
         </section>
+
+        <!-- Project versions -->
+        <section class="card snapshot-card">
+          <div class="snapshot-head">
+            <h2>{{ t('snapshots') }}</h2>
+            <span>{{ projectSnapshots.length }}/8</span>
+          </div>
+          <div class="snapshot-save-row">
+            <input
+              v-model="snapshotName"
+              type="text"
+              class="snapshot-name-input"
+              :placeholder="t('snapshot_name_placeholder')"
+              @keydown.enter.prevent="saveProjectSnapshot"
+            />
+            <button class="btn btn-primary btn-compact" @click="saveProjectSnapshot" :disabled="!pieces.length">{{ t('save') }}</button>
+          </div>
+          <p class="snapshot-hint">{{ t('snapshot_hint') }}</p>
+          <div v-if="projectSnapshots.length" class="snapshot-list">
+            <div v-for="snapshot in projectSnapshots" :key="snapshot.id" class="snapshot-item">
+              <button type="button" class="snapshot-main" @click="restoreProjectSnapshot(snapshot)">
+                <strong>{{ snapshot.name }}</strong>
+                <span>{{ snapshot.summary }}</span>
+                <small>{{ formatSnapshotDate(snapshot.createdAt) }}</small>
+              </button>
+              <button class="btn btn-danger btn-sm" @click="deleteProjectSnapshot(snapshot)" :title="t('delete')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <p v-else class="snapshot-empty">{{ t('snapshot_empty') }}</p>
+        </section>
       </aside>
 
       <main class="panel panel-result">
@@ -817,6 +971,31 @@ onUnmounted(() => {
               </button>
               <button class="btn btn-ghost btn-square" @click="setVisibleRotation(true)" :disabled="!visiblePieces.length" :title="t('rotate_visible_on')">&#8635;</button>
               <button class="btn btn-ghost btn-square" @click="setVisibleRotation(false)" :disabled="!visiblePieces.length" :title="t('rotate_visible_off')">&#8634;</button>
+            </div>
+          </div>
+
+          <div class="transform-strip">
+            <div class="transform-group">
+              <span>{{ t('transform.allowance') }}</span>
+              <NumberField
+                :model-value="transformStep"
+                @update:model-value="v => transformStep = Math.max(1, Math.round(v))"
+                :min="1"
+                :step="1"
+              />
+              <button class="btn btn-ghost btn-square" @click="addVisibleAllowance(1)" :disabled="!visiblePieces.length" :title="t('transform_add_visible')">+</button>
+              <button class="btn btn-ghost btn-square" @click="addVisibleAllowance(-1)" :disabled="!visiblePieces.length" :title="t('transform_sub_visible')">−</button>
+            </div>
+            <div class="transform-group">
+              <span>{{ t('transform.round') }}</span>
+              <NumberField
+                :model-value="roundStep"
+                @update:model-value="v => roundStep = Math.max(1, Math.round(v))"
+                :min="1"
+                :step="1"
+              />
+              <button class="btn btn-ghost btn-square" @click="roundVisibleDimensions" :disabled="!visiblePieces.length" :title="t('transform_round_visible')">⌈</button>
+              <button class="btn btn-ghost btn-square" @click="swapVisibleDimensions" :disabled="!visiblePieces.length" :title="t('transform_swap_visible')">⇄</button>
             </div>
           </div>
 
