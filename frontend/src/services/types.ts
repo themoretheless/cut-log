@@ -6,6 +6,7 @@ export interface CutPiece {
   quantity: number
   allowRotation: boolean
   color: string
+  locked?: boolean
 }
 
 export interface PlacedPiece {

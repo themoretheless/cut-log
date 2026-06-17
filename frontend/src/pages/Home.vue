@@ -92,6 +92,18 @@ const projectSnapshots = ref<ProjectSnapshot[]>([])
 const snapshotName = ref('')
 const transformStep = ref(2)
 const roundStep = ref(5)
+const quickFilterMode = ref<QuickFilterMode>('all')
+const operationLog = ref<OperationEntry[]>([])
+const operationQuery = ref('')
+const lastBulkDiff = ref<BulkDiff | null>(null)
+const snapshotCompare = ref<SnapshotComparison | null>(null)
+const minMachineCut = ref(30)
+
+const ALLOWANCE_PRESETS = [1, 2, 5]
+const OPERATION_LOG_KEY = 'operation_log'
+const OPERATION_LOG_LIMIT = 14
+
+type QuickFilterMode = 'all' | 'unnamed' | 'rotation_off' | 'oversized' | 'locked' | 'machine'
 
 interface PaletteCommand {
   id: string
@@ -106,6 +118,33 @@ interface PreflightCheck {
   label: string
   value: string
   status: 'ok' | 'warn' | 'idle'
+}
+
+interface OperationEntry {
+  id: string
+  label: string
+  detail: string
+  createdAt: string
+}
+
+interface BulkDiff {
+  title: string
+  changed: number
+  skipped: number
+  beforeArea: string
+  afterArea: string
+  sampleBefore: string
+  sampleAfter: string
+}
+
+interface SnapshotComparison {
+  name: string
+  piecesDelta: number
+  areaDelta: string
+  added: number
+  removed: number
+  changed: number
+  sheetChanged: boolean
 }
 
 // ── Drag state ───────────────────────────────────────────────────────────────
@@ -161,6 +200,56 @@ function saveProjectSnapshotsNow() {
   try {
     localStorage.setItem(PROJECT_SNAPSHOTS_KEY, serializeProjectSnapshots(projectSnapshots.value))
   } catch { /* ignore */ }
+}
+
+function validOperationEntry(value: any): OperationEntry | null {
+  if (!value || typeof value !== 'object') return null
+  if (typeof value.label !== 'string' || typeof value.createdAt !== 'string') return null
+  return {
+    id: typeof value.id === 'string' && value.id ? value.id : crypto.randomUUID(),
+    label: value.label.slice(0, 80),
+    detail: typeof value.detail === 'string' ? value.detail.slice(0, 140) : '',
+    createdAt: value.createdAt,
+  }
+}
+
+function loadOperationLog() {
+  let raw = ''
+  try {
+    raw = localStorage.getItem(OPERATION_LOG_KEY) ?? ''
+  } catch {
+    raw = ''
+  }
+  if (!raw) return
+  try {
+    const parsed = JSON.parse(raw)
+    operationLog.value = Array.isArray(parsed)
+      ? parsed.map(validOperationEntry).filter((entry: OperationEntry | null): entry is OperationEntry => entry !== null).slice(0, OPERATION_LOG_LIMIT)
+      : []
+  } catch {
+    operationLog.value = []
+  }
+}
+
+function saveOperationLogNow() {
+  try {
+    localStorage.setItem(OPERATION_LOG_KEY, JSON.stringify(operationLog.value))
+  } catch { /* ignore */ }
+}
+
+function recordOperation(label: string, detail = '') {
+  operationLog.value = [{
+    id: crypto.randomUUID(),
+    label,
+    detail,
+    createdAt: new Date().toISOString(),
+  }, ...operationLog.value].slice(0, OPERATION_LOG_LIMIT)
+  saveOperationLogNow()
+}
+
+function clearOperationLog() {
+  operationLog.value = []
+  saveOperationLogNow()
 }
 
 // ── Undo / redo (snapshot-based, matches how editors model history) ────────────
@@ -244,13 +333,17 @@ function addPiece() {
   addError.value = ''
 
   const color = PIECE_COLORS[colorIdx++ % PIECE_COLORS.length]
-  pieces.push(newPiece(newLabel.value, newWidth.value, newHeight.value, newQty.value, newAllowRotation.value, color))
+  const addedLabel = newLabel.value
+  const addedWidth = newWidth.value
+  const addedHeight = newHeight.value
+  pieces.push(newPiece(addedLabel, addedWidth, addedHeight, newQty.value, newAllowRotation.value, color))
 
   newLabel.value = ''
   newWidth.value = 400
   newHeight.value = 300
   newQty.value = 1
   saveState()
+  recordOperation(t('operation.add_piece'), `${addedLabel || t('unnamed_piece')} · ${addedWidth}×${addedHeight}`)
 }
 
 // ── Bulk import (paste a cut list from a spreadsheet) ──────────────────────────
@@ -264,6 +357,7 @@ function importPieces() {
     return
   }
   addError.value = ''
+  saveAutoProjectSnapshot(t('snapshot.auto_before_import'))
   for (const r of rows) {
     const color = PIECE_COLORS[colorIdx++ % PIECE_COLORS.length]
     pieces.push(newPiece(r.label, r.width, r.height, r.quantity, true, color))
@@ -275,29 +369,45 @@ function importPieces() {
     ? t('import_added_skipped').replace('{0}', String(rows.length)).replace('{1}', String(skipped))
     : t('import_added').replace('{0}', String(rows.length))
   showToast(msg)
+  recordOperation(t('operation.import'), skipped
+    ? t('operation.import_detail_skipped').replace('{0}', String(rows.length)).replace('{1}', String(skipped))
+    : t('operation.import_detail').replace('{0}', String(rows.length)))
 }
 
 function removePiece(p: CutPiece) {
+  saveAutoProjectSnapshot(t('snapshot.auto_before_delete'))
   const idx = pieces.indexOf(p)
   if (idx >= 0) pieces.splice(idx, 1)
   if (selectedPieceId.value === p.id) selectedPieceId.value = null
   saveState()
+  recordOperation(t('operation.delete_piece'), p.label.trim() || t('unnamed_piece'))
 }
 
 function clearAll() {
+  saveAutoProjectSnapshot(t('snapshot.auto_before_clear'))
+  const count = pieces.length
   pieces.splice(0, pieces.length)
   result.value = null
   calculated.value = false
   selectedPieceId.value = null
   pieceQuery.value = ''
   pieceSortMode.value = 'manual'
+  quickFilterMode.value = 'all'
+  lastBulkDiff.value = null
   colorIdx = 0
   saveState()
+  recordOperation(t('operation.clear'), t('operation.clear_detail').replace('{0}', String(count)))
 }
 
 async function calculate() {
   calculated.value = true
   result.value = await optimize(sheetWidth.value, sheetHeight.value, [...pieces], kerf.value, selectedStrategy.value)
+  if (result.value) {
+    recordOperation(
+      t('operation.calculate'),
+      `${result.value.totalSheets} ${t('sheets')} · ${result.value.overallEfficiency.toFixed(1)}%`,
+    )
+  }
 }
 
 // ── Export (cut-ready SVG / DXF / print) ───────────────────────────────────────
@@ -349,6 +459,7 @@ async function copyShareLink() {
     history.replaceState(null, '', url)
   }
   showToast(t('link_copied'))
+  recordOperation(t('operation.share'), t('operation.share_detail'))
 }
 
 // ── Selection (sync between the piece list and the placed rects) ───────────────
@@ -360,12 +471,57 @@ function toggleSelect(id: string) {
 
 const pieceSummary = computed(() => summarizePieces(pieces))
 const oversizedPieces = computed(() => findOversizedPieces(pieces, sheetWidth.value, sheetHeight.value))
-const visiblePieces = computed(() => pieces
-  .map((piece, index) => ({ piece, index }))
-  .filter(({ piece }) => pieceMatchesQuery(piece, pieceQuery.value)))
-const hasPieceFilter = computed(() => pieceQuery.value.trim().length > 0)
+const lockedPiecesCount = computed(() => pieces.filter(piece => piece.locked).length)
+const smallMachinePieces = computed(() => pieces.filter(piece => piece.width < minMachineCut.value || piece.height < minMachineCut.value))
 const unnamedPiecesCount = computed(() => pieces.filter(piece => !piece.label.trim()).length)
 const rotationLockedCount = computed(() => pieces.filter(piece => !piece.allowRotation).length)
+
+function pieceMatchesQuickFilter(piece: CutPiece): boolean {
+  if (quickFilterMode.value === 'unnamed') return !piece.label.trim()
+  if (quickFilterMode.value === 'rotation_off') return !piece.allowRotation
+  if (quickFilterMode.value === 'oversized') return oversizedPieces.value.some(item => item.id === piece.id)
+  if (quickFilterMode.value === 'locked') return piece.locked === true
+  if (quickFilterMode.value === 'machine') return piece.width < minMachineCut.value || piece.height < minMachineCut.value
+  return true
+}
+
+const visiblePieces = computed(() => pieces
+  .map((piece, index) => ({ piece, index }))
+  .filter(({ piece }) => pieceMatchesQuery(piece, pieceQuery.value) && pieceMatchesQuickFilter(piece)))
+const visibleEditablePieces = computed(() => visiblePieces.value.filter(({ piece }) => !piece.locked))
+const visibleLockedCount = computed(() => visiblePieces.value.length - visibleEditablePieces.value.length)
+const hasPieceFilter = computed(() => pieceQuery.value.trim().length > 0 || quickFilterMode.value !== 'all')
+const quickFilters = computed<{ id: QuickFilterMode; label: string; count: number }[]>(() => [
+  { id: 'all', label: t('filter.all'), count: pieces.length },
+  { id: 'unnamed', label: t('filter.unnamed'), count: unnamedPiecesCount.value },
+  { id: 'rotation_off', label: t('filter.rotation_off'), count: rotationLockedCount.value },
+  { id: 'oversized', label: t('filter.oversized'), count: oversizedPieces.value.length },
+  { id: 'locked', label: t('filter.locked'), count: lockedPiecesCount.value },
+  { id: 'machine', label: t('filter.machine'), count: smallMachinePieces.value.length },
+])
+const readinessIssues = computed(() => {
+  const issues: string[] = []
+  if (!pieces.length) return [t('readiness.empty')]
+  if (oversizedPieces.value.length) issues.push(t('readiness.oversized').replace('{0}', String(oversizedPieces.value.length)))
+  if (smallMachinePieces.value.length) issues.push(t('readiness.machine').replace('{0}', String(smallMachinePieces.value.length)))
+  if (unnamedPiecesCount.value) issues.push(t('readiness.unnamed').replace('{0}', String(unnamedPiecesCount.value)))
+  if (!result.value) issues.push(t('readiness.needs_layout'))
+  if (result.value?.unplacedPieces.length) issues.push(t('readiness.unplaced').replace('{0}', String(result.value.unplacedPieces.length)))
+  return issues
+})
+const readinessScore = computed(() => {
+  if (!pieces.length) return 0
+  let score = 100
+  score -= oversizedPieces.value.length ? 30 : 0
+  score -= smallMachinePieces.value.length ? 18 : 0
+  score -= unnamedPiecesCount.value ? 12 : 0
+  score -= result.value ? 0 : 18
+  score -= result.value?.unplacedPieces.length ? 24 : 0
+  if (result.value && result.value.overallEfficiency < 70) score -= 8
+  return Math.max(0, Math.min(100, score))
+})
+const readinessStatus = computed(() => readinessScore.value >= 86 ? 'ok' : readinessScore.value >= 60 ? 'idle' : 'warn')
+const readinessMessage = computed(() => readinessIssues.value[0] ?? t('readiness.ready'))
 const preflightChecks = computed<PreflightCheck[]>(() => [
   {
     id: 'oversized',
@@ -384,6 +540,18 @@ const preflightChecks = computed<PreflightCheck[]>(() => [
     label: t('preflight.rotation_locked'),
     value: String(rotationLockedCount.value),
     status: rotationLockedCount.value ? 'idle' : 'ok',
+  },
+  {
+    id: 'locked',
+    label: t('preflight.locked'),
+    value: String(lockedPiecesCount.value),
+    status: lockedPiecesCount.value ? 'idle' : 'ok',
+  },
+  {
+    id: 'machine',
+    label: t('preflight.machine'),
+    value: String(smallMachinePieces.value.length),
+    status: smallMachinePieces.value.length ? 'warn' : 'ok',
   },
   {
     id: 'layout',
@@ -432,6 +600,60 @@ function formatSnapshotDate(createdAt: string): string {
   return Number.isNaN(date.getTime()) ? createdAt : date.toLocaleString()
 }
 
+function formatOperationDate(createdAt: string): string {
+  return formatSnapshotDate(createdAt)
+}
+
+function stateArea(state: HomeState): number {
+  return state.pieces.reduce((sum, piece) => sum + pieceArea(piece) * piece.quantity, 0)
+}
+
+function buildSnapshotComparison(snapshot: ProjectSnapshot): SnapshotComparison {
+  const current = currentState()
+  const currentById = new Map(current.pieces.map(piece => [piece.id, piece]))
+  const snapshotById = new Map(snapshot.state.pieces.map(piece => [piece.id, piece]))
+  let changed = 0
+  for (const [id, piece] of currentById) {
+    const oldPiece = snapshotById.get(id)
+    if (!oldPiece) continue
+    if (
+      piece.label !== oldPiece.label
+      || piece.width !== oldPiece.width
+      || piece.height !== oldPiece.height
+      || piece.quantity !== oldPiece.quantity
+      || piece.allowRotation !== oldPiece.allowRotation
+      || piece.locked !== oldPiece.locked
+    ) changed++
+  }
+
+  const areaDelta = stateArea(current) - stateArea(snapshot.state)
+  return {
+    name: snapshot.name,
+    piecesDelta: current.pieces.length - snapshot.state.pieces.length,
+    areaDelta: `${areaDelta >= 0 ? '+' : ''}${areaM2(areaDelta)} ${t('material_area')}`,
+    added: current.pieces.filter(piece => !snapshotById.has(piece.id)).length,
+    removed: snapshot.state.pieces.filter(piece => !currentById.has(piece.id)).length,
+    changed,
+    sheetChanged: current.sheetWidth !== snapshot.state.sheetWidth
+      || current.sheetHeight !== snapshot.state.sheetHeight
+      || current.kerf !== snapshot.state.kerf,
+  }
+}
+
+function compareProjectSnapshot(snapshot: ProjectSnapshot) {
+  snapshotCompare.value = buildSnapshotComparison(snapshot)
+  recordOperation(t('operation.compare_snapshot'), snapshot.name)
+}
+
+const filteredOperationLog = computed(() => {
+  const query = operationQuery.value.trim().toLocaleLowerCase()
+  if (!query) return operationLog.value
+  return operationLog.value.filter(entry =>
+    entry.label.toLocaleLowerCase().includes(query)
+    || entry.detail.toLocaleLowerCase().includes(query),
+  )
+})
+
 function saveProjectSnapshot() {
   if (!pieces.length) return
   const snapshot = createProjectSnapshot({
@@ -445,6 +667,7 @@ function saveProjectSnapshot() {
   snapshotName.value = ''
   saveProjectSnapshotsNow()
   showToast(t('snapshot_saved'))
+  recordOperation(t('operation.save_snapshot'), snapshot.name)
 }
 
 function saveAutoProjectSnapshot(name: string) {
@@ -461,27 +684,38 @@ function saveAutoProjectSnapshot(name: string) {
 }
 
 function restoreProjectSnapshot(snapshot: ProjectSnapshot) {
+  saveAutoProjectSnapshot(t('snapshot.auto_before_restore'))
+  snapshotCompare.value = buildSnapshotComparison(snapshot)
   applyState(snapshot.state)
   selectedPieceId.value = null
   pieceQuery.value = ''
+  quickFilterMode.value = 'all'
   pieceSortMode.value = 'manual'
   result.value = null
   calculated.value = false
+  lastBulkDiff.value = null
   undoHistory.reset(serializeHomeState(currentState()))
   refreshHistoryState()
   saveStateNow()
   showToast(t('snapshot_restored'))
+  recordOperation(t('operation.restore_snapshot'), snapshot.name)
 }
 
 function deleteProjectSnapshot(snapshot: ProjectSnapshot) {
   projectSnapshots.value = removeProjectSnapshot(projectSnapshots.value, snapshot.id)
   saveProjectSnapshotsNow()
   showToast(t('snapshot_deleted'))
+  recordOperation(t('operation.delete_snapshot'), snapshot.name)
 }
 
 function setPieceSortMode(mode: PieceSortMode) {
   pieceSortMode.value = mode
   applyPieceSort()
+}
+
+function clearPieceFilters() {
+  pieceQuery.value = ''
+  quickFilterMode.value = 'all'
 }
 
 function duplicatePiece(source = selectedPiece.value) {
@@ -490,10 +724,12 @@ function duplicatePiece(source = selectedPiece.value) {
   if (idx < 0) return
   const color = PIECE_COLORS[colorIdx++ % PIECE_COLORS.length]
   const copy = newPiece(source.label, source.width, source.height, source.quantity, source.allowRotation, color)
+  if (source.locked) copy.locked = true
   pieces.splice(idx + 1, 0, copy)
   selectedPieceId.value = copy.id
   saveState()
   showToast(t('piece_duplicated'))
+  recordOperation(t('operation.duplicate_piece'), source.label.trim() || t('unnamed_piece'))
 }
 
 function deleteSelectedPiece() {
@@ -504,50 +740,97 @@ function clearSelection() {
   selectedPieceId.value = null
 }
 
+function togglePieceLock(piece: CutPiece) {
+  if (piece.locked) delete piece.locked
+  else piece.locked = true
+  saveState()
+  showToast(piece.locked ? t('piece_locked') : t('piece_unlocked'))
+  recordOperation(piece.locked ? t('operation.lock_piece') : t('operation.unlock_piece'), piece.label.trim() || t('unnamed_piece'))
+}
+
 function setVisibleRotation(allowRotation: boolean) {
-  if (!visiblePieces.value.length) return
-  for (const { piece } of visiblePieces.value) piece.allowRotation = allowRotation
+  if (!visibleEditablePieces.value.length) return
+  saveAutoProjectSnapshot(t('snapshot.auto_before_rotation'))
+  for (const { piece } of visibleEditablePieces.value) piece.allowRotation = allowRotation
+  result.value = null
+  calculated.value = false
   saveState()
   showToast(allowRotation ? t('rotation_enabled') : t('rotation_disabled'))
+  lastBulkDiff.value = {
+    title: allowRotation ? t('bulk.rotation_on') : t('bulk.rotation_off'),
+    changed: visibleEditablePieces.value.length,
+    skipped: visibleLockedCount.value,
+    beforeArea: areaM2(pieceSummary.value.totalArea),
+    afterArea: areaM2(pieceSummary.value.totalArea),
+    sampleBefore: t('bulk.rotation'),
+    sampleAfter: allowRotation ? t('bulk.enabled') : t('bulk.disabled'),
+  }
+  recordOperation(allowRotation ? t('operation.rotation_on') : t('operation.rotation_off'), t('operation.visible_count').replace('{0}', String(visibleEditablePieces.value.length)))
 }
 
 function mutateVisibleDimensions(
   transform: (piece: CutPiece) => { width: number; height: number },
   toastKey: string,
+  title = t('bulk.transform'),
 ) {
-  if (!visiblePieces.value.length) return
+  const editable = visibleEditablePieces.value
+  if (!editable.length) return
+  const beforeArea = editable.reduce((sum, { piece }) => sum + pieceTotalArea(piece), 0)
+  const sample = editable[0]?.piece
+  const sampleBefore = sample ? `${sample.width}×${sample.height}` : ''
   saveAutoProjectSnapshot(t('snapshot.auto_before_transform'))
-  for (const { piece } of visiblePieces.value) {
+  for (const { piece } of editable) {
     const next = transform(piece)
     piece.width = next.width
     piece.height = next.height
+  }
+  const afterArea = editable.reduce((sum, { piece }) => sum + pieceTotalArea(piece), 0)
+  const sampleAfter = sample ? `${sample.width}×${sample.height}` : ''
+  lastBulkDiff.value = {
+    title,
+    changed: editable.length,
+    skipped: visibleLockedCount.value,
+    beforeArea: areaM2(beforeArea),
+    afterArea: areaM2(afterArea),
+    sampleBefore,
+    sampleAfter,
   }
   result.value = null
   calculated.value = false
   saveState()
   showToast(t(toastKey))
+  recordOperation(title, t('operation.visible_count').replace('{0}', String(editable.length)))
 }
 
 function addVisibleAllowance(sign = 1) {
   const delta = Math.max(1, Math.round(transformStep.value)) * sign
-  mutateVisibleDimensions(piece => addDimensionDelta(piece, delta), 'transform_done')
+  mutateVisibleDimensions(piece => addDimensionDelta(piece, delta), 'transform_done', `${delta > 0 ? '+' : ''}${delta} ${t('bulk.allowance')}`)
+}
+
+function addVisibleAllowancePreset(delta: number) {
+  transformStep.value = delta
+  mutateVisibleDimensions(piece => addDimensionDelta(piece, delta), 'transform_done', `+${delta} ${t('bulk.allowance')}`)
 }
 
 function swapVisibleDimensions() {
-  mutateVisibleDimensions(piece => swapDimensions(piece), 'transform_done')
+  mutateVisibleDimensions(piece => swapDimensions(piece), 'transform_done', t('bulk.swap'))
 }
 
 function roundVisibleDimensions() {
   const step = Math.max(1, Math.round(roundStep.value))
-  mutateVisibleDimensions(piece => roundDimensionsUp(piece, step), 'transform_done')
+  mutateVisibleDimensions(piece => roundDimensionsUp(piece, step), 'transform_done', `${t('bulk.round')} ${step}`)
 }
 
 function applyPieceSort() {
   if (pieceSortMode.value === 'manual') return
-  const sorted = sortPiecesForEditor(pieces, pieceSortMode.value)
-  pieces.splice(0, pieces.length, ...sorted)
+  const unlockedIndexes = pieces.map((piece, index) => piece.locked ? -1 : index).filter(index => index >= 0)
+  const sorted = sortPiecesForEditor(unlockedIndexes.map(index => pieces[index]), pieceSortMode.value)
+  unlockedIndexes.forEach((index, sortedIndex) => {
+    pieces[index] = sorted[sortedIndex]
+  })
   saveState()
   showToast(t('pieces_sorted'))
+  recordOperation(t('operation.sort'), t(`sort.${pieceSortMode.value}`))
 }
 
 const paletteCommands = computed<PaletteCommand[]>(() => [
@@ -555,22 +838,27 @@ const paletteCommands = computed<PaletteCommand[]>(() => [
   { id: 'add', label: t('add_piece'), shortcut: 'Enter', run: addPiece },
   { id: 'duplicate', label: t('duplicate_selected'), disabled: !selectedPiece.value, run: () => duplicatePiece() },
   { id: 'delete', label: t('delete'), disabled: !selectedPiece.value, run: deleteSelectedPiece },
+  { id: 'lock-toggle', label: selectedPiece.value?.locked ? t('command.unlock_selected') : t('command.lock_selected'), disabled: !selectedPiece.value, run: () => selectedPiece.value && togglePieceLock(selectedPiece.value) },
   { id: 'import', label: t('command.open_import'), disabled: showImport.value, run: () => { showImport.value = true } },
   { id: 'share', label: t('command.copy_share'), disabled: !pieces.length, run: copyShareLink },
   { id: 'snapshot-save', label: t('command.snapshot_save'), disabled: !pieces.length, run: saveProjectSnapshot },
   { id: 'snapshot-restore', label: t('command.snapshot_restore_latest'), disabled: !projectSnapshots.value.length, run: () => restoreProjectSnapshot(projectSnapshots.value[0]) },
   { id: 'undo', label: t('hotkey.undo'), shortcut: 'Ctrl+Z', disabled: !canUndo.value, run: doUndo },
   { id: 'redo', label: t('hotkey.redo'), shortcut: 'Ctrl+Shift+Z', disabled: !canRedo.value, run: doRedo },
-  { id: 'clear-filter', label: t('command.clear_filter'), disabled: !hasPieceFilter.value, run: () => { pieceQuery.value = '' } },
+  { id: 'clear-filter', label: t('command.clear_filter'), disabled: !hasPieceFilter.value, run: clearPieceFilters },
+  { id: 'filter-unnamed', label: t('command.filter_unnamed'), disabled: !unnamedPiecesCount.value, run: () => { quickFilterMode.value = 'unnamed' } },
+  { id: 'filter-oversized', label: t('command.filter_oversized'), disabled: !oversizedPieces.value.length, run: () => { quickFilterMode.value = 'oversized' } },
+  { id: 'filter-machine', label: t('command.filter_machine'), disabled: !smallMachinePieces.value.length, run: () => { quickFilterMode.value = 'machine' } },
   { id: 'sort-area', label: t('command.sort_area'), run: () => setPieceSortMode('area_desc') },
   { id: 'sort-name', label: t('command.sort_name'), run: () => setPieceSortMode('name_asc') },
   { id: 'sort-quantity', label: t('command.sort_quantity'), run: () => setPieceSortMode('quantity_desc') },
-  { id: 'rotation-on', label: t('command.rotation_visible_on'), disabled: !visiblePieces.value.length, run: () => setVisibleRotation(true) },
-  { id: 'rotation-off', label: t('command.rotation_visible_off'), disabled: !visiblePieces.value.length, run: () => setVisibleRotation(false) },
-  { id: 'transform-add', label: t('command.transform_add'), disabled: !visiblePieces.value.length, run: () => addVisibleAllowance(1) },
-  { id: 'transform-sub', label: t('command.transform_sub'), disabled: !visiblePieces.value.length, run: () => addVisibleAllowance(-1) },
-  { id: 'transform-swap', label: t('command.transform_swap'), disabled: !visiblePieces.value.length, run: swapVisibleDimensions },
-  { id: 'transform-round', label: t('command.transform_round'), disabled: !visiblePieces.value.length, run: roundVisibleDimensions },
+  { id: 'rotation-on', label: t('command.rotation_visible_on'), disabled: !visibleEditablePieces.value.length, run: () => setVisibleRotation(true) },
+  { id: 'rotation-off', label: t('command.rotation_visible_off'), disabled: !visibleEditablePieces.value.length, run: () => setVisibleRotation(false) },
+  { id: 'transform-add', label: t('command.transform_add'), disabled: !visibleEditablePieces.value.length, run: () => addVisibleAllowance(1) },
+  { id: 'transform-sub', label: t('command.transform_sub'), disabled: !visibleEditablePieces.value.length, run: () => addVisibleAllowance(-1) },
+  { id: 'transform-swap', label: t('command.transform_swap'), disabled: !visibleEditablePieces.value.length, run: swapVisibleDimensions },
+  { id: 'transform-round', label: t('command.transform_round'), disabled: !visibleEditablePieces.value.length, run: roundVisibleDimensions },
+  { id: 'clear-log', label: t('command.clear_log'), disabled: !operationLog.value.length, run: clearOperationLog },
   { id: 'clear-all', label: t('command.clear_all'), disabled: !pieces.length, run: clearAll },
 ])
 
@@ -613,6 +901,7 @@ function onPaletteKeydown(e: KeyboardEvent) {
 
 // ── Example project (one-click starter for the empty state) ────────────────────
 function loadExample() {
+  saveAutoProjectSnapshot(t('snapshot.auto_before_import'))
   const ex = [
     { label: t('example.side'), w: 1800, h: 300, q: 2 },
     { label: t('example.shelf'), w: 760, h: 300, q: 4 },
@@ -623,11 +912,13 @@ function loadExample() {
     pieces.push(newPiece(e.label, e.w, e.h, e.q, true, color))
   }
   saveState()
+  recordOperation(t('operation.load_example'), t('operation.import_detail').replace('{0}', String(ex.length)))
   calculate()
 }
 
 // ── Drag & drop ──────────────────────────────────────────────────────────────
 function onDragStart(idx: number) {
+  if (pieces[idx]?.locked) return
   dragStartIdx.value = idx
   isDragging.value = true
 }
@@ -642,13 +933,22 @@ function onDragLeave() {
 
 function dropPiece(targetIdx: number) {
   if (dragStartIdx.value < 0 || dragStartIdx.value === targetIdx || dragStartIdx.value >= pieces.length) return
-  const item = pieces[dragStartIdx.value]
-  pieces.splice(dragStartIdx.value, 1)
-  pieces.splice(Math.min(targetIdx, pieces.length), 0, item)
+  if (pieces[dragStartIdx.value]?.locked || pieces[targetIdx]?.locked) return
+  const unlockedIndexes = pieces.map((piece, index) => piece.locked ? -1 : index).filter(index => index >= 0)
+  const sourcePos = unlockedIndexes.indexOf(dragStartIdx.value)
+  const targetPos = unlockedIndexes.indexOf(targetIdx)
+  if (sourcePos < 0 || targetPos < 0) return
+  const unlockedPieces = unlockedIndexes.map(index => pieces[index])
+  const [item] = unlockedPieces.splice(sourcePos, 1)
+  unlockedPieces.splice(targetPos, 0, item)
+  unlockedIndexes.forEach((index, unlockedIndex) => {
+    pieces[index] = unlockedPieces[unlockedIndex]
+  })
   pieceSortMode.value = 'manual'
   dragStartIdx.value = -1
   dragOverIdx.value = -1
   saveState()
+  recordOperation(t('operation.reorder'), t('operation.visible_count').replace('{0}', String(unlockedIndexes.length)))
 }
 
 function onDragEnd() {
@@ -756,6 +1056,7 @@ watch([sheetWidth, sheetHeight, kerf, pieces], () => {
 onMounted(() => {
   loadInitialState()
   loadProjectSnapshots()
+  loadOperationLog()
   // Baseline the history on whatever was actually loaded (link/localStorage),
   // so the first undo can't step back into the pre-load default.
   undoHistory.reset(serializeHomeState(currentState()))
@@ -769,6 +1070,7 @@ onUnmounted(() => {
   clearTimeout(toastTimer)
   clearTimeout(recordTimer)
   saveStateNow()
+  saveOperationLogNow()
 })
 </script>
 
@@ -893,6 +1195,7 @@ onUnmounted(() => {
                 <span>{{ snapshot.summary }}</span>
                 <small>{{ formatSnapshotDate(snapshot.createdAt) }}</small>
               </button>
+              <button class="btn btn-ghost btn-sm" @click="compareProjectSnapshot(snapshot)" :title="t('snapshot_compare')">Δ</button>
               <button class="btn btn-danger btn-sm" @click="deleteProjectSnapshot(snapshot)" :title="t('delete')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
@@ -901,6 +1204,35 @@ onUnmounted(() => {
             </div>
           </div>
           <p v-else class="snapshot-empty">{{ t('snapshot_empty') }}</p>
+          <div v-if="snapshotCompare" class="snapshot-compare">
+            <strong>{{ snapshotCompare.name }}</strong>
+            <span>{{ t('snapshot_compare_pieces') }}: {{ snapshotCompare.piecesDelta >= 0 ? '+' : '' }}{{ snapshotCompare.piecesDelta }}</span>
+            <span>{{ t('snapshot_compare_area') }}: {{ snapshotCompare.areaDelta }}</span>
+            <span>{{ t('snapshot_compare_changed') }}: {{ snapshotCompare.changed }} · +{{ snapshotCompare.added }} · -{{ snapshotCompare.removed }}</span>
+            <span v-if="snapshotCompare.sheetChanged">{{ t('snapshot_compare_sheet') }}</span>
+          </div>
+        </section>
+
+        <!-- Operation log -->
+        <section class="card operation-card">
+          <div class="operation-head">
+            <h2>{{ t('operation_log') }}</h2>
+            <button class="btn btn-ghost btn-sm" @click="clearOperationLog" :disabled="!operationLog.length" :title="t('clear_all')">×</button>
+          </div>
+          <input
+            v-model="operationQuery"
+            type="search"
+            class="snapshot-name-input"
+            :placeholder="t('operation_search')"
+          />
+          <div v-if="filteredOperationLog.length" class="operation-list">
+            <div v-for="entry in filteredOperationLog" :key="entry.id" class="operation-item">
+              <strong>{{ entry.label }}</strong>
+              <span v-if="entry.detail">{{ entry.detail }}</span>
+              <small>{{ formatOperationDate(entry.createdAt) }}</small>
+            </div>
+          </div>
+          <p v-else class="snapshot-empty">{{ t('operation_empty') }}</p>
         </section>
       </aside>
 
@@ -937,6 +1269,18 @@ onUnmounted(() => {
             <span class="metric-pill"><strong>{{ pieceSummary.rotationEnabled }}/{{ pieceSummary.totalTypes }}</strong> {{ t('rotation') }}</span>
           </div>
 
+          <div class="readiness-strip" :class="`is-${readinessStatus}`">
+            <div class="readiness-main">
+              <span>{{ t('readiness') }}</span>
+              <strong>{{ readinessScore }}%</strong>
+            </div>
+            <div class="readiness-meter" aria-hidden="true">
+              <span :style="{ width: `${readinessScore}%` }"></span>
+            </div>
+            <p>{{ readinessMessage }}</p>
+            <button class="btn btn-ghost btn-compact" @click="calculate" :disabled="!pieces.length">{{ t('calculate') }}</button>
+          </div>
+
           <div class="preflight-strip">
             <span
               v-for="check in preflightChecks"
@@ -947,6 +1291,21 @@ onUnmounted(() => {
               <strong>{{ check.value }}</strong>
               {{ check.label }}
             </span>
+          </div>
+
+          <div class="quick-filter-strip">
+            <button
+              v-for="filter in quickFilters"
+              :key="filter.id"
+              class="filter-chip"
+              :class="{ active: quickFilterMode === filter.id }"
+              :disabled="filter.id !== 'all' && !filter.count"
+              @click="quickFilterMode = filter.id"
+            >
+              <span>{{ filter.label }}</span>
+              <strong>{{ filter.count }}</strong>
+            </button>
+            <button class="filter-chip" :disabled="!hasPieceFilter" @click="clearPieceFilters">{{ t('filter.clear') }}</button>
           </div>
 
           <div class="editor-toolbar">
@@ -983,8 +1342,15 @@ onUnmounted(() => {
                 :min="1"
                 :step="1"
               />
-              <button class="btn btn-ghost btn-square" @click="addVisibleAllowance(1)" :disabled="!visiblePieces.length" :title="t('transform_add_visible')">+</button>
-              <button class="btn btn-ghost btn-square" @click="addVisibleAllowance(-1)" :disabled="!visiblePieces.length" :title="t('transform_sub_visible')">−</button>
+              <button class="btn btn-ghost btn-square" @click="addVisibleAllowance(1)" :disabled="!visibleEditablePieces.length" :title="t('transform_add_visible')">+</button>
+              <button class="btn btn-ghost btn-square" @click="addVisibleAllowance(-1)" :disabled="!visibleEditablePieces.length" :title="t('transform_sub_visible')">−</button>
+              <button
+                v-for="preset in ALLOWANCE_PRESETS"
+                :key="preset"
+                class="preset-chip"
+                @click="addVisibleAllowancePreset(preset)"
+                :disabled="!visibleEditablePieces.length"
+              >+{{ preset }}</button>
             </div>
             <div class="transform-group">
               <span>{{ t('transform.round') }}</span>
@@ -994,9 +1360,27 @@ onUnmounted(() => {
                 :min="1"
                 :step="1"
               />
-              <button class="btn btn-ghost btn-square" @click="roundVisibleDimensions" :disabled="!visiblePieces.length" :title="t('transform_round_visible')">⌈</button>
-              <button class="btn btn-ghost btn-square" @click="swapVisibleDimensions" :disabled="!visiblePieces.length" :title="t('transform_swap_visible')">⇄</button>
+              <button class="btn btn-ghost btn-square" @click="roundVisibleDimensions" :disabled="!visibleEditablePieces.length" :title="t('transform_round_visible')">⌈</button>
+              <button class="btn btn-ghost btn-square" @click="swapVisibleDimensions" :disabled="!visibleEditablePieces.length" :title="t('transform_swap_visible')">⇄</button>
             </div>
+            <div class="transform-group transform-group-machine">
+              <span>{{ t('machine_min') }}</span>
+              <NumberField
+                :model-value="minMachineCut"
+                @update:model-value="v => minMachineCut = Math.max(1, Math.round(v))"
+                :min="1"
+                :step="1"
+              />
+              <strong>{{ visibleEditablePieces.length }}/{{ visiblePieces.length }}</strong>
+            </div>
+          </div>
+
+          <div v-if="lastBulkDiff" class="bulk-diff">
+            <strong>{{ lastBulkDiff.title }}</strong>
+            <span>{{ t('bulk_changed') }}: {{ lastBulkDiff.changed }}</span>
+            <span v-if="lastBulkDiff.skipped">{{ t('bulk_skipped') }}: {{ lastBulkDiff.skipped }}</span>
+            <span>{{ lastBulkDiff.sampleBefore }} → {{ lastBulkDiff.sampleAfter }}</span>
+            <span>{{ lastBulkDiff.beforeArea }} → {{ lastBulkDiff.afterArea }} {{ t('material_area') }}</span>
           </div>
 
           <div v-if="selectedPiece && selectedPieceStats" class="selected-inspector">
@@ -1017,6 +1401,7 @@ onUnmounted(() => {
               </span>
             </div>
             <div class="selected-inspector-actions">
+              <button class="btn btn-ghost btn-compact" @click="togglePieceLock(selectedPiece)">{{ selectedPiece.locked ? t('unlock') : t('lock') }}</button>
               <button class="btn btn-ghost btn-compact" @click="duplicatePiece()">{{ t('duplicate') }}</button>
               <button class="btn btn-danger btn-compact" @click="deleteSelectedPiece">{{ t('delete') }}</button>
               <button class="btn btn-ghost btn-compact" @click="clearSelection">{{ t('clear_selection') }}</button>
@@ -1027,6 +1412,15 @@ onUnmounted(() => {
             <strong>{{ t('oversized_existing_warn') }}</strong>
             <ul>
               <li v-for="p in oversizedPieces" :key="p.id">
+                <template v-if="p.label.trim()">{{ p.label.trim() }} </template>({{ p.width.toFixed(0) }}&times;{{ p.height.toFixed(0) }})
+              </li>
+            </ul>
+          </div>
+
+          <div v-if="smallMachinePieces.length" class="alert alert-warn editor-alert">
+            <strong>{{ t('small_machine_warn').replace('{0}', String(minMachineCut)) }}</strong>
+            <ul>
+              <li v-for="p in smallMachinePieces" :key="p.id">
                 <template v-if="p.label.trim()">{{ p.label.trim() }} </template>({{ p.width.toFixed(0) }}&times;{{ p.height.toFixed(0) }})
               </li>
             </ul>
@@ -1043,8 +1437,8 @@ onUnmounted(() => {
               v-for="entry in visiblePieces"
               :key="entry.piece.id"
               class="piece-item piece-item-editing"
-              :class="{ 'drag-over': dragOverIdx === entry.index, 'is-dragging-item': dragStartIdx === entry.index, selected: selectedPieceId === entry.piece.id }"
-              draggable="true"
+              :class="{ 'drag-over': dragOverIdx === entry.index, 'is-dragging-item': dragStartIdx === entry.index, selected: selectedPieceId === entry.piece.id, locked: entry.piece.locked }"
+              :draggable="!entry.piece.locked"
               @dragstart="onDragStart(entry.index)"
               @dragover.prevent="onDragOver(entry.index)"
               @drop="dropPiece(entry.index)"
@@ -1078,6 +1472,20 @@ onUnmounted(() => {
                     :title="t('rotation')"
                     @click="entry.piece.allowRotation = !entry.piece.allowRotation"
                   >&#8635;</button>
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-sm piece-lock-btn"
+                    :class="{ active: entry.piece.locked }"
+                    :title="entry.piece.locked ? t('unlock') : t('lock')"
+                    @click="togglePieceLock(entry.piece)"
+                  >
+                    <svg v-if="entry.piece.locked" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                    </svg>
+                    <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 7-2"/>
+                    </svg>
+                  </button>
                 </div>
               </div>
               <button class="btn btn-danger btn-sm" @click="removePiece(entry.piece)" :title="t('delete')">
