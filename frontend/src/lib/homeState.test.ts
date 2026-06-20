@@ -39,6 +39,20 @@ describe('homeState persistence', () => {
     expect(parseHomeState(serializeHomeState({ ...valid, kerf: 0 }))?.kerf).toBe(0)
   })
 
+  it('keeps valid hex colors but replaces non-hex / injected ones with the default', () => {
+    const raw = serializeHomeState({
+      ...valid,
+      pieces: [
+        { id: 'short', label: 'A', width: 100, height: 50, quantity: 1, allowRotation: true, color: '#abc' },
+        { id: 'long', label: 'B', width: 100, height: 50, quantity: 1, allowRotation: true, color: '#aabbccdd' },
+        { id: 'evil', label: 'C', width: 100, height: 50, quantity: 1, allowRotation: true, color: 'red"/><script>x</script>' },
+        { id: 'named', label: 'D', width: 100, height: 50, quantity: 1, allowRotation: true, color: 'rebeccapurple' },
+      ],
+    })
+    const parsed = parseHomeState(raw)!
+    expect(parsed.pieces.map(p => p.color)).toEqual(['#abc', '#aabbccdd', '#4A90D9', '#4A90D9'])
+  })
+
   it('drops invalid pieces and coerces quantity', () => {
     const raw = serializeHomeState({
       ...valid,
