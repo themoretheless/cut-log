@@ -51,6 +51,14 @@ describe('buildLayoutSvg', () => {
     // piece color is carried through
     expect(svg).toContain('fill="#abc123"')
   })
+  it('escapes the piece color so a tampered value cannot break out of the fill attribute', () => {
+    const r: CuttingResult = { ...result, sheets: [{ ...result.sheets[0], placedPieces: [
+      { source: piece('x', 'P', 100, 100, 'red"/><script>x</script>'), x: 0, y: 0, width: 100, height: 100, isRotated: false },
+    ] }] }
+    const svg = buildLayoutSvg(r)
+    expect(svg).not.toContain('<script>')
+    expect(svg).toContain('&lt;script&gt;')
+  })
   it('escapes labels', () => {
     const r: CuttingResult = { ...result, sheets: [{ ...result.sheets[0], placedPieces: [
       { source: piece('x', 'A & <B>', 100, 100), x: 0, y: 0, width: 100, height: 100, isRotated: false },

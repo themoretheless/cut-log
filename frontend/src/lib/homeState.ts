@@ -21,6 +21,13 @@ export function serializeHomeState(state: HomeState): string {
 
 const isPosNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0
 const isNonNegNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0
+// A CSS hex color (#rgb / #rgba / #rrggbb / #rrggbbaa). This is the single trust
+// boundary for untrusted state (localStorage + share-link hash), and `color`
+// flows on into raw SVG `fill`, CSS `background`, and the SVG/print export — so
+// reject anything that isn't plain hex here to keep markup-injection out of all
+// of those sinks at once.
+const isHexColor = (v: unknown): v is string =>
+  typeof v === 'string' && /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(v)
 
 function validPiece(p: any): CutPiece | null {
   if (!p || typeof p !== 'object') return null
@@ -33,7 +40,7 @@ function validPiece(p: any): CutPiece | null {
     height: p.height,
     quantity,
     allowRotation: p.allowRotation !== false,
-    color: typeof p.color === 'string' ? p.color : '#4A90D9',
+    color: isHexColor(p.color) ? p.color : '#4A90D9',
   }
 }
 

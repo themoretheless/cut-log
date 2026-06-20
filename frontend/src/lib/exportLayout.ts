@@ -48,7 +48,7 @@ export function buildLayoutSvg(result: CuttingResult): string {
     body += `\n  <g transform="translate(0,${n(oy)})">`
     body += `\n    <rect x="0" y="0" width="${n(s.width)}" height="${n(s.height)}" fill="none" stroke="#888888" stroke-width="1"/>`
     for (const pp of s.placedPieces) {
-      body += `\n    <rect x="${n(pp.x)}" y="${n(pp.y)}" width="${n(pp.width)}" height="${n(pp.height)}" fill="${pp.source.color}" fill-opacity="0.18" stroke="#cc2222" stroke-width="0.5"/>`
+      body += `\n    <rect x="${n(pp.x)}" y="${n(pp.y)}" width="${n(pp.width)}" height="${n(pp.height)}" fill="${escapeXml(pp.source.color)}" fill-opacity="0.18" stroke="#cc2222" stroke-width="0.5"/>`
       const cx = pp.x + pp.width / 2
       const cy = pp.y + pp.height / 2
       const name = pp.source.label?.trim() ? `${pp.source.label.trim()} ` : ''
