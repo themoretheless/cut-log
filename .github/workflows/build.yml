@@ -21,7 +21,12 @@ jobs:
           fetch-depth: 0
 
       - name: Check version
-        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        # Dependabot can't edit version.json, so its dependency PRs always trip
+        # the "already released" check. Exempt it: the dep change still ships on
+        # the next deploy (release.yml gracefully skips re-tagging when the
+        # version is unchanged), it just doesn't cut a new release tag. Human
+        # PRs that touch dependencies still have to bump, since they ship code.
+        if: github.event_name == 'pull_request' && github.base_ref == 'main' && github.actor != 'dependabot[bot]'
         run: |
           VERSION=$(node -p 'require("./version.json").version')
           LATEST=$(git tag --sort=-v:refname | grep '^v[0-9]' | head -1 | sed 's/^v//' || echo "0.0.0")
