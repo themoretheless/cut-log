@@ -67,29 +67,122 @@ export function shelfDepthAt(p: BoxParams, sy: number): number {
   return p.d - shelfOffsetAt(p, sy)
 }
 
-// ── SVG path builders ────────────────────────────────────────────────────────
-function f(v: number): string { return v.toFixed(2) }
+// ── Panel contours (the single tab-walk shared by SVG + 3D) ──────────────────
+// Each panel's outline is generated once in panel-local (u, v) coordinates, then
+// consumed twice: formatted as an SVG cut path, and mapped to 3D assembly
+// vertices. Walking the tabbed edge in exactly one place is what keeps the cut
+// layout and the 3D model from ever disagreeing.
+export type UV = [number, number]
 
+function f(v: number): string { return v.toFixed(2) }
+// The original hand-written paths rendered an exact-zero coordinate as a bare
+// `0` on some edges but as `0.00` on others (e.g. the side wall's bevel corner
+// keeps `0.00`, while the bottom edge and the horizontal panels' left edge use
+// `0`). `fz` reproduces the bare-zero variant so the cut paths stay byte-for-
+// byte identical to the golden fixtures; which axis uses which is passed in.
+function fz(v: number): string { return v === 0 ? '0' : v.toFixed(2) }
+
+/**
+ * Format a panel contour as a closed SVG path. `fu`/`fv` format the two axes
+ * (they differ only in how an exact zero is printed, see `fz`). `extra` appends
+ * one final corner before the Z, for panels whose original path restated the
+ * start corner explicitly (the horizontal panels close with an explicit `L start`).
+ */
+function contourToPath(
+  c: UV[],
+  fu: (n: number) => string,
+  fv: (n: number) => string,
+  extra?: UV,
+): string {
+  let d = `M${fu(c[0][0])},${fv(c[0][1])}`
+  for (let i = 1; i < c.length; i++) d += ` L${fu(c[i][0])},${fv(c[i][1])}`
+  if (extra) d += ` L${fu(extra[0])},${fv(extra[1])}`
+  return d + ' Z'
+}
+
+/** Side wall (u = depth, v = height). The bevel clip differs between the SVG and
+ *  3D views only in which end is clipped, so the two clip values are parameters
+ *  (`cStart`/`cEnd`) rather than two hand-copied walks. */
+function sideContour(p: BoxParams, cStart: number, cEnd: number): UV[] {
+  const out: UV[] = []
+  const a = (u: number, v: number) => out.push([u, v])
+  const d = p.d, h = p.h, th = p.tabH, t = tf(p)
+  a(cStart, 0)
+  for (const ty of tabPositions(p, d)) {
+    if (ty < cStart) continue
+    a(ty, 0); a(ty, t); a(ty + th, t); a(ty + th, 0)
+  }
+  a(d, 0)
+  for (const tz of tabPositions(p, h)) { a(d, tz); a(d - t, tz); a(d - t, tz + th); a(d, tz + th) }
+  a(d, h)
+  for (const ty of [...tabPositions(p, d)].reverse()) {
+    if (ty < cEnd) continue
+    a(ty + th, h); a(ty + th, h - t); a(ty, h - t); a(ty, h)
+  }
+  a(cEnd, h)
+  return out
+}
+
+/** Top / bottom wall (u = width, v = depth). */
+function horizContour(p: BoxParams, depth: number, off: number): UV[] {
+  const out: UV[] = []
+  const a = (u: number, v: number) => out.push([u, v])
+  const w = p.w, th = p.tabH, t = p.t, tfv = tf(p), wiv = wi(p)
+  const sTabs = depthTabs(p, p.d, off, depth)
+  a(t, 0); a(w - t, 0)
+  for (const ty of sTabs) { a(w - t, ty); a(w, ty); a(w, ty + th); a(w - t, ty + th) }
+  a(w - t, depth)
+  for (const tx of [...tabPositions(p, wiv)].reverse()) {
+    const rx = t + tx
+    a(rx + th, depth); a(rx + th, depth - tfv); a(rx, depth - tfv); a(rx, depth)
+  }
+  a(t, depth)
+  for (const ty of [...sTabs].reverse()) { a(t, ty + th); a(0, ty + th); a(0, ty); a(t, ty) }
+  return out
+}
+
+/** Internal shelf (u = width, v = depth); like horiz but the front edge carries
+ *  tabs instead of a slotted lip, and the back edge sits a thickness in. */
+function shelfContour(p: BoxParams, depth: number, off: number): UV[] {
+  const out: UV[] = []
+  const a = (u: number, v: number) => out.push([u, v])
+  const w = p.w, th = p.tabH, t = p.t, wiv = wi(p)
+  const sTabs = depthTabs(p, p.d, off, depth)
+  a(t, 0); a(w - t, 0)
+  for (const ty of sTabs) { a(w - t, ty); a(w, ty); a(w, ty + th); a(w - t, ty + th) }
+  a(w - t, depth - t)
+  for (const tx of [...tabPositions(p, wiv)].reverse()) {
+    const rx = t + tx
+    a(rx + th, depth - t); a(rx + th, depth); a(rx, depth); a(rx, depth - t)
+  }
+  a(t, depth - t)
+  for (const ty of [...sTabs].reverse()) { a(t, ty + th); a(0, ty + th); a(0, ty); a(t, ty) }
+  return out
+}
+
+/** Back wall (u = width, v = height), tabs on all four edges. */
+function backContour(p: BoxParams): UV[] {
+  const out: UV[] = []
+  const a = (u: number, v: number) => out.push([u, v])
+  const w = p.w, h = p.h, th = p.tabH, t = p.t, wiv = wi(p), hiv = hi(p)
+  a(t, t)
+  for (const tx of tabPositions(p, wiv)) { const rx = t + tx; a(rx, t); a(rx, 0); a(rx + th, 0); a(rx + th, t) }
+  a(w - t, t)
+  for (const tz of tabPositions(p, hiv)) { const rz = t + tz; a(w - t, rz); a(w, rz); a(w, rz + th); a(w - t, rz + th) }
+  a(w - t, h - t)
+  for (const tx of [...tabPositions(p, wiv)].reverse()) { const rx = t + tx; a(rx + th, h - t); a(rx + th, h); a(rx, h); a(rx, h - t) }
+  a(t, h - t)
+  for (const tz of [...tabPositions(p, hiv)].reverse()) { const rz = t + tz; a(t, rz + th); a(0, rz + th); a(0, rz); a(t, rz) }
+  return out
+}
+
+// ── SVG path builders ────────────────────────────────────────────────────────
 export function pathSide(p: BoxParams): string {
-  const pw = p.d, ph = p.h, th = p.tabH
-  const t = tf(p)
-  const bv = p.bevel
-  const clipTop = Math.max(0, bv)
-  const clipBot = Math.max(0, -bv)
-  let d = `M${f(clipTop)},0`
-  for (const x of tabPositions(p, p.d)) {
-    if (x < clipTop) continue
-    d += ` L${f(x)},0 L${f(x)},${f(t)} L${f(x + th)},${f(t)} L${f(x + th)},0`
-  }
-  d += ` L${f(pw)},0`
-  for (const y of tabPositions(p, p.h))
-    d += ` L${f(pw)},${f(y)} L${f(pw - t)},${f(y)} L${f(pw - t)},${f(y + th)} L${f(pw)},${f(y + th)}`
-  d += ` L${f(pw)},${f(ph)}`
-  for (const x of [...tabPositions(p, p.d)].reverse()) {
-    if (x < clipBot) continue
-    d += ` L${f(x + th)},${f(ph)} L${f(x + th)},${f(ph - t)} L${f(x)},${f(ph - t)} L${f(x)},${f(ph)}`
-  }
-  d += ` L${f(clipBot)},${f(ph)} Z`
+  const clipTop = Math.max(0, p.bevel)
+  const clipBot = Math.max(0, -p.bevel)
+  // Side wall: depth (u) keeps 2-decimal zeros, height (v) prints bare 0.
+  let d = contourToPath(sideContour(p, clipTop, clipBot), f, fz)
+  const t = tf(p), th = p.tabH, pw = p.d
   for (const sy of shelfSlotYs(p)) {
     const sOff = shelfOffsetAt(p, sy)
     for (const x of tabPositions(p, p.d)) {
@@ -101,49 +194,12 @@ export function pathSide(p: BoxParams): string {
 }
 
 export function pathTopBottom(p: BoxParams, depth?: number, depthOff = 0): string {
-  const ph = depth ?? p.d
-  const pw = p.w, th = p.tabH, t = p.t
-  const tfv = tf(p), wiv = wi(p)
-  const sideTabs = depthTabs(p, p.d, depthOff, ph)
-  let d = `M${f(t)},0 L${f(pw - t)},0`
-  for (const y of sideTabs)
-    d += ` L${f(pw - t)},${f(y)} L${f(pw)},${f(y)} L${f(pw)},${f(y + th)} L${f(pw - t)},${f(y + th)}`
-  d += ` L${f(pw - t)},${f(ph)}`
-  for (const x of [...tabPositions(p, wiv)].reverse()) {
-    const rx = t + x
-    d += ` L${f(rx + th)},${f(ph)} L${f(rx + th)},${f(ph - tfv)} L${f(rx)},${f(ph - tfv)} L${f(rx)},${f(ph)}`
-  }
-  d += ` L${f(t)},${f(ph)}`
-  for (const y of [...sideTabs].reverse())
-    d += ` L${f(t)},${f(y + th)} L0,${f(y + th)} L0,${f(y)} L${f(t)},${f(y)}`
-  d += ` L${f(t)},0 Z`
-  return d
+  return contourToPath(horizContour(p, depth ?? p.d, depthOff), fz, fz, [p.t, 0])
 }
 
 export function pathBack(p: BoxParams): string {
-  const pw = p.w, ph = p.h, th = p.tabH, t = p.t
-  const tfv = tf(p), wiv = wi(p), hiv = hi(p)
-  let d = `M${f(t)},${f(t)}`
-  for (const x of tabPositions(p, wiv)) {
-    const rx = t + x
-    d += ` L${f(rx)},${f(t)} L${f(rx)},0 L${f(rx + th)},0 L${f(rx + th)},${f(t)}`
-  }
-  d += ` L${f(pw - t)},${f(t)}`
-  for (const y of tabPositions(p, hiv)) {
-    const ry = t + y
-    d += ` L${f(pw - t)},${f(ry)} L${f(pw)},${f(ry)} L${f(pw)},${f(ry + th)} L${f(pw - t)},${f(ry + th)}`
-  }
-  d += ` L${f(pw - t)},${f(ph - t)}`
-  for (const x of [...tabPositions(p, wiv)].reverse()) {
-    const rx = t + x
-    d += ` L${f(rx + th)},${f(ph - t)} L${f(rx + th)},${f(ph)} L${f(rx)},${f(ph)} L${f(rx)},${f(ph - t)}`
-  }
-  d += ` L${f(t)},${f(ph - t)}`
-  for (const y of [...tabPositions(p, hiv)].reverse()) {
-    const ry = t + y
-    d += ` L${f(t)},${f(ry + th)} L0,${f(ry + th)} L0,${f(ry)} L${f(t)},${f(ry)}`
-  }
-  d += ' Z'
+  let d = contourToPath(backContour(p), fz, fz)
+  const th = p.tabH, t = p.t, tfv = tf(p), wiv = wi(p)
   for (const sy of shelfSlotYs(p))
     for (const x of tabPositions(p, wiv))
       d += ` M${f(t + x)},${f(sy)} L${f(t + x + th)},${f(sy)} L${f(t + x + th)},${f(sy + tfv)} L${f(t + x)},${f(sy + tfv)} Z`
@@ -151,23 +207,7 @@ export function pathBack(p: BoxParams): string {
 }
 
 export function pathShelf(p: BoxParams, depth?: number, depthOff = 0): string {
-  const ph = depth ?? p.d
-  const pw = p.w, th = p.tabH, t = p.t
-  const wiv = wi(p)
-  const sideTabs = depthTabs(p, p.d, depthOff, ph)
-  let d = `M${f(t)},0 L${f(pw - t)},0`
-  for (const y of sideTabs)
-    d += ` L${f(pw - t)},${f(y)} L${f(pw)},${f(y)} L${f(pw)},${f(y + th)} L${f(pw - t)},${f(y + th)}`
-  d += ` L${f(pw - t)},${f(ph - t)}`
-  for (const x of [...tabPositions(p, wiv)].reverse()) {
-    const rx = t + x
-    d += ` L${f(rx + th)},${f(ph - t)} L${f(rx + th)},${f(ph)} L${f(rx)},${f(ph)} L${f(rx)},${f(ph - t)}`
-  }
-  d += ` L${f(t)},${f(ph - t)}`
-  for (const y of [...sideTabs].reverse())
-    d += ` L${f(t)},${f(y + th)} L0,${f(y + th)} L0,${f(y)} L${f(t)},${f(y)}`
-  d += ` L${f(t)},0 Z`
-  return d
+  return contourToPath(shelfContour(p, depth ?? p.d, depthOff), fz, fz, [p.t, 0])
 }
 
 export function svgScale(pw: number, ph: number): number {
@@ -176,77 +216,22 @@ export function svgScale(pw: number, ph: number): number {
 
 // ── 3D contour generators ────────────────────────────────────────────────────
 export function sidePts3D(p: BoxParams, x0: number): Pt3[] {
-  const pts: Pt3[] = []
-  const a = (y: number, z: number) => pts.push([x0, y, z])
-  const d = p.d, h = p.h, th = p.tabH, t = tf(p), bv = p.bevel
-  const clipBot = Math.max(0, -bv)
-  const clipTop = Math.max(0, bv)
-  a(clipBot, 0)
-  for (const ty of tabPositions(p, d)) {
-    if (ty < clipBot) continue
-    a(ty, 0); a(ty, t); a(ty + th, t); a(ty + th, 0)
-  }
-  a(d, 0)
-  for (const tz of tabPositions(p, h)) { a(d, tz); a(d - t, tz); a(d - t, tz + th); a(d, tz + th) }
-  a(d, h)
-  for (const ty of [...tabPositions(p, d)].reverse()) {
-    if (ty < clipTop) continue
-    a(ty + th, h); a(ty + th, h - t); a(ty, h - t); a(ty, h)
-  }
-  a(clipTop, h)
-  return pts
+  // 3D clips the opposite end from the SVG view, so the clip args are swapped.
+  const clipTop = Math.max(0, p.bevel)
+  const clipBot = Math.max(0, -p.bevel)
+  return sideContour(p, clipBot, clipTop).map(([u, v]): Pt3 => [x0, u, v])
 }
 
 export function horizPts3D(p: BoxParams, z0: number, depth?: number, yOff = 0): Pt3[] {
-  const pts: Pt3[] = []
-  const a = (x: number, y: number) => pts.push([x, y + yOff, z0])
-  const w = p.w, d = depth ?? p.d, th = p.tabH, t = p.t
-  const tfv = tf(p), wiv = wi(p)
-  const sTabs = depthTabs(p, p.d, yOff, d)
-  a(t, 0); a(w - t, 0)
-  for (const ty of sTabs) { a(w - t, ty); a(w, ty); a(w, ty + th); a(w - t, ty + th) }
-  a(w - t, d)
-  for (const tx of [...tabPositions(p, wiv)].reverse()) {
-    const rx = t + tx
-    a(rx + th, d); a(rx + th, d - tfv); a(rx, d - tfv); a(rx, d)
-  }
-  a(t, d)
-  for (const ty of [...sTabs].reverse()) { a(t, ty + th); a(0, ty + th); a(0, ty); a(t, ty) }
-  return pts
+  return horizContour(p, depth ?? p.d, yOff).map(([u, v]): Pt3 => [u, v + yOff, z0])
 }
 
 export function backPts3D(p: BoxParams, y0: number): Pt3[] {
-  const pts: Pt3[] = []
-  const a = (x: number, z: number) => pts.push([x, y0, z])
-  const w = p.w, h = p.h, th = p.tabH, t = p.t
-  const wiv = wi(p), hiv = hi(p)
-  a(t, t)
-  for (const tx of tabPositions(p, wiv)) { const rx = t + tx; a(rx, t); a(rx, 0); a(rx + th, 0); a(rx + th, t) }
-  a(w - t, t)
-  for (const tz of tabPositions(p, hiv)) { const rz = t + tz; a(w - t, rz); a(w, rz); a(w, rz + th); a(w - t, rz + th) }
-  a(w - t, h - t)
-  for (const tx of [...tabPositions(p, wiv)].reverse()) { const rx = t + tx; a(rx + th, h - t); a(rx + th, h); a(rx, h); a(rx, h - t) }
-  a(t, h - t)
-  for (const tz of [...tabPositions(p, hiv)].reverse()) { const rz = t + tz; a(t, rz + th); a(0, rz + th); a(0, rz); a(t, rz) }
-  return pts
+  return backContour(p).map(([u, v]): Pt3 => [u, y0, v])
 }
 
 export function shelfPts3D(p: BoxParams, z0: number, depth?: number, yOff = 0): Pt3[] {
-  const pts: Pt3[] = []
-  const a = (x: number, y: number) => pts.push([x, y + yOff, z0])
-  const w = p.w, d = depth ?? p.d, th = p.tabH, t = p.t
-  const wiv = wi(p)
-  const sTabs = depthTabs(p, p.d, yOff, d)
-  a(t, 0); a(w - t, 0)
-  for (const ty of sTabs) { a(w - t, ty); a(w, ty); a(w, ty + th); a(w - t, ty + th) }
-  a(w - t, d - t)
-  for (const tx of [...tabPositions(p, wiv)].reverse()) {
-    const rx = t + tx
-    a(rx + th, d - t); a(rx + th, d); a(rx, d); a(rx, d - t)
-  }
-  a(t, d - t)
-  for (const ty of [...sTabs].reverse()) { a(t, ty + th); a(0, ty + th); a(0, ty); a(t, ty) }
-  return pts
+  return shelfContour(p, depth ?? p.d, yOff).map(([u, v]): Pt3 => [u, v + yOff, z0])
 }
 
 export function sideHoles3D(p: BoxParams, x0: number): Pt3[][] {
