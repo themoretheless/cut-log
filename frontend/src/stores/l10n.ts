@@ -6,7 +6,7 @@ function initialLang(): 'ru' | 'en' {
 
 const lang = ref<'ru' | 'en'>(initialLang())
 
-const ru: Record<string, string> = {
+export const ru: Record<string, string> = {
   'app.title': 'CutLog — Оптимизатор раскроя фанеры',
   sheets: 'листов', efficiency: 'эффективность', waste: 'отходы', sheet: 'Лист',
   pieces_short: 'дет.', calculate: 'Рассчитать', clear_all: 'Очистить всё',
@@ -76,7 +76,7 @@ const ru: Record<string, string> = {
   theme: 'Тема', 'notfound.title': 'Страница не найдена', 'notfound.text': 'Запрашиваемая страница не существует.',
 }
 
-const en: Record<string, string> = {
+export const en: Record<string, string> = {
   'app.title': 'CutLog — Plywood Cutting Optimizer',
   sheets: 'sheets', efficiency: 'efficiency', waste: 'waste', sheet: 'Sheet',
   pieces_short: 'pcs', calculate: 'Calculate', clear_all: 'Clear all',
