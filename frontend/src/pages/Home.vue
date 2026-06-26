@@ -31,6 +31,9 @@ import {
   summarizePieces,
   swapDimensions,
 } from '@/lib/pieceEditor'
+import { computeCostSummary } from '@/lib/costSummary'
+import { buildPiecesCsv } from '@/lib/piecesCsv'
+import { duplicatePiece as duplicatePieceList } from '@/lib/pieceOps'
 import { useL10n } from '@/stores/l10n'
 
 const { t } = useL10n()
@@ -53,6 +56,8 @@ const selectedPreset = ref('2440x1220')
 const sheetWidth = ref(2440)
 const sheetHeight = ref(1220)
 const kerf = ref(3)
+const pricePerSheet = ref(0)
+const currency = ref('₽')
 const selectedStrategy = ref<CuttingStrategy>(CuttingStrategy.Auto)
 
 function onPresetChanged(e: Event) {
@@ -176,6 +181,8 @@ function currentState(): HomeState {
     sheetHeight: sheetHeight.value,
     kerf: kerf.value,
     pieces: [...pieces],
+    pricePerSheet: pricePerSheet.value,
+    currency: currency.value,
   }
 }
 
@@ -183,6 +190,8 @@ function applyState(saved: HomeState) {
   sheetWidth.value = saved.sheetWidth
   sheetHeight.value = saved.sheetHeight
   kerf.value = saved.kerf
+  pricePerSheet.value = saved.pricePerSheet
+  currency.value = saved.currency
   pieces.splice(0, pieces.length, ...saved.pieces)
   colorIdx = pieces.length
 }
@@ -383,6 +392,16 @@ function removePiece(p: CutPiece) {
   recordOperation(t('operation.delete_piece'), p.label.trim() || t('unnamed_piece'))
 }
 
+// Duplicate the given piece (or the selected/last one for the Ctrl+D shortcut),
+// inserting the copy right after it with a fresh id and the next palette color.
+function duplicate(id: string | null) {
+  if (!pieces.length) return
+  const color = PIECE_COLORS[colorIdx++ % PIECE_COLORS.length]
+  const next = duplicatePieceList([...pieces], id, crypto.randomUUID(), color)
+  pieces.splice(0, pieces.length, ...next)
+  saveState()
+}
+
 function clearAll() {
   saveAutoProjectSnapshot(t('snapshot.auto_before_clear'))
   const count = pieces.length
@@ -419,6 +438,10 @@ function downloadFile(name: string, content: string, mime: string) {
   a.download = name
   a.click()
   URL.revokeObjectURL(url)
+}
+
+function exportPiecesCsv() {
+  if (pieces.length) downloadFile('cutlog-parts.csv', buildPiecesCsv([...pieces]), 'text/csv;charset=utf-8')
 }
 
 function exportSvg() {
@@ -968,6 +991,10 @@ const sheetScale = computed(() => {
   return s ? svgScale(s.width, s.height) : 1
 })
 
+// Material cost for the current result; null until a layout is calculated.
+const costSummary = computed(() =>
+  result.value ? computeCostSummary(result.value, pricePerSheet.value) : null)
+
 const pieceIndexById = computed(() => {
   const m = new Map<string, number>()
   pieces.forEach((p, i) => m.set(p.id, i + 1))
@@ -1039,6 +1066,9 @@ function onKeydown(e: KeyboardEvent) {
     || (e.key.toLowerCase() === 'y' && (e.ctrlKey || e.metaKey))) {
     e.preventDefault()
     doRedo()
+  } else if (e.key.toLowerCase() === 'd' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault()
+    duplicate(selectedPieceId.value)
   } else if (e.key === 'Escape') {
     if (selectedPieceId.value !== null) { selectedPieceId.value = null; return }
     result.value = null
@@ -1048,7 +1078,7 @@ function onKeydown(e: KeyboardEvent) {
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
 // Persist and record history on any sheet/kerf/piece edit.
-watch([sheetWidth, sheetHeight, kerf, pieces], () => {
+watch([sheetWidth, sheetHeight, kerf, pieces, pricePerSheet, currency], () => {
   saveState()
   recordHistory()
 }, { deep: true })
@@ -1087,6 +1117,7 @@ onUnmounted(() => {
       <span><kbd>Ctrl</kbd>+<kbd>K</kbd> {{ t('command_palette') }}</span>
       <span><kbd>Ctrl</kbd>+<kbd>Z</kbd> {{ t('hotkey.undo') }}</span>
       <span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> {{ t('hotkey.redo') }}</span>
+      <span><kbd>Ctrl</kbd>+<kbd>D</kbd> {{ t('hotkey.duplicate') }}</span>
       <span><kbd>Esc</kbd> {{ t('hotkey.clear') }}</span>
     </div>
 
@@ -1113,6 +1144,13 @@ onUnmounted(() => {
           <div class="form-row">
             <label>{{ t('kerf_mm') }}</label>
             <NumberField v-model="kerf" :min="0" :step="1" />
+          </div>
+          <div class="form-row">
+            <label>{{ t('cost.price_per_sheet') }}</label>
+            <div class="price-row">
+              <NumberField v-model="pricePerSheet" :min="0" :step="1" />
+              <input class="currency-input" type="text" v-model="currency" maxlength="3" :title="t('cost.currency')" />
+            </div>
           </div>
           <div class="form-row">
             <label>{{ t('strategy') }}</label>
@@ -1488,6 +1526,11 @@ onUnmounted(() => {
                   </button>
                 </div>
               </div>
+              <button class="btn btn-ghost btn-sm" @click="duplicate(entry.piece.id)" :title="t('duplicate')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+              </button>
               <button class="btn btn-danger btn-sm" @click="removePiece(entry.piece)" :title="t('delete')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
@@ -1507,6 +1550,12 @@ onUnmounted(() => {
                 <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>
               </svg>
               {{ t('share') }}
+            </button>
+            <button class="btn btn-ghost" @click="exportPiecesCsv" :title="t('export.parts_csv')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+              </svg>
+              CSV
             </button>
             <button class="btn btn-primary" @click="calculate">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px">
@@ -1542,6 +1591,23 @@ onUnmounted(() => {
             <div class="stat">
               <span class="stat-value stat-value-sm">{{ strategyDisplayName(result.autoPickedStrategy ?? result.strategy) }}</span>
               <span class="stat-label">{{ t('strategy.used') }}</span>
+            </div>
+          </div>
+
+          <!-- Material cost (shown once a sheet price is set) -->
+          <div v-if="costSummary && pricePerSheet > 0" class="cost-bar">
+            <span class="cost-title">{{ t('cost.summary') }}</span>
+            <div class="cost-item">
+              <span class="cost-value">{{ costSummary.totalCost.toFixed(0) }} {{ currency }}</span>
+              <span class="cost-label">{{ t('cost.total') }}</span>
+            </div>
+            <div class="cost-item">
+              <span class="cost-value">{{ costSummary.costPerPart.toFixed(2) }} {{ currency }}</span>
+              <span class="cost-label">{{ t('cost.per_part') }}</span>
+            </div>
+            <div class="cost-item">
+              <span class="cost-value">{{ costSummary.wasteCost.toFixed(0) }} {{ currency }}</span>
+              <span class="cost-label">{{ t('cost.waste_cost') }}</span>
             </div>
           </div>
 
@@ -1765,6 +1831,52 @@ onUnmounted(() => {
 }
 .import-hint {
   margin: 0;
+  font-size: 11px;
+  opacity: 0.7;
+}
+.price-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.currency-input {
+  width: 48px;
+  text-align: center;
+  padding: 6px 4px;
+  border: 1px solid var(--border, #d0d0d0);
+  border-radius: 6px;
+  background: var(--input-bg, #fff);
+  color: inherit;
+  box-sizing: border-box;
+}
+.cost-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 22px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border, #d0d0d0);
+  border-radius: 8px;
+  background: var(--input-bg, #fff);
+}
+.cost-title {
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.65;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cost-item {
+  display: flex;
+  flex-direction: column;
+}
+.cost-value {
+  font-size: 16px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.cost-label {
   font-size: 11px;
   opacity: 0.7;
 }

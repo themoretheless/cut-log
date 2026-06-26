@@ -48,6 +48,22 @@ The **cutting optimizer** lives in Rust and is compiled to WebAssembly. The
 **box geometry** lives in TypeScript (`src/box/geometry.ts`) — it was measured to
 be the faster place for it; see [scripts/bench/BENCH.md](scripts/bench/BENCH.md).
 
+### Layering and the refactoring plan
+
+The frontend follows a strict inward dependency direction:
+
+`pages -> composables -> services / lib -> types`
+
+Pure logic (serialization, parsing, history, geometry, cost, export) lives in
+framework-free, unit-tested `lib/*` modules and `box/geometry.ts`. Vue-reactive
+glue lives in composables; pages stay thin and presentation-only. Nothing in
+`lib/` or `services/` may import Vue, a component, a composable, or a store.
+
+A full architecture review (by ten independent critics, each on one lens) and an
+incremental, behavior-preserving plan to decompose the remaining god component
+(`Home.vue`, ~958 lines) into testable composables and a `SheetCard` component
+live in [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Build & run
 
 Prerequisites: Rust (with the `wasm32-unknown-unknown` target), `wasm-pack`,

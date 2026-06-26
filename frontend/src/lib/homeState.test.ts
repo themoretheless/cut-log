@@ -8,6 +8,8 @@ const valid: HomeState = {
   pieces: [
     { id: 'a', label: 'X', width: 400, height: 300, quantity: 2, allowRotation: true, color: '#fff' },
   ],
+  pricePerSheet: 0,
+  currency: '₽',
 }
 
 describe('homeState persistence', () => {
@@ -37,6 +39,37 @@ describe('homeState persistence', () => {
 
   it('keeps kerf of zero (valid)', () => {
     expect(parseHomeState(serializeHomeState({ ...valid, kerf: 0 }))?.kerf).toBe(0)
+  })
+
+  it('defaults costing fields for a state saved before they existed', () => {
+    // An old payload (version 1, no pricePerSheet / currency) must still load.
+    const old = JSON.stringify({ version: 1, sheetWidth: 2440, sheetHeight: 1220, kerf: 3, pieces: [] })
+    const parsed = parseHomeState(old)!
+    expect(parsed.pricePerSheet).toBe(0)
+    expect(parsed.currency).toBe('₽')
+  })
+
+  it('keeps a valid price and currency, rejects a bad price, bounds the symbol', () => {
+    const a = parseHomeState(serializeHomeState({ ...valid, pricePerSheet: 42.5, currency: '$' }))!
+    expect(a.pricePerSheet).toBe(42.5)
+    expect(a.currency).toBe('$')
+    const b = parseHomeState(serializeHomeState({ ...valid, pricePerSheet: -5, currency: 'долл' }))!
+    expect(b.pricePerSheet).toBe(0) // negative -> default
+    expect(b.currency).toBe('дол') // trimmed to 3 chars
+  })
+
+  it('keeps valid hex colors but replaces non-hex / injected ones with the default', () => {
+    const raw = serializeHomeState({
+      ...valid,
+      pieces: [
+        { id: 'short', label: 'A', width: 100, height: 50, quantity: 1, allowRotation: true, color: '#abc' },
+        { id: 'long', label: 'B', width: 100, height: 50, quantity: 1, allowRotation: true, color: '#aabbccdd' },
+        { id: 'evil', label: 'C', width: 100, height: 50, quantity: 1, allowRotation: true, color: 'red"/><script>x</script>' },
+        { id: 'named', label: 'D', width: 100, height: 50, quantity: 1, allowRotation: true, color: 'rebeccapurple' },
+      ],
+    })
+    const parsed = parseHomeState(raw)!
+    expect(parsed.pieces.map(p => p.color)).toEqual(['#abc', '#aabbccdd', '#4A90D9', '#4A90D9'])
   })
 
   it('drops invalid pieces and coerces quantity', () => {

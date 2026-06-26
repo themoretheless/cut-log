@@ -197,7 +197,7 @@ export function useAssemblyScene(model: BoxModel, t: Translate) {
       { c: model.sidePts3D(w), n: [-1, 0, 0], t: thick, col: '#2980b9', ec: '#1a5276', h: rh.length > 0 ? rh : undefined, gid: 'side', axis: 0, sign: 1 },
       { c: model.horizPts3D(h, model.TopD.value, Math.max(Bevel, 0)), n: [0, 0, -1], t: thick, col: '#27ae60', ec: '#1e8449', gid: 'top', axis: 2, sign: 1 },
       { c: model.horizPts3D(0, model.BotD.value, Math.max(-Bevel, 0)), n: [0, 0, 1], t: thick, col: Bevel !== 0 ? '#1abc9c' : '#27ae60', ec: Bevel !== 0 ? '#27ae60' : '#1e8449', gid: 'bot', axis: 2, sign: -1 },
-      { c: model.backPts3D(d), n: [0, -1, 0], t: thick, col: '#8e44ad', ec: '#5b2c6f', h: bh.length > 0 ? bh : undefined, gid: 'back', axis: 1, sign: 1 },
+      { c: model.backPts3D(d), n: [0, -1, 0], t: thick, col: '#a855f7', ec: '#7d3c98', h: bh.length > 0 ? bh : undefined, gid: 'back', axis: 1, sign: 1 },
     ]
     const clipTop = Math.max(Bevel, 0)
     const clipBot = Math.max(-Bevel, 0)
