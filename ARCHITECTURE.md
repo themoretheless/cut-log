@@ -10,7 +10,9 @@ The focus is modularity, code decomposition, and loose coupling.
 
 For the operational checklist (status, order, next action), see
 [recommendation.md](recommendation.md). This file is the rationale; that file is
-the to-do.
+the to-do. recommendation.md also carries a ranked top-50 audit of concrete
+issues (bugs, security, accessibility, i18n, performance) from a ten-reviewer
+pass; the phases below cover the structural ones, the rest are standalone fixes.
 
 Status as of version 0.1.38: 0 of 6 phases done. The plan is written but not yet
 executed. PR #65 (editor UX iteration) since grew `Home.vue` from ~958 to ~1907
