@@ -11,6 +11,7 @@ import { buildShareUrl, readShareFromHash } from '@/lib/shareLink'
 import { parsePieceList } from '@/lib/parsePieceList'
 import { createHistory } from '@/lib/history'
 import { computeCostSummary } from '@/lib/costSummary'
+import { buildPiecesCsv } from '@/lib/piecesCsv'
 import { useL10n } from '@/stores/l10n'
 
 const { t } = useL10n()
@@ -231,6 +232,10 @@ function downloadFile(name: string, content: string, mime: string) {
   a.download = name
   a.click()
   URL.revokeObjectURL(url)
+}
+
+function exportPiecesCsv() {
+  if (pieces.length) downloadFile('cutlog-parts.csv', buildPiecesCsv([...pieces]), 'text/csv;charset=utf-8')
 }
 
 function exportSvg() {
@@ -608,6 +613,12 @@ onUnmounted(() => {
                 <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>
               </svg>
               {{ t('share') }}
+            </button>
+            <button class="btn btn-ghost" @click="exportPiecesCsv" :title="t('export.parts_csv')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+              </svg>
+              CSV
             </button>
             <button class="btn btn-primary" @click="calculate">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px">
