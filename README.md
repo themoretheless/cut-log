@@ -50,19 +50,20 @@ be the faster place for it; see [scripts/bench/BENCH.md](scripts/bench/BENCH.md)
 
 ### Layering and the refactoring plan
 
-The frontend follows a strict inward dependency direction:
+The intended dependency direction is strictly inward:
 
 `pages -> composables -> services / lib -> types`
 
-Pure logic (serialization, parsing, history, geometry, cost, export) lives in
-framework-free, unit-tested `lib/*` modules and `box/geometry.ts`. Vue-reactive
-glue lives in composables; pages stay thin and presentation-only. Nothing in
-`lib/` or `services/` may import Vue, a component, a composable, or a store.
+Pure logic (serialization, parsing, history, geometry, cost, export, piece-edit
+ops) already lives in framework-free, unit-tested `lib/*` modules and
+`box/geometry.ts`, and nothing in `lib/` or `services/` imports Vue. The
+composables layer is the target home for the Vue-reactive glue; today most of
+that glue still lives in the page components, chiefly `Home.vue` (~1907 lines),
+which the plan decomposes into composables and a `SheetCard` component.
 
-A full architecture review (by ten independent critics, each on one lens) and an
-incremental, behavior-preserving plan to decompose the remaining god component
-(`Home.vue`, ~958 lines) into testable composables and a `SheetCard` component
-live in [ARCHITECTURE.md](ARCHITECTURE.md).
+The full from-scratch review (ten independent critics, one per lens) and the
+target model live in [ARCHITECTURE.md](ARCHITECTURE.md); the ordered,
+status-tracked to-do is in [recommendation.md](recommendation.md).
 
 ## Build & run
 
