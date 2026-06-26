@@ -12,6 +12,7 @@ import { parsePieceList } from '@/lib/parsePieceList'
 import { createHistory } from '@/lib/history'
 import { computeCostSummary } from '@/lib/costSummary'
 import { buildPiecesCsv } from '@/lib/piecesCsv'
+import { duplicatePiece } from '@/lib/pieceOps'
 import { useL10n } from '@/stores/l10n'
 
 const { t } = useL10n()
@@ -207,6 +208,16 @@ function importPieces() {
 function removePiece(p: CutPiece) {
   const idx = pieces.indexOf(p)
   if (idx >= 0) pieces.splice(idx, 1)
+  saveState()
+}
+
+// Duplicate the given piece (or the selected/last one for the Ctrl+D shortcut),
+// inserting the copy right after it with a fresh id and the next palette color.
+function duplicate(id: string | null) {
+  if (!pieces.length) return
+  const color = PIECE_COLORS[colorIdx++ % PIECE_COLORS.length]
+  const next = duplicatePiece([...pieces], id, crypto.randomUUID(), color)
+  pieces.splice(0, pieces.length, ...next)
   saveState()
 }
 
@@ -409,6 +420,9 @@ function onKeydown(e: KeyboardEvent) {
     || (e.key.toLowerCase() === 'y' && (e.ctrlKey || e.metaKey))) {
     e.preventDefault()
     doRedo()
+  } else if (e.key.toLowerCase() === 'd' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault()
+    duplicate(selectedPieceId.value)
   } else if (e.key === 'Escape') {
     if (selectedPieceId.value !== null) { selectedPieceId.value = null; return }
     result.value = null
@@ -452,6 +466,7 @@ onUnmounted(() => {
       <span><kbd>Ctrl</kbd>+<kbd>Enter</kbd> {{ t('hotkey.calculate') }}</span>
       <span><kbd>Ctrl</kbd>+<kbd>Z</kbd> {{ t('hotkey.undo') }}</span>
       <span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> {{ t('hotkey.redo') }}</span>
+      <span><kbd>Ctrl</kbd>+<kbd>D</kbd> {{ t('hotkey.duplicate') }}</span>
       <span><kbd>Esc</kbd> {{ t('hotkey.clear') }}</span>
     </div>
 
@@ -594,6 +609,11 @@ onUnmounted(() => {
                   >&#8635;</button>
                 </div>
               </div>
+              <button class="btn btn-ghost btn-sm" @click="duplicate(piece.id)" :title="t('duplicate')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+              </button>
               <button class="btn btn-danger btn-sm" @click="removePiece(piece)" :title="t('delete')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
