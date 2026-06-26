@@ -12,6 +12,8 @@ const state: HomeState = {
   sheetHeight: 1220,
   kerf: 3,
   pieces: [piece('a', 'Полка A', 760, 300), piece('b', 'Side', 1800, 300)],
+  pricePerSheet: 1200,
+  currency: '₽',
 }
 
 describe('encodeShare / decodeShare', () => {

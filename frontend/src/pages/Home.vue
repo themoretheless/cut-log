@@ -10,6 +10,7 @@ import { buildLayoutSvg, buildLayoutDxf, buildPrintHtml } from '@/lib/exportLayo
 import { buildShareUrl, readShareFromHash } from '@/lib/shareLink'
 import { parsePieceList } from '@/lib/parsePieceList'
 import { createHistory } from '@/lib/history'
+import { computeCostSummary } from '@/lib/costSummary'
 import { useL10n } from '@/stores/l10n'
 
 const { t } = useL10n()
@@ -32,6 +33,8 @@ const selectedPreset = ref('2440x1220')
 const sheetWidth = ref(2440)
 const sheetHeight = ref(1220)
 const kerf = ref(3)
+const pricePerSheet = ref(0)
+const currency = ref('₽')
 const selectedStrategy = ref<CuttingStrategy>(CuttingStrategy.Auto)
 
 function onPresetChanged(e: Event) {
@@ -90,6 +93,8 @@ function currentState(): HomeState {
     sheetHeight: sheetHeight.value,
     kerf: kerf.value,
     pieces: [...pieces],
+    pricePerSheet: pricePerSheet.value,
+    currency: currency.value,
   }
 }
 
@@ -97,6 +102,8 @@ function applyState(saved: HomeState) {
   sheetWidth.value = saved.sheetWidth
   sheetHeight.value = saved.sheetHeight
   kerf.value = saved.kerf
+  pricePerSheet.value = saved.pricePerSheet
+  currency.value = saved.currency
   pieces.splice(0, pieces.length, ...saved.pieces)
   colorIdx = pieces.length
 }
@@ -328,6 +335,10 @@ const sheetScale = computed(() => {
   return s ? svgScale(s.width, s.height) : 1
 })
 
+// Material cost for the current result; null until a layout is calculated.
+const costSummary = computed(() =>
+  result.value ? computeCostSummary(result.value, pricePerSheet.value) : null)
+
 const pieceIndexById = computed(() => {
   const m = new Map<string, number>()
   pieces.forEach((p, i) => m.set(p.id, i + 1))
@@ -402,7 +413,7 @@ function onKeydown(e: KeyboardEvent) {
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
 // Persist and record history on any sheet/kerf/piece edit.
-watch([sheetWidth, sheetHeight, kerf, pieces], () => {
+watch([sheetWidth, sheetHeight, kerf, pieces, pricePerSheet, currency], () => {
   saveState()
   recordHistory()
 }, { deep: true })
@@ -462,6 +473,13 @@ onUnmounted(() => {
           <div class="form-row">
             <label>{{ t('kerf_mm') }}</label>
             <NumberField v-model="kerf" :min="0" :step="1" />
+          </div>
+          <div class="form-row">
+            <label>{{ t('cost.price_per_sheet') }}</label>
+            <div class="price-row">
+              <NumberField v-model="pricePerSheet" :min="0" :step="1" />
+              <input class="currency-input" type="text" v-model="currency" maxlength="3" :title="t('cost.currency')" />
+            </div>
           </div>
           <div class="form-row">
             <label>{{ t('strategy') }}</label>
@@ -625,6 +643,23 @@ onUnmounted(() => {
             <div class="stat">
               <span class="stat-value stat-value-sm">{{ strategyDisplayName(result.autoPickedStrategy ?? result.strategy) }}</span>
               <span class="stat-label">{{ t('strategy.used') }}</span>
+            </div>
+          </div>
+
+          <!-- Material cost (shown once a sheet price is set) -->
+          <div v-if="costSummary && pricePerSheet > 0" class="cost-bar">
+            <span class="cost-title">{{ t('cost.summary') }}</span>
+            <div class="cost-item">
+              <span class="cost-value">{{ costSummary.totalCost.toFixed(0) }} {{ currency }}</span>
+              <span class="cost-label">{{ t('cost.total') }}</span>
+            </div>
+            <div class="cost-item">
+              <span class="cost-value">{{ costSummary.costPerPart.toFixed(2) }} {{ currency }}</span>
+              <span class="cost-label">{{ t('cost.per_part') }}</span>
+            </div>
+            <div class="cost-item">
+              <span class="cost-value">{{ costSummary.wasteCost.toFixed(0) }} {{ currency }}</span>
+              <span class="cost-label">{{ t('cost.waste_cost') }}</span>
             </div>
           </div>
 
@@ -816,6 +851,52 @@ onUnmounted(() => {
 }
 .import-hint {
   margin: 0;
+  font-size: 11px;
+  opacity: 0.7;
+}
+.price-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.currency-input {
+  width: 48px;
+  text-align: center;
+  padding: 6px 4px;
+  border: 1px solid var(--border, #d0d0d0);
+  border-radius: 6px;
+  background: var(--input-bg, #fff);
+  color: inherit;
+  box-sizing: border-box;
+}
+.cost-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 22px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border, #d0d0d0);
+  border-radius: 8px;
+  background: var(--input-bg, #fff);
+}
+.cost-title {
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.65;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cost-item {
+  display: flex;
+  flex-direction: column;
+}
+.cost-value {
+  font-size: 16px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.cost-label {
   font-size: 11px;
   opacity: 0.7;
 }
