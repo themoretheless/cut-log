@@ -37,7 +37,7 @@ function validPiece(p: any): CutPiece | null {
   if (!p || typeof p !== 'object') return null
   if (!isPosNum(p.width) || !isPosNum(p.height)) return null
   const quantity = Number.isFinite(p.quantity) ? Math.max(1, Math.round(p.quantity)) : 1
-  return {
+  const piece: CutPiece = {
     id: typeof p.id === 'string' && p.id ? p.id : crypto.randomUUID(),
     label: typeof p.label === 'string' ? p.label : '',
     width: p.width,
@@ -46,6 +46,8 @@ function validPiece(p: any): CutPiece | null {
     allowRotation: p.allowRotation !== false,
     color: isHexColor(p.color) ? p.color : '#4A90D9',
   }
+  if (p.locked === true) piece.locked = true
+  return piece
 }
 
 /**

@@ -85,7 +85,17 @@ describe('homeState persistence', () => {
     expect(parsed.pieces).toHaveLength(2)
     expect(parsed.pieces[0].quantity).toBe(3) // rounded
     expect(parsed.pieces[0].allowRotation).toBe(false)
+    expect(parsed.pieces[0].locked).toBeUndefined()
     expect(parsed.pieces[1].quantity).toBe(1) // default
     expect(parsed.pieces[1].id).toBeTruthy() // generated
+  })
+
+  it('preserves locked pieces', () => {
+    const parsed = parseHomeState(serializeHomeState({
+      ...valid,
+      pieces: [{ ...valid.pieces[0], locked: true }],
+    }))!
+
+    expect(parsed.pieces[0].locked).toBe(true)
   })
 })
