@@ -13,6 +13,10 @@ export interface HomeState {
   sheetHeight: number
   kerf: number
   pieces: CutPiece[]
+  /** Price of one stock sheet, in `currency` units. 0 means "no costing". */
+  pricePerSheet: number
+  /** Display symbol for the price (e.g. ₽, $, €). Bounded to keep it a symbol. */
+  currency: string
 }
 
 export function serializeHomeState(state: HomeState): string {
@@ -64,5 +68,12 @@ export function parseHomeState(raw: string | null): HomeState | null {
     ? data.pieces.map(validPiece).filter((p: CutPiece | null): p is CutPiece => p !== null)
     : []
 
-  return { sheetWidth: data.sheetWidth, sheetHeight: data.sheetHeight, kerf: data.kerf, pieces }
+  // Both costing fields are optional and back-compatible: a state saved before
+  // costing existed simply gets the defaults, so no schema-version bump is needed.
+  const pricePerSheet = isNonNegNum(data.pricePerSheet) ? data.pricePerSheet : 0
+  const currency = typeof data.currency === 'string' && data.currency.trim()
+    ? data.currency.trim().slice(0, 3)
+    : '₽'
+
+  return { sheetWidth: data.sheetWidth, sheetHeight: data.sheetHeight, kerf: data.kerf, pieces, pricePerSheet, currency }
 }
