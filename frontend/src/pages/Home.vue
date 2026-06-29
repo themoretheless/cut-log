@@ -418,14 +418,25 @@ function clearAll() {
   recordOperation(t('operation.clear'), t('operation.clear_detail').replace('{0}', String(count)))
 }
 
+// Monotonic id so an out-of-order resolve from a superseded run cannot overwrite
+// the latest result, and so a failure is surfaced instead of leaving a dead UI.
+let calcGen = 0
 async function calculate() {
+  const gen = ++calcGen
   calculated.value = true
-  result.value = await optimize(sheetWidth.value, sheetHeight.value, [...pieces], kerf.value, selectedStrategy.value)
-  if (result.value) {
+  try {
+    const res = await optimize(sheetWidth.value, sheetHeight.value, [...pieces], kerf.value, selectedStrategy.value)
+    if (gen !== calcGen) return // a newer calculate() superseded this one
+    result.value = res
     recordOperation(
       t('operation.calculate'),
-      `${result.value.totalSheets} ${t('sheets')} · ${result.value.overallEfficiency.toFixed(1)}%`,
+      `${res.totalSheets} ${t('sheets')} · ${res.overallEfficiency.toFixed(1)}%`,
     )
+  } catch (e) {
+    if (gen !== calcGen) return
+    result.value = null
+    calculated.value = false
+    showToast(t('calc_error'))
   }
 }
 
