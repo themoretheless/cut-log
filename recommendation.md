@@ -95,6 +95,7 @@ Resolved items, removed from the active lists below (numbers are the stable audi
 - **#18 - unbounded label length** (`lib/homeState.ts`, Home.vue): label sliced to 200 at parse, plus `maxlength` on the inputs. Shipped in #71.
 - **#40 - currency control/bidi characters** (`lib/homeState.ts`): currency whitelisted to letters / currency symbols / dot. Shipped in #71.
 - **#14 - drag-reorder under filter/locked** (`lib/pieceOps.ts`, Home.vue): the locked-aware reorder is now a pure, tested `reorderByDrag`. The drag handlers already bound absolute indices, so the wrong-piece risk was overstated; this pins the behavior with tests. Shipped in #72.
+- **#12 - keyboard shortcuts hijack typing** (`lib/keyboard.ts`, Home.vue): a tested `isEditableTarget` guard (incl. contentEditable) now lets inputs handle Enter and their own Ctrl+Z/Y/D natively; only Ctrl+K and Ctrl+Enter stay global. Shipped in #73.
 
 ## Top 50 issues (audit)
 
@@ -107,9 +108,9 @@ already address; the rest are standalone fixes. Locations are approximate and
 may drift as code changes.
 
 Item numbers are stable ids: a missing number means the item is fixed and moved
-to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #7, #14, #18, #40, #51, #52.
+to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #7, #12, #14, #18, #40, #51, #52.
 
-### High (9)
+### High (8)
 
 1. **three.js scenes leak GPU memory on dispose** [performance] `box/three/useAssemblyScene.ts:284-294`, `usePieceGallery.ts:309-322`. dispose() calls only `renderer.dispose()` and never traverses the groups, so geometries/materials/sprite textures stay in WebGL memory and accumulate on rebuilds. Fix: clearGroup/disposeObj every group first. (Phase 6)
 5. **Deep watcher fires save + history on every keystroke** [performance] `Home.vue:1081-1084`. Deep watch on `pieces` re-runs on each character typed, writing localStorage and snapshotting per keystroke and muddying the undo stack. Fix: drop `deep`, trigger save/record from real mutation handlers. (relates to Phase 3)
@@ -118,7 +119,6 @@ to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #7, #14, #18, #40, 
 9. **Dimension field labels not associated with the input** [a11y] `Home.vue` form rows, `BoxBuilder.vue:97-129`. `<label>` and NumberField are siblings with no `for`/`id`, and even nested the first labelable descendant is NumberField's "minus" button, so the number input is unlabeled. Fix: expose an `id` on NumberField's input and use `for`/`id`.
 10. **No keyboard alternative to drag-drop reorder** [a11y] `Home.vue:1474-1540`. Reordering is drag-only; keyboard and AT users cannot reorder. Fix: Alt+ArrowUp/Down on focused rows with an ARIA live announce.
 11. **Layout SVGs have no accessible names** [a11y] `Home.vue:1642-1763`, `BoxBuilder.vue:159-221`. Placed-piece rects/text have no `title`/`desc`/`role`. Fix: `role="img"` plus per-piece `title`/`desc`.
-12. **Bare-Enter handler can swallow typing in inputs** [correctness] `Home.vue:1046-1077`. The editable-target guard must run before any `preventDefault`, and `contentEditable` is not covered. Fix: move the guard to the top and include `isContentEditable`.
 13. **No round-trip test for the label-based piece matching** [testing] `box/useBoxModel.ts:77-90`. Nothing feeds every `allPieces()` label back through `pieceData()`, so a label change ships broken. Fix: add that round-trip test. (Phase 5)
 
 ### Medium (24)

@@ -34,6 +34,7 @@ import {
 import { computeCostSummary } from '@/lib/costSummary'
 import { buildPiecesCsv } from '@/lib/piecesCsv'
 import { duplicatePiece as duplicatePieceList, reorderByDrag } from '@/lib/pieceOps'
+import { isEditableTarget } from '@/lib/keyboard'
 import { useL10n } from '@/stores/l10n'
 
 const { t } = useL10n()
@@ -1048,21 +1049,31 @@ function strategyDisplayName(s: CuttingStrategy): string {
 
 // ── Keyboard shortcuts ───────────────────────────────────────────────────────
 function onKeydown(e: KeyboardEvent) {
+  // Global shortcuts that are safe to fire even while typing in a field.
   if (e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault()
     openCommandPalette()
-  } else if (commandPaletteOpen.value && e.key === 'Escape') {
+    return
+  }
+  if (commandPaletteOpen.value && e.key === 'Escape') {
     e.preventDefault()
     closeCommandPalette()
-  } else if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
-    // Only fire if not focused on an input that should handle Enter natively
-    const tag = (e.target as HTMLElement)?.tagName
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-    e.preventDefault()
-    addPiece()
-  } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    return
+  }
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault()
     if (pieces.length) calculate()
+    return
+  }
+
+  // Everything below would clobber native text editing (Enter, the field's own
+  // Ctrl+Z/Y undo, Ctrl+D), so leave inputs / textareas / selects /
+  // contentEditable to the browser.
+  if (isEditableTarget(e.target as HTMLElement | null)) return
+
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    addPiece()
   } else if (e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
     e.preventDefault()
     doUndo()
