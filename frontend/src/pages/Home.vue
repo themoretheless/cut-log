@@ -33,7 +33,7 @@ import {
 } from '@/lib/pieceEditor'
 import { computeCostSummary } from '@/lib/costSummary'
 import { buildPiecesCsv } from '@/lib/piecesCsv'
-import { duplicatePiece as duplicatePieceList } from '@/lib/pieceOps'
+import { duplicatePiece as duplicatePieceList, reorderByDrag } from '@/lib/pieceOps'
 import { useL10n } from '@/stores/l10n'
 
 const { t } = useL10n()
@@ -968,21 +968,14 @@ function onDragLeave() {
 function dropPiece(targetIdx: number) {
   if (dragStartIdx.value < 0 || dragStartIdx.value === targetIdx || dragStartIdx.value >= pieces.length) return
   if (pieces[dragStartIdx.value]?.locked || pieces[targetIdx]?.locked) return
-  const unlockedIndexes = pieces.map((piece, index) => piece.locked ? -1 : index).filter(index => index >= 0)
-  const sourcePos = unlockedIndexes.indexOf(dragStartIdx.value)
-  const targetPos = unlockedIndexes.indexOf(targetIdx)
-  if (sourcePos < 0 || targetPos < 0) return
-  const unlockedPieces = unlockedIndexes.map(index => pieces[index])
-  const [item] = unlockedPieces.splice(sourcePos, 1)
-  unlockedPieces.splice(targetPos, 0, item)
-  unlockedIndexes.forEach((index, unlockedIndex) => {
-    pieces[index] = unlockedPieces[unlockedIndex]
-  })
+  const unlockedCount = pieces.filter(piece => !piece.locked).length
+  const next = reorderByDrag([...pieces], dragStartIdx.value, targetIdx)
+  pieces.splice(0, pieces.length, ...next)
   pieceSortMode.value = 'manual'
   dragStartIdx.value = -1
   dragOverIdx.value = -1
   saveState()
-  recordOperation(t('operation.reorder'), t('operation.visible_count').replace('{0}', String(unlockedIndexes.length)))
+  recordOperation(t('operation.reorder'), t('operation.visible_count').replace('{0}', String(unlockedCount)))
 }
 
 function onDragEnd() {
