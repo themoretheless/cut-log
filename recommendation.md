@@ -91,6 +91,9 @@ Resolved items, removed from the active lists below (numbers are the stable audi
 - **#3 - WASM init never reset on failure** (`services/rustService.ts`): `initPromise` is cleared on error so the next call retries. Shipped in #70.
 - **#4 - WASM output untyped/unguarded** (`services/optimizer.ts`): typed `RawOutput` interfaces, parse wrapped in try/catch, array-shape guard. Shipped in #70.
 - **#51 - calculate() result race**: a monotonic generation id discards superseded runs. Shipped in #70.
+- **#52 - unbounded piece count** (`lib/homeState.ts`): parseHomeState caps the list at 1000. Shipped in #71.
+- **#18 - unbounded label length** (`lib/homeState.ts`, Home.vue): label sliced to 200 at parse, plus `maxlength` on the inputs. Shipped in #71.
+- **#40 - currency control/bidi characters** (`lib/homeState.ts`): currency whitelisted to letters / currency symbols / dot. Shipped in #71.
 
 ## Top 50 issues (audit)
 
@@ -103,7 +106,7 @@ already address; the rest are standalone fixes. Locations are approximate and
 may drift as code changes.
 
 Item numbers are stable ids: a missing number means the item is fixed and moved
-to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #7, #51.
+to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #7, #18, #40, #51, #52.
 
 ### High (10)
 
@@ -118,12 +121,11 @@ to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #7, #51.
 13. **No round-trip test for the label-based piece matching** [testing] `box/useBoxModel.ts:77-90`. Nothing feeds every `allPieces()` label back through `pieceData()`, so a label change ships broken. Fix: add that round-trip test. (Phase 5)
 14. **Drag-drop with an active filter can move the wrong piece** [correctness] `Home.vue:957-975`. The visible-vs-real index remapping with interleaved locked/filtered pieces is untested. Fix: tests for drag with a filter and locked neighbors.
 
-### Medium (25)
+### Medium (24)
 
 15. **localStorage.setItem failures swallowed** [error-handling] `Home.vue:172-176`. QuotaExceeded and private-mode errors are discarded; the user silently stops persisting. Fix: detect quota and warn.
 16. **Palette command errors dropped** [error-handling] `Home.vue:904-908`. `runPaletteCommand` has no catch and the caller does not await. Fix: try/catch + error toast + await.
 17. **Imported/shared quantity reaches optimizer unvalidated** [correctness] `services/optimizer.ts:20-28`. `0`/`-1`/`0.5`/`NaN` from a link or paste hit the Rust packer. Fix: `Math.max(1, Math.round(q))` before serializing.
-18. **Piece label length unbounded** [correctness] `lib/homeState.ts:42`. A crafted link can carry a multi-MB label that bloats the payload and slows the UI. Fix: slice to ~200 plus a `maxlength`.
 19. **useBoxModel injects t() into geometry logic** [architecture] `box/useBoxModel.ts:23,78-109`. Couples geometry to the l10n store. Fix: pass a kind enum, localize labels in the component. (Phase 5)
 20. **colorIdx is module-level mutable, not restored on undo** [correctness] `Home.vue` (several sites). The color counter desyncs after undo/redo/import. Fix: store it in state or derive color from array position.
 21. **labelMatCache materials/textures never disposed** [performance] `box/three/useAssemblyScene.ts:38-62,284`. Cached SpriteMaterial + CanvasTexture grow unbounded. Fix: dispose and clear the cache in `dispose()`. (Phase 6)
@@ -146,9 +148,8 @@ to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #7, #51.
 38. **Bulk-transform summaries diverge under a filter change** [correctness] `Home.vue:775-825`. Reads the visible set twice; a mid-op filter change misreports counts. Fix: snapshot the target set once and test it.
 39. **l10n parity test ignores placeholder counts** [testing] `stores/l10n.parity.test.ts`. A `{0}`/`{1}` mismatch between locales passes. Fix: assert matching `{N}` placeholders across locales.
 
-### Low (11)
+### Low (10)
 
-40. **Currency field accepts control/bidi characters** [correctness] `lib/homeState.ts:76-78`. The 3-char limit allows control or bidi-override chars from a link. Fix: whitelist allowed currency characters.
 41. **ResizeObserver has no zero-size guard** [error-handling] `useAssemblyScene.ts:142-152`, `usePieceGallery.ts:146-155`. A 0-size container yields a NaN camera aspect. Fix: guard `w > 0 && h > 0`.
 42. **validSnapshot can pass undefined state to serialize** [correctness] `projectSnapshots.ts:52-54`. An undefined `state` stringifies to invalid JSON that fails on load. Fix: reject when `state` is missing or not an object.
 43. **makeLabel calls t() per loop iteration** [correctness] `useAssemblyScene.ts:265-273`. Stale shelf labels on a runtime locale change. Fix: hoist the label before the loop. (Phase 5/6)
@@ -168,10 +169,6 @@ test quality). It mostly re-confirmed the top-50 criticals (omitted here), which
 is a good signal those are real; below are only the genuinely new findings. With
 both passes, the audit is considered complete for the current code; further
 issues will surface as code changes.
-
-### High (1)
-
-52. **Share-link / persisted piece count is unbounded** [security] `lib/homeState.ts:69-71`. A crafted hash or localStorage value with hundreds of thousands of pieces is fully materialized and fed to the optimizer, freezing the tab (memory DoS). Fix: cap the array (e.g. 1000) in parseHomeState and reject/truncate beyond it.
 
 ### Medium (14)
 

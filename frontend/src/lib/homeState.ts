@@ -7,6 +7,14 @@ import type { CutPiece } from '@/services/types'
 
 export const HOME_STATE_KEY = 'home_state'
 const VERSION = 1
+// Bounds on untrusted input (a share-link hash or localStorage value is fully
+// attacker-controllable). Without these a crafted payload can carry a multi-MB
+// label or hundreds of thousands of pieces and freeze the tab (memory DoS).
+const MAX_LABEL = 200
+const MAX_PIECES = 1000
+// Currency is rendered into the UI; allow only letters, currency symbols, and a
+// dot so a crafted value cannot inject control or bidi-override characters.
+const CURRENCY_RE = /^[\p{L}\p{Sc}.]{1,3}$/u
 
 export interface HomeState {
   sheetWidth: number
@@ -39,7 +47,7 @@ function validPiece(p: any): CutPiece | null {
   const quantity = Number.isFinite(p.quantity) ? Math.max(1, Math.round(p.quantity)) : 1
   const piece: CutPiece = {
     id: typeof p.id === 'string' && p.id ? p.id : crypto.randomUUID(),
-    label: typeof p.label === 'string' ? p.label : '',
+    label: typeof p.label === 'string' ? p.label.slice(0, MAX_LABEL) : '',
     width: p.width,
     height: p.height,
     quantity,
@@ -67,15 +75,14 @@ export function parseHomeState(raw: string | null): HomeState | null {
   if (!isPosNum(data.sheetWidth) || !isPosNum(data.sheetHeight) || !isNonNegNum(data.kerf)) return null
 
   const pieces = Array.isArray(data.pieces)
-    ? data.pieces.map(validPiece).filter((p: CutPiece | null): p is CutPiece => p !== null)
+    ? data.pieces.slice(0, MAX_PIECES).map(validPiece).filter((p: CutPiece | null): p is CutPiece => p !== null)
     : []
 
   // Both costing fields are optional and back-compatible: a state saved before
   // costing existed simply gets the defaults, so no schema-version bump is needed.
   const pricePerSheet = isNonNegNum(data.pricePerSheet) ? data.pricePerSheet : 0
-  const currency = typeof data.currency === 'string' && data.currency.trim()
-    ? data.currency.trim().slice(0, 3)
-    : '₽'
+  const rawCurrency = typeof data.currency === 'string' ? data.currency.trim().slice(0, 3) : ''
+  const currency = CURRENCY_RE.test(rawCurrency) ? rawCurrency : '₽'
 
   return { sheetWidth: data.sheetWidth, sheetHeight: data.sheetHeight, kerf: data.kerf, pieces, pricePerSheet, currency }
 }
