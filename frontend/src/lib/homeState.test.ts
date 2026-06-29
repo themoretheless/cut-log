@@ -58,6 +58,28 @@ describe('homeState persistence', () => {
     expect(b.currency).toBe('дол') // trimmed to 3 chars
   })
 
+  it('rejects a currency with control or bidi characters', () => {
+    const cur = (c: string) => parseHomeState(serializeHomeState({ ...valid, currency: c }))!.currency
+    const rtlOverride = String.fromCharCode(0x202E)
+    expect(cur(rtlOverride + '$')).toBe('₽') // bidi override -> default
+    expect(cur('"x')).toBe('₽')               // quote not allowed -> default
+    expect(cur('€')).toBe('€')                 // legit symbol kept
+    expect(cur('USD')).toBe('USD')             // letters kept
+  })
+
+  it('bounds an oversized label and an oversized piece list', () => {
+    const huge = 'L'.repeat(5000)
+    const many = Array.from({ length: 5000 }, (_, i) => ({
+      id: 'p' + i, label: 'x', width: 100, height: 50, quantity: 1, allowRotation: true, color: '#abc',
+    }))
+    const parsed = parseHomeState(serializeHomeState({
+      ...valid,
+      pieces: [{ ...valid.pieces[0], label: huge }, ...many],
+    }))!
+    expect(parsed.pieces.length).toBe(1000)         // piece count capped
+    expect(parsed.pieces[0].label.length).toBe(200) // label length capped
+  })
+
   it('keeps valid hex colors but replaces non-hex / injected ones with the default', () => {
     const raw = serializeHomeState({
       ...valid,

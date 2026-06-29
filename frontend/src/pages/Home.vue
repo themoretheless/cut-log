@@ -1179,7 +1179,7 @@ onUnmounted(() => {
           <h2>{{ t('add_piece') }}</h2>
           <div class="form-row">
             <label>{{ t('name') }}</label>
-            <input type="text" v-model="newLabel" :placeholder="t('name_placeholder')" />
+            <input type="text" v-model="newLabel" :placeholder="t('name_placeholder')" maxlength="200" />
           </div>
           <div class="form-row">
             <label>{{ t('width_mm') }}</label>
@@ -1502,7 +1502,7 @@ onUnmounted(() => {
               </span>
               <span class="piece-color" :style="{ background: entry.piece.color, cursor: 'pointer' }" :title="t('highlight_hint')" @click="toggleSelect(entry.piece.id)">{{ entry.index + 1 }}</span>
               <div class="piece-edit-fields">
-                <input class="piece-edit-label" type="text" v-model="entry.piece.label" :placeholder="t('name')" />
+                <input class="piece-edit-label" type="text" v-model="entry.piece.label" :placeholder="t('name')" maxlength="200" />
                 <div class="piece-edit-dims">
                   <NumberField v-model="entry.piece.width" :min="1" :step="1" />
                   <span class="unit">&times;</span>
