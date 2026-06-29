@@ -11,8 +11,9 @@ Progress so far: 0 of 6 phases done.
 Two things live here: the **phased refactoring plan** (structural, below) and a
 **ranked top-50 audit** of concrete issues found by a ten-reviewer pass (bugs,
 security, accessibility, i18n, performance), in the
-[Top 50 issues](#top-50-issues-audit) section. The phases address the structural
-items; many audit issues are standalone fixes that can ship independently.
+[Top 50 issues](#top-50-issues-audit) section, plus a deeper second-wave
+addendum (issues 51-73). The phases address the structural items; many audit
+issues are standalone fixes that can ship independently.
 
 ## How to work this list
 
@@ -152,6 +153,47 @@ error handling (#2, #3, #4), none of which are covered by the structural phases.
 48. **Unused jspdf/svg2pdf dependencies** [dead-code] `package.json:13-14`. Roughly 200KB of footprint, never imported. Fix: remove them. (Phase 0)
 49. **Color palettes scattered with no shared source** [duplication] `helpers/svg.ts`, `box/useBoxModel.ts`. No single palette to keep the two pages consistent. Fix: consolidate into `lib/palette.ts`. (Phase 1)
 50. **readinessScore is opaque magic numbers, untested** [architecture] `Home.vue:535-545`. Inline `30/18/12/18/24` deductions with no constants or tests. Fix: extract a pure `scoreReadiness()` into `lib/readiness.ts` with tests.
+
+## Second wave: additional issues (deduped vs the top 50)
+
+A deeper second audit pass (ten reviewers over the Rust optimizer, the WASM/build
+boundary, numerical edge cases, CSS, async timing, security/DoS, persistence, and
+test quality). It mostly re-confirmed the top-50 criticals (omitted here), which
+is a good signal those are real; below are only the genuinely new findings. With
+both passes, the audit is considered complete for the current code; further
+issues will surface as code changes.
+
+### High (2)
+
+51. **calculate() result race shows a stale layout** [correctness] `Home.vue:421-430`. Two rapid recomputes resolve out of order and the older run can overwrite the newer result; there is no generation guard. Fix: capture an incrementing run id before awaiting and assign only if it is still current.
+52. **Share-link / persisted piece count is unbounded** [security] `lib/homeState.ts:69-71`. A crafted hash or localStorage value with hundreds of thousands of pieces is fully materialized and fed to the optimizer, freezing the tab (memory DoS). Fix: cap the array (e.g. 1000) in parseHomeState and reject/truncate beyond it.
+
+### Medium (14)
+
+53. **Form numbers not validated finite/positive before the optimizer** [error-handling] `Home.vue:421-423`, `lib/validatePiece.ts`. `validateNewPiece` never checks `Number.isFinite` (NaN passes `<= 0`), and live sheet/kerf refs reach `optimize()` unguarded. Fix: guard with `Number.isFinite` and `> 0` in validateNewPiece and before calculate.
+54. **validateNewPiece ignores kerf** [correctness] `lib/validatePiece.ts:19-28`. A piece within kerf of the sheet passes the form then silently lands in unplaced. Fix: compare `width+kerf`/`height+kerf` against the sheet in both orientations.
+55. **Optimizer expands quantity with no total-count guard (Rust OOM)** [error-handling] `crates/core/src/optimizer.rs:236`, `crates/wasm/src/lib.rs:112-116`. `repeat_n(p, quantity as usize)` on an untrusted u32 can materialize billions of entries and hang the WASM thread. Fix: clamp quantity and the total expanded count after deserialization.
+56. **Export SVG fill color not hex-validated on the WASM path** [security] `lib/exportLayout.ts:51`. Synthetic pieces built from raw WASM `source_color` (optimizer.ts) bypass the `isHexColor` gate; export only `escapeXml`s it, so `url(...)`/malformed colors pass through. Fix: validate against the hex regex and fall back to a default.
+57. **Snapshot fallback aliases live state** [data-integrity] `lib/projectSnapshots.ts:69`. `parseHomeState(serialize(state)) ?? input.state` returns the caller's live object by reference on parse failure, so later edits mutate the stored backup. Fix: drop the fallback (or structuredClone) so a snapshot never aliases live state.
+58. **Auto-backup taken after mutation on some delete paths** [correctness] `Home.vue` clearAll/removePiece. If the backup runs after the splice, undo loses the pre-delete list. Fix: always snapshot strictly before mutating, with a test.
+59. **partsList groups by rounded dimensions** [correctness] `lib/exportLayout.ts:22-36`. The key `${label}|${round(w)}x${round(h)}` merges distinct sizes that round alike, misreporting size and per-size quantity. Fix: key on unrounded dimensions, round only for display.
+60. **costSummary wasteCost double-counts** [correctness] `lib/costSummary.ts:34-37`. `totalCost * (1 - usedFraction)` mixes whole-sheet pricing with area waste and will not reconcile with `totalCost - usefulCost`. Fix: define wasteCost as totalCost minus placed-area value, or drop the metric.
+61. **DXF export has no HEADER/TABLES section** [correctness] `lib/exportLayout.ts:73-100`. Entities-only DXF declares no units; stricter CAM tools reject it or import at the wrong scale. Fix: emit a minimal HEADER (`$INSUNITS=4`, extents) and a TABLES layer-0 section.
+62. **BoxParams has no thickness-fits-box validation** [numerical] `box/geometry.ts:25-26`. When `t >= w/2` or `t >= h/2`, `wi`/`hi` go zero/negative and produce degenerate contours and broken 3D. Fix: validate/clamp `0 < t < min(w,h)/2` before generating geometry.
+63. **Negative tab/shelf gaps when counts exceed length** [numerical] `box/geometry.ts:31-37,48-57`. `gap=(L - n*tabH)/(n+1)` goes negative once the count does not fit, marching positions backward into self-intersecting paths. Fix: cap nTab/nShelves to what fits, or clamp gap and bail to empty.
+64. **svgScale/sheetScale divide with no near-zero floor** [numerical] `box/geometry.ts:213-214`, `Home.vue` sheetScale. A tiny/zero dimension makes the scale explode and overflow the canvas. Fix: clamp the denominator to a small positive floor.
+65. **BASE_URL wasm path has no fallback** [build] `services/rustService.ts:16`. A base/path mismatch 404s the `.wasm`, and (with the cached-rejection bug) kills the optimizer with only a console error. Fix: on init failure retry once with an origin-relative URL.
+66. **Version drift across manifests** [build] `version.json` vs `crates/wasm/Cargo.toml`, `frontend/package.json`. Only `version.json` is bumped; the crate/package versions are stale. Fix: a CI check that asserts they match (or derive them).
+
+### Low (7)
+
+67. **sortPiecesForEditor comparator is not stable** [correctness] `lib/pieceEditor.ts:85-96`. Ties in area/quantity sorts shuffle equal-key pieces, polluting undo with no-op reorders. Fix: add a deterministic secondary key (piece id).
+68. **copyShareLink fallback hijacks the address bar** [correctness] `Home.vue:475-486`. On clipboard failure it `history.replaceState`s a multi-KB hash and still toasts "copied". Fix: show a manual-copy message and do not claim success.
+69. **Rust packer fit checks use bare f64 comparisons** [numerical] `crates/core/src/optimizer.rs:335-338,408-418`. Accumulated rounding can reject a piece that exactly fits. Fix: compare with a small epsilon consistently.
+70. **compose() can panic via expect** [error-handling] `crates/core/src/optimizer.rs:84-89`. A future strategy added to one enum but not the table panics in WASM. Fix: return a default/Option, or assert ALL_STRATEGIES is exhaustive in a test.
+71. **makeLabel renders text to a fixed 256px canvas with no bound** [correctness] `box/three/useAssemblyScene.ts:41-69`. Long localized labels overflow/clip, and the never-disposed cache can grow across a session. Fix: measure/clamp the text and bound the cache.
+72. **Error toasts use role=status (polite)** [a11y] `Home.vue` toast. Failures may not be announced before the 2.2s node is removed. Fix: role=alert for error/critical toasts.
+73. **CI wasm copy does not verify required files** [build] `.github/workflows/build.yml:107-111`. A wasm-pack output rename would ship a broken `frontend/wasm` with a green build. Fix: assert the expected files exist after copy and fail otherwise.
 
 ## Known doc and code corrections folded in
 
