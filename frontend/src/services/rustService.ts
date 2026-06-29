@@ -12,9 +12,16 @@ export async function ensureWasm(): Promise<WasmModule> {
   if (wasm) return wasm
   if (!initPromise) {
     initPromise = (async () => {
-      const mod = await import('../../wasm/cutter_wasm')
-      await mod.default({ module_or_path: `${import.meta.env.BASE_URL}cutter_wasm_bg.wasm` })
-      wasm = mod
+      try {
+        const mod = await import('../../wasm/cutter_wasm')
+        await mod.default({ module_or_path: `${import.meta.env.BASE_URL}cutter_wasm_bg.wasm` })
+        wasm = mod
+      } catch (err) {
+        // Drop the cached promise so a later call retries instead of awaiting a
+        // permanently-rejected one (which would wedge the optimizer for good).
+        initPromise = null
+        throw err
+      }
     })()
   }
   await initPromise

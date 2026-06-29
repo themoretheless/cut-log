@@ -22,11 +22,14 @@ const rawResult = {
   overall_efficiency: 8.06,
 }
 
+// Mutable so individual tests can make the optimizer return malformed output.
+let wasmOutput = JSON.stringify(rawResult)
+
 vi.mock('./rustService', () => ({
   ensureWasm: async () => ({
     optimize_sync: (input: string) => {
       captured = input
-      return JSON.stringify(rawResult)
+      return wasmOutput
     },
   }),
 }))
@@ -35,7 +38,7 @@ const piece: CutPiece = {
   id: 'p1', label: 'A', width: 400, height: 300, quantity: 2, allowRotation: false, color: '#111',
 }
 
-beforeEach(() => { captured = '' })
+beforeEach(() => { captured = ''; wasmOutput = JSON.stringify(rawResult) })
 
 describe('optimize() service glue', () => {
   it('builds the wasm request with snake_case fields', async () => {
@@ -58,6 +61,16 @@ describe('optimize() service glue', () => {
     const res = await optimize(2440, 1220, [piece], 3)
     const fallback = res.sheets[0].placedPieces[1].source
     expect(fallback).toMatchObject({ id: 'gone', label: 'X', color: '#222', width: 300, height: 400 })
+  })
+
+  it('throws a clear error when wasm returns invalid JSON', async () => {
+    wasmOutput = 'this is not json'
+    await expect(optimize(2440, 1220, [piece], 3)).rejects.toThrow(/invalid JSON/i)
+  })
+
+  it('throws when the wasm output shape is unexpected', async () => {
+    wasmOutput = JSON.stringify({ sheets: 'nope' })
+    await expect(optimize(2440, 1220, [piece], 3)).rejects.toThrow(/unexpected shape/i)
   })
 
   it('maps unplaced pieces and top-level totals', async () => {

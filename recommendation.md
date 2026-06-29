@@ -82,28 +82,34 @@ downloads correctly on each page.
 - Phase 6: `renderer.info.memory.geometries`/`textures` stay flat across repeated
   box-param changes and navigate-away-and-back; visual parity of explode and ring.
 
+## Fixed
+
+Resolved items, removed from the active lists below (numbers are the stable audit ids):
+
+- **#7 - CSV formula injection** (`lib/piecesCsv.ts`): formula-lead labels are neutralized with a leading quote. Shipped in #69.
+- **#2 - calculate() error handling** (`Home.vue`): wrapped in try/catch, resets state and shows an error toast on failure. Shipped in #70.
+- **#3 - WASM init never reset on failure** (`services/rustService.ts`): `initPromise` is cleared on error so the next call retries. Shipped in #70.
+- **#4 - WASM output untyped/unguarded** (`services/optimizer.ts`): typed `RawOutput` interfaces, parse wrapped in try/catch, array-shape guard. Shipped in #70.
+- **#51 - calculate() result race**: a monotonic generation id discards superseded runs. Shipped in #70.
+
 ## Top 50 issues (audit)
 
 Ranked output of a ten-reviewer audit (correctness, security, error-handling,
 performance, architecture, dead-code, duplication, testing, type-safety, a11y,
-i18n), deduped from 101 raw findings. No critical issues were found (14 high, 25
-medium, 11 low). These are findings to triage; the high-severity ones were
+i18n), deduped from 101 raw findings (originally 14 high, 25 medium, 11 low; no
+criticals). These are findings to triage; the high-severity ones were
 spot-checked against the code. A `(Phase N)` tag marks issues the phases above
 already address; the rest are standalone fixes. Locations are approximate and
 may drift as code changes.
 
-The two most urgent standalone fixes are #7 (CSV formula injection) and the WASM
-error handling (#2, #3, #4), none of which are covered by the structural phases.
+Item numbers are stable ids: a missing number means the item is fixed and moved
+to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #7, #51.
 
-### High (14)
+### High (10)
 
 1. **three.js scenes leak GPU memory on dispose** [performance] `box/three/useAssemblyScene.ts:284-294`, `usePieceGallery.ts:309-322`. dispose() calls only `renderer.dispose()` and never traverses the groups, so geometries/materials/sprite textures stay in WebGL memory and accumulate on rebuilds. Fix: clearGroup/disposeObj every group first. (Phase 6)
-2. **calculate() has no try/catch around optimize()** [error-handling] `Home.vue:421-430`. A WASM load failure or Rust panic rejects unhandled, leaving `calculated=true`, `result=null`, and an unhandled window error. Fix: try/catch, reset `calculated`, error toast.
-3. **WASM init promise never reset on failure** [error-handling] `services/rustService.ts:11-22`. If init throws, the cached promise stays dead and every later `optimize()` awaits it forever (wasm stays null). Fix: on error set `initPromise=null` and rethrow so the next call retries.
-4. **WASM output JSON.parse is untyped and unguarded** [error-handling] `services/optimizer.ts:31-60`. Parsed as `any` with no try/catch; malformed or field-renamed output throws or silently mismaps. Fix: typed response interface + try/catch + shape guard.
 5. **Deep watcher fires save + history on every keystroke** [performance] `Home.vue:1081-1084`. Deep watch on `pieces` re-runs on each character typed, writing localStorage and snapshotting per keystroke and muddying the undo stack. Fix: drop `deep`, trigger save/record from real mutation handlers. (relates to Phase 3)
 6. **God component Home.vue (~1907 lines)** [architecture] `Home.vue:1-1908`. UI, persistence, history, snapshots, export, commands, sort/filter, and bulk transforms over shared mutable state; untestable. Fix: extract composables and modules. (Phases 3-5)
-7. **CSV export is open to spreadsheet formula injection** [security] `lib/piecesCsv.ts:10-11`. A label starting with `=`, `+`, `-`, or `@` is emitted unquoted and runs as a formula in Excel/Sheets. Fix: force-quote and prefix a tab or apostrophe for such values. (standalone, urgent)
 8. **Box piece identity matched by translated label** [correctness] `box/useBoxModel.ts:77-90`. `pieceData()` compares against `t()` labels; a translation edit, a language switch, or an old saved label falls through to wrong geometry silently. Fix: match on a stable `pieceKind` enum. (Phase 5)
 9. **Dimension field labels not associated with the input** [a11y] `Home.vue` form rows, `BoxBuilder.vue:97-129`. `<label>` and NumberField are siblings with no `for`/`id`, and even nested the first labelable descendant is NumberField's "minus" button, so the number input is unlabeled. Fix: expose an `id` on NumberField's input and use `for`/`id`.
 10. **No keyboard alternative to drag-drop reorder** [a11y] `Home.vue:1474-1540`. Reordering is drag-only; keyboard and AT users cannot reorder. Fix: Alt+ArrowUp/Down on focused rows with an ARIA live announce.
@@ -163,9 +169,8 @@ is a good signal those are real; below are only the genuinely new findings. With
 both passes, the audit is considered complete for the current code; further
 issues will surface as code changes.
 
-### High (2)
+### High (1)
 
-51. **calculate() result race shows a stale layout** [correctness] `Home.vue:421-430`. Two rapid recomputes resolve out of order and the older run can overwrite the newer result; there is no generation guard. Fix: capture an incrementing run id before awaiting and assign only if it is still current.
 52. **Share-link / persisted piece count is unbounded** [security] `lib/homeState.ts:69-71`. A crafted hash or localStorage value with hundreds of thousands of pieces is fully materialized and fed to the optimizer, freezing the tab (memory DoS). Fix: cap the array (e.g. 1000) in parseHomeState and reject/truncate beyond it.
 
 ### Medium (14)
