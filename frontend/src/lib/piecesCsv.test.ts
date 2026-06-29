@@ -22,6 +22,29 @@ describe('buildPiecesCsv', () => {
     expect(csv).toContain('"A ""wide"" panel",100,50,1,1')
   })
 
+  it('neutralizes spreadsheet formula injection in labels', () => {
+    const csv = buildPiecesCsv([
+      piece('=1+2', 100, 50, 1),
+      piece('+SUM(A1)', 100, 50, 1),
+      piece('-2', 100, 50, 1),
+      piece('@cmd', 100, 50, 1),
+    ])
+    // each dangerous label is prefixed with a single quote so it reads as text
+    expect(csv).toContain("'=1+2,100,50,1,1")
+    expect(csv).toContain("'+SUM(A1),100,50,1,1")
+    expect(csv).toContain("'-2,100,50,1,1")
+    expect(csv).toContain("'@cmd,100,50,1,1")
+    // and no data cell starts with a bare formula lead
+    for (const line of csv.trimEnd().split('\r\n').slice(1)) {
+      expect(/^[=+\-@\t\r]/.test(line)).toBe(false)
+    }
+  })
+
+  it('still quotes a formula-lead label that also contains a comma', () => {
+    const csv = buildPiecesCsv([piece('=a,b', 100, 50, 1)])
+    expect(csv).toContain('"\'=a,b",100,50,1,1')
+  })
+
   it('round-trips through parsePieceList (dims and quantity)', () => {
     const csv = buildPiecesCsv([piece('Полка A', 760, 300, 4), piece('Bok', 1800, 300, 2)])
     const { rows } = parsePieceList(csv)
