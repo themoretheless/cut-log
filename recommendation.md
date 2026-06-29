@@ -94,6 +94,7 @@ Resolved items, removed from the active lists below (numbers are the stable audi
 - **#52 - unbounded piece count** (`lib/homeState.ts`): parseHomeState caps the list at 1000. Shipped in #71.
 - **#18 - unbounded label length** (`lib/homeState.ts`, Home.vue): label sliced to 200 at parse, plus `maxlength` on the inputs. Shipped in #71.
 - **#40 - currency control/bidi characters** (`lib/homeState.ts`): currency whitelisted to letters / currency symbols / dot. Shipped in #71.
+- **#14 - drag-reorder under filter/locked** (`lib/pieceOps.ts`, Home.vue): the locked-aware reorder is now a pure, tested `reorderByDrag`. The drag handlers already bound absolute indices, so the wrong-piece risk was overstated; this pins the behavior with tests. Shipped in #72.
 
 ## Top 50 issues (audit)
 
@@ -106,9 +107,9 @@ already address; the rest are standalone fixes. Locations are approximate and
 may drift as code changes.
 
 Item numbers are stable ids: a missing number means the item is fixed and moved
-to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #7, #18, #40, #51, #52.
+to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #7, #14, #18, #40, #51, #52.
 
-### High (10)
+### High (9)
 
 1. **three.js scenes leak GPU memory on dispose** [performance] `box/three/useAssemblyScene.ts:284-294`, `usePieceGallery.ts:309-322`. dispose() calls only `renderer.dispose()` and never traverses the groups, so geometries/materials/sprite textures stay in WebGL memory and accumulate on rebuilds. Fix: clearGroup/disposeObj every group first. (Phase 6)
 5. **Deep watcher fires save + history on every keystroke** [performance] `Home.vue:1081-1084`. Deep watch on `pieces` re-runs on each character typed, writing localStorage and snapshotting per keystroke and muddying the undo stack. Fix: drop `deep`, trigger save/record from real mutation handlers. (relates to Phase 3)
@@ -119,7 +120,6 @@ to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #7, #18, #40, #51, 
 11. **Layout SVGs have no accessible names** [a11y] `Home.vue:1642-1763`, `BoxBuilder.vue:159-221`. Placed-piece rects/text have no `title`/`desc`/`role`. Fix: `role="img"` plus per-piece `title`/`desc`.
 12. **Bare-Enter handler can swallow typing in inputs** [correctness] `Home.vue:1046-1077`. The editable-target guard must run before any `preventDefault`, and `contentEditable` is not covered. Fix: move the guard to the top and include `isContentEditable`.
 13. **No round-trip test for the label-based piece matching** [testing] `box/useBoxModel.ts:77-90`. Nothing feeds every `allPieces()` label back through `pieceData()`, so a label change ships broken. Fix: add that round-trip test. (Phase 5)
-14. **Drag-drop with an active filter can move the wrong piece** [correctness] `Home.vue:957-975`. The visible-vs-real index remapping with interleaved locked/filtered pieces is untested. Fix: tests for drag with a filter and locked neighbors.
 
 ### Medium (24)
 

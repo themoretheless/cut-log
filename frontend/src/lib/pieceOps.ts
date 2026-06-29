@@ -25,3 +25,30 @@ export function duplicatePiece(
   out.splice(idx + 1, 0, copy)
   return out
 }
+
+/**
+ * Move the piece at `fromIndex` to `toIndex`, reordering only the non-locked
+ * pieces (locked pieces keep their absolute slots). Indices are absolute
+ * positions in `pieces`; the visible list carries each piece's original index,
+ * so an active filter does not change the mapping. Returns a new array, or an
+ * unchanged copy when an index is equal, out of range, or points at a locked
+ * piece. Insert-after on a downward move, insert-before on an upward move
+ * (the usual drag convention).
+ */
+export function reorderByDrag(pieces: CutPiece[], fromIndex: number, toIndex: number): CutPiece[] {
+  const out = pieces.slice()
+  if (fromIndex === toIndex) return out
+  if (fromIndex < 0 || fromIndex >= pieces.length || toIndex < 0 || toIndex >= pieces.length) return out
+  if (pieces[fromIndex]?.locked || pieces[toIndex]?.locked) return out
+
+  const unlockedIndexes = pieces.map((p, i) => (p.locked ? -1 : i)).filter(i => i >= 0)
+  const sourcePos = unlockedIndexes.indexOf(fromIndex)
+  const targetPos = unlockedIndexes.indexOf(toIndex)
+  if (sourcePos < 0 || targetPos < 0) return out
+
+  const unlocked = unlockedIndexes.map(i => pieces[i])
+  const [item] = unlocked.splice(sourcePos, 1)
+  unlocked.splice(targetPos, 0, item)
+  unlockedIndexes.forEach((i, k) => { out[i] = unlocked[k] })
+  return out
+}
