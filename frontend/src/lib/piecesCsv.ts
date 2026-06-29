@@ -6,9 +6,20 @@
  */
 import type { CutPiece } from '@/services/types'
 
-/** Quote a field only when it contains a delimiter, quote, or newline (RFC 4180). */
+// A field whose first character is one of = + - @ (or a leading tab/CR that some
+// spreadsheets also treat as a formula lead-in) is evaluated as a formula when
+// the CSV is opened in Excel / Sheets / Numbers. Prefix such a field with a
+// single quote so it is treated as text. This is the standard CSV-injection
+// (a.k.a. formula/DDE injection) mitigation; piece labels are user-controlled.
+const FORMULA_LEAD = /^[=+\-@\t\r]/
+
+/**
+ * Serialize one field: neutralize formula leads, then quote per RFC 4180 only
+ * when the (possibly prefixed) value contains a delimiter, quote, or newline.
+ */
 function csvField(s: string): string {
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  const v = FORMULA_LEAD.test(s) ? `'${s}` : s
+  return /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v
 }
 
 const HEADER = ['label', 'width', 'height', 'quantity', 'rotation'] as const
