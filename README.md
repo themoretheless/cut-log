@@ -63,9 +63,10 @@ which the plan decomposes into composables and a `SheetCard` component.
 
 The full from-scratch review (ten independent critics, one per lens) and the
 target model live in [ARCHITECTURE.md](ARCHITECTURE.md); the ordered,
-status-tracked to-do plus a ranked top-50 audit of concrete issues (bugs,
-security, accessibility, i18n, performance), with a deeper second-wave addendum,
-are in [recommendation.md](recommendation.md).
+status-tracked to-do plus a ranked audit of concrete issues (bugs, security,
+accessibility, i18n, performance) are in
+[recommendation.md](recommendation.md); the master roadmap and the
+idea/suggestion backlog are in [plan.md](plan.md).
 
 ## Build & run
 
