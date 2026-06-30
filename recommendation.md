@@ -97,6 +97,9 @@ Resolved items, removed from the active lists below (numbers are the stable audi
 - **#18 - unbounded label length** (`lib/homeState.ts`, Home.vue): label sliced to 200 at parse, plus `maxlength` on the inputs. Shipped in #71.
 - **#40 - currency control/bidi characters** (`lib/homeState.ts`): currency whitelisted to letters / currency symbols / dot. Shipped in #71.
 - **#14 - drag-reorder under filter/locked** (`lib/pieceOps.ts`, Home.vue): the locked-aware reorder is now a pure, tested `reorderByDrag`. The drag handlers already bound absolute indices, so the wrong-piece risk was overstated; this pins the behavior with tests. Shipped in #72.
+- **#53 - numbers not validated finite/positive** (`lib/validatePiece.ts`, Home.vue): validateNewPiece now rejects NaN/Infinity dims and quantity, and calculate() refuses non-finite/non-positive sheet dims before the WASM call. Shipped in #75.
+- **#54 - validateNewPiece ignores kerf** (`lib/validatePiece.ts`): the fit check now compares width+kerf / height+kerf in both orientations. Shipped in #75.
+- **#74 - imported pieces bypass validateNewPiece** (Home.vue): importPieces validates each row (kerf-aware) and skips invalid ones with a count in the toast. Shipped in #75.
 - **#12 - keyboard shortcuts hijack typing** (`lib/keyboard.ts`, Home.vue): a tested `isEditableTarget` guard (incl. contentEditable) now lets inputs handle Enter and their own Ctrl+Z/Y/D natively; only Ctrl+K and Ctrl+Enter stay global. Shipped in #73.
 
 ## Top 50 issues (audit)
@@ -110,7 +113,7 @@ already address; the rest are standalone fixes. Locations are approximate and
 may drift as code changes.
 
 Item numbers are stable ids: a missing number means the item is fixed and moved
-to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #7, #12, #14, #18, #40, #51, #52.
+to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #7, #12, #14, #18, #40, #51, #52, #53, #54, #74.
 
 ### High (8)
 
@@ -172,10 +175,7 @@ is a good signal those are real; below are only the genuinely new findings. With
 both passes, the audit is considered complete for the current code; further
 issues will surface as code changes.
 
-### Medium (14)
-
-53. **Form numbers not validated finite/positive before the optimizer** [error-handling] `Home.vue:421-423`, `lib/validatePiece.ts`. `validateNewPiece` never checks `Number.isFinite` (NaN passes `<= 0`), and live sheet/kerf refs reach `optimize()` unguarded. Fix: guard with `Number.isFinite` and `> 0` in validateNewPiece and before calculate.
-54. **validateNewPiece ignores kerf** [correctness] `lib/validatePiece.ts:19-28`. A piece within kerf of the sheet passes the form then silently lands in unplaced. Fix: compare `width+kerf`/`height+kerf` against the sheet in both orientations.
+### Medium (12)
 55. **Optimizer expands quantity with no total-count guard (Rust OOM)** [error-handling] `crates/core/src/optimizer.rs:236`, `crates/wasm/src/lib.rs:112-116`. `repeat_n(p, quantity as usize)` on an untrusted u32 can materialize billions of entries and hang the WASM thread. Fix: clamp quantity and the total expanded count after deserialization.
 56. **Export SVG fill color not hex-validated on the WASM path** [security] `lib/exportLayout.ts:51`. Synthetic pieces built from raw WASM `source_color` (optimizer.ts) bypass the `isHexColor` gate; export only `escapeXml`s it, so `url(...)`/malformed colors pass through. Fix: validate against the hex regex and fall back to a default.
 57. **Snapshot fallback aliases live state** [data-integrity] `lib/projectSnapshots.ts:69`. `parseHomeState(serialize(state)) ?? input.state` returns the caller's live object by reference on parse failure, so later edits mutate the stored backup. Fix: drop the fallback (or structuredClone) so a snapshot never aliases live state.
@@ -202,10 +202,6 @@ issues will surface as code changes.
 ## Third wave: additional issues (deduped vs the first 73)
 
 A 12-domain survey raised 18 candidate new issues; 8 overlapped items already listed in the earlier waves and were dropped, leaving 10 genuinely new ones. Same stable-id scheme; locations approximate.
-
-### High (1)
-
-74. **Imported pieces bypass validateNewPiece and silently become unplaced** [correctness] `frontend/src/pages/Home.vue:363-385`. importPieces() calls parsePieceList() then pushes every row via newPiece() without calling validateNewPiece(). parseLine only rejects width/height <= 0; it does NOT reject pieces larger than the sheet. addPiece() (the manual path) does validate sheet fit, so imports are inconsistent with manual add. Oversized imported pieces are added silently and only surface later as unplaced pieces in the result with no up-front warning. Verified: validateNewPiece is imported but never referenced in importPieces. Fix: In the import loop, run validateNewPiece({width,height,quantity}, {sheetWidth,sheetHeight}) per row; skip invalid rows and surface a count in the toast (e.g. 'N added, M skipped as too large / invalid').
 
 ### Medium (3)
 

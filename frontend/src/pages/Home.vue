@@ -337,7 +337,7 @@ function loadInitialState() {
 function addPiece() {
   const err = validateNewPiece(
     { width: newWidth.value, height: newHeight.value, quantity: newQty.value },
-    { sheetWidth: sheetWidth.value, sheetHeight: sheetHeight.value },
+    { sheetWidth: sheetWidth.value, sheetHeight: sheetHeight.value, kerf: kerf.value },
   )
   if (err) { addError.value = t(err); return }
   addError.value = ''
@@ -362,26 +362,33 @@ const importText = ref('')
 
 function importPieces() {
   const { rows, skipped } = parsePieceList(importText.value)
-  if (!rows.length) {
+  // Apply the same validation as manual add, so oversized / invalid rows are
+  // skipped up front (with a count) instead of silently landing as unplaced.
+  const valid = rows.filter(r => !validateNewPiece(
+    { width: r.width, height: r.height, quantity: r.quantity },
+    { sheetWidth: sheetWidth.value, sheetHeight: sheetHeight.value, kerf: kerf.value },
+  ))
+  if (!valid.length) {
     addError.value = t('import_none')
     return
   }
   addError.value = ''
   saveAutoProjectSnapshot(t('snapshot.auto_before_import'))
-  for (const r of rows) {
+  for (const r of valid) {
     const color = PIECE_COLORS[colorIdx++ % PIECE_COLORS.length]
     pieces.push(newPiece(r.label, r.width, r.height, r.quantity, true, color))
   }
+  const totalSkipped = skipped + (rows.length - valid.length)
   importText.value = ''
   showImport.value = false
   saveState()
-  const msg = skipped
-    ? t('import_added_skipped').replace('{0}', String(rows.length)).replace('{1}', String(skipped))
-    : t('import_added').replace('{0}', String(rows.length))
+  const msg = totalSkipped
+    ? t('import_added_skipped').replace('{0}', String(valid.length)).replace('{1}', String(totalSkipped))
+    : t('import_added').replace('{0}', String(valid.length))
   showToast(msg)
-  recordOperation(t('operation.import'), skipped
-    ? t('operation.import_detail_skipped').replace('{0}', String(rows.length)).replace('{1}', String(skipped))
-    : t('operation.import_detail').replace('{0}', String(rows.length)))
+  recordOperation(t('operation.import'), totalSkipped
+    ? t('operation.import_detail_skipped').replace('{0}', String(valid.length)).replace('{1}', String(totalSkipped))
+    : t('operation.import_detail').replace('{0}', String(valid.length)))
 }
 
 function removePiece(p: CutPiece) {
@@ -423,6 +430,14 @@ function clearAll() {
 // the latest result, and so a failure is surfaced instead of leaving a dead UI.
 let calcGen = 0
 async function calculate() {
+  // Refuse non-finite / non-positive sheet inputs before they reach the WASM
+  // packer, which has no such guard and would return an empty/garbage layout.
+  if (!Number.isFinite(sheetWidth.value) || sheetWidth.value <= 0
+    || !Number.isFinite(sheetHeight.value) || sheetHeight.value <= 0
+    || !Number.isFinite(kerf.value) || kerf.value < 0) {
+    showToast(t('calc_error'))
+    return
+  }
   const gen = ++calcGen
   calculated.value = true
   try {
