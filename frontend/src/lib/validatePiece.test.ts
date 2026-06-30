@@ -26,4 +26,18 @@ describe('validateNewPiece', () => {
   it('rejects non-positive quantity', () => {
     expect(validateNewPiece({ width: 400, height: 300, quantity: 0 }, sheet)).toBe('qty_min')
   })
+
+  it('rejects NaN / non-finite dimensions and quantity', () => {
+    expect(validateNewPiece({ width: NaN, height: 300, quantity: 1 }, sheet)).toBe('invalid_dims')
+    expect(validateNewPiece({ width: 400, height: Infinity, quantity: 1 }, sheet)).toBe('invalid_dims')
+    expect(validateNewPiece({ width: 400, height: 300, quantity: NaN }, sheet)).toBe('qty_min')
+  })
+
+  it('accounts for kerf in the fit check', () => {
+    // exactly sheet-sized fits with no kerf, but not once kerf is added
+    expect(validateNewPiece({ width: 1220, height: 2440, quantity: 1 }, sheet)).toBeNull()
+    expect(validateNewPiece({ width: 1220, height: 2440, quantity: 1 }, { ...sheet, kerf: 3 })).toBe('piece_larger')
+    // a piece that still fits with kerf is allowed
+    expect(validateNewPiece({ width: 1000, height: 2000, quantity: 1 }, { ...sheet, kerf: 3 })).toBeNull()
+  })
 })
