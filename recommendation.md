@@ -95,6 +95,7 @@ Resolved items, removed from the active lists below (numbers are the stable audi
 - **#5 - Deep watcher fires save + history on every keystroke** (`Home.vue`): piece-row edits now commit through explicit mutation handlers, and the watcher only observes top-level scalar refs. Shipped in #76.
 - **#75 - galPieces[galIdx] out-of-range crash** (`box/useBoxModel.ts`, BoxBuilder.vue): a clamp watcher keeps galIdx in range when the gallery shrinks (bevel toggle / fewer shelves), plus defensive `?.` in the template and a guard in galDlSvg. Shipped in #77.
 - **#76 - CSV round-trip loses the rotation flag** (`lib/parsePieceList.ts`, Home.vue): ParsedRow gains an optional allowRotation parsed from the 4th column (0 = locked), and importPieces applies it, so export then re-import preserves rotation. Shipped in #78.
+- **#77 - WASM swallowed malformed input** (`crates/wasm/src/lib.rs`): run_optimize returns Result and both wasm entry points surface Err (thrown), so a bad payload raises the calc-error toast instead of a silent empty layout. Shipped in #79.
 - **#51 - calculate() result race**: a monotonic generation id discards superseded runs. Shipped in #70.
 - **#52 - unbounded piece count** (`lib/homeState.ts`): parseHomeState caps the list at 1000. Shipped in #71.
 - **#18 - unbounded label length** (`lib/homeState.ts`, Home.vue): label sliced to 200 at parse, plus `maxlength` on the inputs. Shipped in #71.
@@ -116,7 +117,7 @@ already address; the rest are standalone fixes. Locations are approximate and
 may drift as code changes.
 
 Item numbers are stable ids: a missing number means the item is fixed and moved
-to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #5, #7, #12, #14, #18, #40, #51, #52, #53, #54, #74, #75, #76.
+to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #5, #7, #12, #14, #18, #40, #51, #52, #53, #54, #74, #75, #76, #77.
 
 ### High (7)
 
@@ -204,10 +205,6 @@ issues will surface as code changes.
 ## Third wave: additional issues (deduped vs the first 73)
 
 A 12-domain survey raised 18 candidate new issues; 8 overlapped items already listed in the earlier waves and were dropped, leaving 10 genuinely new ones. Same stable-id scheme; locations approximate.
-
-### Medium (1)
-
-77. **WASM malformed-input fallback silently returns an empty result** [error-handling] `crates/wasm/src/lib.rs:107-110`. run_optimize does serde_json::from_str(...).unwrap_or_else(|_| default {2440x1220, pieces:[]}). Any malformed payload (including a NaN dimension, which JSON.stringify in optimizer.ts:34 serializes as null and serde cannot parse into f64) is swallowed and replaced by an empty default, so the frontend receives a valid-looking empty result instead of an error. The frontend's own shape check (optimizer.ts:56) passes because the default is well-formed, so the failure is invisible to the user. Fix: Make run_optimize return Result and have the wasm_bindgen wrappers surface Err(JsValue) on parse failure; let optimizer.ts throw so the existing calc-error toast fires. Frontend should also guard non-finite width/height/kerf before stringifying.
 
 ### Low (6)
 
