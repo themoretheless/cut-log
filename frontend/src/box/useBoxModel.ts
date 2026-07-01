@@ -5,7 +5,7 @@
  * The translate function is injected to keep the model decoupled from the
  * l10n store.
  */
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import * as G from '@/box/geometry'
 
 export type Translate = (key: string) => string
@@ -170,6 +170,13 @@ export function useBoxModel(t: Translate) {
       }
     }
     return list
+  })
+
+  // Keep the selected gallery index in range: galPieces shrinks when the bevel
+  // toggles or the shelf count drops, and a stale galIdx would otherwise crash
+  // the gallery template (galPieces[galIdx].title on an out-of-range index).
+  watch(() => galPieces.value.length, (len) => {
+    if (galIdx.value > len - 1) galIdx.value = Math.max(0, len - 1)
   })
 
   // pieceData rebuilds the full SVG path, so the cut-sheet template reads it

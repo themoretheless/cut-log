@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { nextTick } from 'vue'
 import { useBoxModel } from './useBoxModel'
 
 // Stub translate: return the last key segment, so labels are stable and unique.
@@ -36,6 +37,20 @@ describe('useBoxModel', () => {
     m.NShelves.value = 3
     expect(m.galPieces.value.map(p => p.id)).toEqual(['side', 'tb', 'back', 'shelf'])
     expect(m.galPieces.value.at(-1)!.count).toBe(3)
+  })
+
+  it('clamps galIdx when the gallery list shrinks', async () => {
+    const m = useBoxModel(t)
+    m.Bevel.value = 40
+    m.NShelves.value = 3
+    await nextTick()
+    m.galIdx.value = m.galPieces.value.length - 1 // select the last piece (a shelf)
+    expect(m.galIdx.value).toBeGreaterThan(3)
+    m.Bevel.value = 0
+    m.NShelves.value = 0 // gallery shrinks back to [side, tb, back]
+    await nextTick()
+    expect(m.galPieces.value.length).toBe(3)
+    expect(m.galIdx.value).toBe(2) // clamped to the new last index, not left dangling
   })
 
   it('computes cutting layout and stats reactively', () => {
