@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, watch } from 'vue'
 import NumberField from '@/components/NumberField.vue'
 import { useL10n } from '@/stores/l10n'
 import { wrapCutSvg } from '@/box/geometry'
+import { downloadFile } from '@/lib/downloadFile'
 import { useBoxModel } from '@/box/useBoxModel'
 import { useAssemblyScene } from '@/box/three/useAssemblyScene'
 import { usePieceGallery } from '@/box/three/usePieceGallery'
@@ -61,20 +62,10 @@ watch(
 watch(galIdx, () => { assembly.update(); gallery.update(true) }, { flush: 'post' })
 
 // ── Download helpers ────────────────────────────────────────────────────────
-function downloadSvg(name: string, content: string) {
-  const blob = new Blob([content], { type: 'image/svg+xml' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = name
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
 function galDlSvg() {
   const p = galPieces.value[galIdx.value]
   if (!p) return
-  downloadSvg(`${p.id}.svg`, wrapCutSvg(p.d, p.pw, p.ph, p.xOff))
+  downloadFile(`${p.id}.svg`, wrapCutSvg(p.d, p.pw, p.ph, p.xOff), 'image/svg+xml')
 }
 </script>
 
