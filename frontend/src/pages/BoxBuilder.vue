@@ -73,6 +73,7 @@ function downloadSvg(name: string, content: string) {
 
 function galDlSvg() {
   const p = galPieces.value[galIdx.value]
+  if (!p) return
   downloadSvg(`${p.id}.svg`, wrapCutSvg(p.d, p.pw, p.ph, p.xOff))
 }
 </script>
@@ -147,7 +148,7 @@ function galDlSvg() {
             <button class="piece3d-nav piece3d-reset" @click="gallery.resetView()" title="Reset view">&#x21ba;</button>
           </div>
           <div class="gallery-3d-bar">
-            <span class="gallery-sel-title">{{ galPieces[galIdx].title }} <small>({{ galPieces[galIdx].count }} {{ t('box.pcs') }}, {{ galPieces[galIdx].pw.toFixed(0) }}&times;{{ galPieces[galIdx].ph.toFixed(0) }} mm)</small></span>
+            <span class="gallery-sel-title">{{ galPieces[galIdx]?.title }} <small>({{ galPieces[galIdx]?.count }} {{ t('box.pcs') }}, {{ galPieces[galIdx]?.pw.toFixed(0) }}&times;{{ galPieces[galIdx]?.ph.toFixed(0) }} mm)</small></span>
             <button class="btn-dl" @click="galDlSvg">&#x2193; SVG</button>
           </div>
           <div class="gallery-thumbs">
