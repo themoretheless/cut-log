@@ -45,6 +45,13 @@ describe('buildPiecesCsv', () => {
     expect(csv).toContain('"\'=a,b",100,50,1,1')
   })
 
+  it('round-trips the rotation flag through parsePieceList', () => {
+    const csv = buildPiecesCsv([piece('Fixed', 760, 300, 1, false), piece('Free', 760, 300, 1, true)])
+    const { rows } = parsePieceList(csv)
+    expect(rows[0].allowRotation).toBe(false)
+    expect(rows[1].allowRotation).toBe(true)
+  })
+
   it('round-trips through parsePieceList (dims and quantity)', () => {
     const csv = buildPiecesCsv([piece('Полка A', 760, 300, 4), piece('Bok', 1800, 300, 2)])
     const { rows } = parsePieceList(csv)

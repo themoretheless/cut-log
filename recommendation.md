@@ -94,6 +94,7 @@ Resolved items, removed from the active lists below (numbers are the stable audi
 - **#4 - WASM output untyped/unguarded** (`services/optimizer.ts`): typed `RawOutput` interfaces, parse wrapped in try/catch, array-shape guard. Shipped in #70.
 - **#5 - Deep watcher fires save + history on every keystroke** (`Home.vue`): piece-row edits now commit through explicit mutation handlers, and the watcher only observes top-level scalar refs. Shipped in #76.
 - **#75 - galPieces[galIdx] out-of-range crash** (`box/useBoxModel.ts`, BoxBuilder.vue): a clamp watcher keeps galIdx in range when the gallery shrinks (bevel toggle / fewer shelves), plus defensive `?.` in the template and a guard in galDlSvg. Shipped in #77.
+- **#76 - CSV round-trip loses the rotation flag** (`lib/parsePieceList.ts`, Home.vue): ParsedRow gains an optional allowRotation parsed from the 4th column (0 = locked), and importPieces applies it, so export then re-import preserves rotation. Shipped in #78.
 - **#51 - calculate() result race**: a monotonic generation id discards superseded runs. Shipped in #70.
 - **#52 - unbounded piece count** (`lib/homeState.ts`): parseHomeState caps the list at 1000. Shipped in #71.
 - **#18 - unbounded label length** (`lib/homeState.ts`, Home.vue): label sliced to 200 at parse, plus `maxlength` on the inputs. Shipped in #71.
@@ -115,7 +116,7 @@ already address; the rest are standalone fixes. Locations are approximate and
 may drift as code changes.
 
 Item numbers are stable ids: a missing number means the item is fixed and moved
-to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #5, #7, #12, #14, #18, #40, #51, #52, #53, #54, #74, #75.
+to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #5, #7, #12, #14, #18, #40, #51, #52, #53, #54, #74, #75, #76.
 
 ### High (7)
 
@@ -204,9 +205,8 @@ issues will surface as code changes.
 
 A 12-domain survey raised 18 candidate new issues; 8 overlapped items already listed in the earlier waves and were dropped, leaving 10 genuinely new ones. Same stable-id scheme; locations approximate.
 
-### Medium (2)
+### Medium (1)
 
-76. **CSV round-trip loses the per-piece rotation lock** [correctness] `frontend/src/lib/piecesCsv.ts:25-38, frontend/src/lib/parsePieceList.ts:11-16,71-74, frontend/src/pages/Home.vue:371-373`. buildPiecesCsv exports rotation as column 5 (0/1), and parseLine reads cells as a flat number list where nums[2] becomes quantity and the 5th value (rotation flag) is ignored. ParsedRow has no allowRotation field, and importPieces hardcodes true at Home.vue:373. So exporting a piece with allowRotation=false and re-importing the CSV silently re-enables rotation. A full export->import round-trip changes packing behavior. Verified across all three files. Fix: Add optional allowRotation to ParsedRow; in parseLine capture the trailing 0/1 column (distinct from quantity) and map 0->false; in importPieces use r.allowRotation ?? true.
 77. **WASM malformed-input fallback silently returns an empty result** [error-handling] `crates/wasm/src/lib.rs:107-110`. run_optimize does serde_json::from_str(...).unwrap_or_else(|_| default {2440x1220, pieces:[]}). Any malformed payload (including a NaN dimension, which JSON.stringify in optimizer.ts:34 serializes as null and serde cannot parse into f64) is swallowed and replaced by an empty default, so the frontend receives a valid-looking empty result instead of an error. The frontend's own shape check (optimizer.ts:56) passes because the default is well-formed, so the failure is invisible to the user. Fix: Make run_optimize return Result and have the wasm_bindgen wrappers surface Err(JsValue) on parse failure; let optimizer.ts throw so the existing calc-error toast fires. Frontend should also guard non-finite width/height/kerf before stringifying.
 
 ### Low (6)

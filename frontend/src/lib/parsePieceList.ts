@@ -13,6 +13,9 @@ export interface ParsedRow {
   width: number
   height: number
   quantity: number
+  /** Present only when the row carried an explicit rotation column (as the CSV
+   *  export writes it); 0 means rotation locked. Absent means "not specified". */
+  allowRotation?: boolean
 }
 
 export interface ParseResult {
@@ -71,7 +74,11 @@ function parseLine(raw: string): ParsedRow | null {
   const rawQty = qtyMark || (nums.length >= 3 ? nums[2] : 1)
   const quantity = Number.isFinite(rawQty) ? Math.max(1, Math.round(rawQty)) : 1
 
-  return { label: labelParts.join(' '), width, height, quantity }
+  const row: ParsedRow = { label: labelParts.join(' '), width, height, quantity }
+  // A 4th number is the rotation flag from CSV export (0 = rotation locked);
+  // only then is rotation specified, so a round-trip preserves it.
+  if (nums.length >= 4) row.allowRotation = nums[3] !== 0
+  return row
 }
 
 export function parsePieceList(text: string): ParseResult {
