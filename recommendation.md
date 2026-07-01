@@ -92,6 +92,7 @@ Resolved items, removed from the active lists below (numbers are the stable audi
 - **#2 - calculate() error handling** (`Home.vue`): wrapped in try/catch, resets state and shows an error toast on failure. Shipped in #70.
 - **#3 - WASM init never reset on failure** (`services/rustService.ts`): `initPromise` is cleared on error so the next call retries. Shipped in #70.
 - **#4 - WASM output untyped/unguarded** (`services/optimizer.ts`): typed `RawOutput` interfaces, parse wrapped in try/catch, array-shape guard. Shipped in #70.
+- **#5 - Deep watcher fires save + history on every keystroke** (`Home.vue`): piece-row edits now commit through explicit mutation handlers, and the watcher only observes top-level scalar refs. Shipped in #76.
 - **#51 - calculate() result race**: a monotonic generation id discards superseded runs. Shipped in #70.
 - **#52 - unbounded piece count** (`lib/homeState.ts`): parseHomeState caps the list at 1000. Shipped in #71.
 - **#18 - unbounded label length** (`lib/homeState.ts`, Home.vue): label sliced to 200 at parse, plus `maxlength` on the inputs. Shipped in #71.
@@ -113,12 +114,11 @@ already address; the rest are standalone fixes. Locations are approximate and
 may drift as code changes.
 
 Item numbers are stable ids: a missing number means the item is fixed and moved
-to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #7, #12, #14, #18, #40, #51, #52, #53, #54, #74.
+to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #5, #7, #12, #14, #18, #40, #51, #52, #53, #54, #74.
 
-### High (8)
+### High (7)
 
 1. **three.js scenes leak GPU memory on dispose** [performance] `box/three/useAssemblyScene.ts:284-294`, `usePieceGallery.ts:309-322`. dispose() calls only `renderer.dispose()` and never traverses the groups, so geometries/materials/sprite textures stay in WebGL memory and accumulate on rebuilds. Fix: clearGroup/disposeObj every group first. (Phase 6)
-5. **Deep watcher fires save + history on every keystroke** [performance] `Home.vue:1081-1084`. Deep watch on `pieces` re-runs on each character typed, writing localStorage and snapshotting per keystroke and muddying the undo stack. Fix: drop `deep`, trigger save/record from real mutation handlers. (relates to Phase 3)
 6. **God component Home.vue (~1907 lines)** [architecture] `Home.vue:1-1908`. UI, persistence, history, snapshots, export, commands, sort/filter, and bulk transforms over shared mutable state; untestable. Fix: extract composables and modules. (Phases 3-5)
 8. **Box piece identity matched by translated label** [correctness] `box/useBoxModel.ts:77-90`. `pieceData()` compares against `t()` labels; a translation edit, a language switch, or an old saved label falls through to wrong geometry silently. Fix: match on a stable `pieceKind` enum. (Phase 5)
 9. **Dimension field labels not associated with the input** [a11y] `Home.vue` form rows, `BoxBuilder.vue:97-129`. `<label>` and NumberField are siblings with no `for`/`id`, and even nested the first labelable descendant is NumberField's "minus" button, so the number input is unlabeled. Fix: expose an `id` on NumberField's input and use `for`/`id`.

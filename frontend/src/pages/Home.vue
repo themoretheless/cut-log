@@ -292,6 +292,11 @@ function recordHistory() {
   }, 350)
 }
 
+function commitProjectEdit() {
+  saveState()
+  recordHistory()
+}
+
 function restoreSnapshot(snap: string) {
   const st = parseHomeState(snap)
   if (!st) return
@@ -352,7 +357,7 @@ function addPiece() {
   newWidth.value = 400
   newHeight.value = 300
   newQty.value = 1
-  saveState()
+  commitProjectEdit()
   recordOperation(t('operation.add_piece'), `${addedLabel || t('unnamed_piece')} · ${addedWidth}×${addedHeight}`)
 }
 
@@ -381,7 +386,7 @@ function importPieces() {
   const totalSkipped = skipped + (rows.length - valid.length)
   importText.value = ''
   showImport.value = false
-  saveState()
+  commitProjectEdit()
   const msg = totalSkipped
     ? t('import_added_skipped').replace('{0}', String(valid.length)).replace('{1}', String(totalSkipped))
     : t('import_added').replace('{0}', String(valid.length))
@@ -396,7 +401,7 @@ function removePiece(p: CutPiece) {
   const idx = pieces.indexOf(p)
   if (idx >= 0) pieces.splice(idx, 1)
   if (selectedPieceId.value === p.id) selectedPieceId.value = null
-  saveState()
+  commitProjectEdit()
   recordOperation(t('operation.delete_piece'), p.label.trim() || t('unnamed_piece'))
 }
 
@@ -407,7 +412,7 @@ function duplicate(id: string | null) {
   const color = PIECE_COLORS[colorIdx++ % PIECE_COLORS.length]
   const next = duplicatePieceList([...pieces], id, crypto.randomUUID(), color)
   pieces.splice(0, pieces.length, ...next)
-  saveState()
+  commitProjectEdit()
 }
 
 function clearAll() {
@@ -422,7 +427,7 @@ function clearAll() {
   quickFilterMode.value = 'all'
   lastBulkDiff.value = null
   colorIdx = 0
-  saveState()
+  commitProjectEdit()
   recordOperation(t('operation.clear'), t('operation.clear_detail').replace('{0}', String(count)))
 }
 
@@ -777,7 +782,7 @@ function duplicatePiece(source = selectedPiece.value) {
   if (source.locked) copy.locked = true
   pieces.splice(idx + 1, 0, copy)
   selectedPieceId.value = copy.id
-  saveState()
+  commitProjectEdit()
   showToast(t('piece_duplicated'))
   recordOperation(t('operation.duplicate_piece'), source.label.trim() || t('unnamed_piece'))
 }
@@ -793,9 +798,39 @@ function clearSelection() {
 function togglePieceLock(piece: CutPiece) {
   if (piece.locked) delete piece.locked
   else piece.locked = true
-  saveState()
+  commitProjectEdit()
   showToast(piece.locked ? t('piece_locked') : t('piece_unlocked'))
   recordOperation(piece.locked ? t('operation.lock_piece') : t('operation.unlock_piece'), piece.label.trim() || t('unnamed_piece'))
+}
+
+function updatePieceLabel(piece: CutPiece, label: string) {
+  if (piece.label === label) return
+  piece.label = label
+  commitProjectEdit()
+}
+
+function updatePieceWidth(piece: CutPiece, width: number) {
+  if (piece.width === width) return
+  piece.width = width
+  commitProjectEdit()
+}
+
+function updatePieceHeight(piece: CutPiece, height: number) {
+  if (piece.height === height) return
+  piece.height = height
+  commitProjectEdit()
+}
+
+function updatePieceQuantity(piece: CutPiece, quantity: number) {
+  const clean = Math.max(1, Math.round(quantity))
+  if (piece.quantity === clean) return
+  piece.quantity = clean
+  commitProjectEdit()
+}
+
+function togglePieceRotation(piece: CutPiece) {
+  piece.allowRotation = !piece.allowRotation
+  commitProjectEdit()
 }
 
 function setVisibleRotation(allowRotation: boolean) {
@@ -804,7 +839,7 @@ function setVisibleRotation(allowRotation: boolean) {
   for (const { piece } of visibleEditablePieces.value) piece.allowRotation = allowRotation
   result.value = null
   calculated.value = false
-  saveState()
+  commitProjectEdit()
   showToast(allowRotation ? t('rotation_enabled') : t('rotation_disabled'))
   lastBulkDiff.value = {
     title: allowRotation ? t('bulk.rotation_on') : t('bulk.rotation_off'),
@@ -847,7 +882,7 @@ function mutateVisibleDimensions(
   }
   result.value = null
   calculated.value = false
-  saveState()
+  commitProjectEdit()
   showToast(t(toastKey))
   recordOperation(title, t('operation.visible_count').replace('{0}', String(editable.length)))
 }
@@ -878,7 +913,7 @@ function applyPieceSort() {
   unlockedIndexes.forEach((index, sortedIndex) => {
     pieces[index] = sorted[sortedIndex]
   })
-  saveState()
+  commitProjectEdit()
   showToast(t('pieces_sorted'))
   recordOperation(t('operation.sort'), t(`sort.${pieceSortMode.value}`))
 }
@@ -961,7 +996,7 @@ function loadExample() {
     const color = PIECE_COLORS[colorIdx++ % PIECE_COLORS.length]
     pieces.push(newPiece(e.label, e.w, e.h, e.q, true, color))
   }
-  saveState()
+  commitProjectEdit()
   recordOperation(t('operation.load_example'), t('operation.import_detail').replace('{0}', String(ex.length)))
   calculate()
 }
@@ -990,7 +1025,7 @@ function dropPiece(targetIdx: number) {
   pieceSortMode.value = 'manual'
   dragStartIdx.value = -1
   dragOverIdx.value = -1
-  saveState()
+  commitProjectEdit()
   recordOperation(t('operation.reorder'), t('operation.visible_count').replace('{0}', String(unlockedCount)))
 }
 
@@ -1107,11 +1142,9 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
-// Persist and record history on any sheet/kerf/piece edit.
-watch([sheetWidth, sheetHeight, kerf, pieces, pricePerSheet, currency], () => {
-  saveState()
-  recordHistory()
-}, { deep: true })
+// Persist top-level scalar edits here. Piece mutations call commitProjectEdit()
+// from their concrete handlers so typing in a row does not trigger a deep watch.
+watch([sheetWidth, sheetHeight, kerf, pricePerSheet, currency], commitProjectEdit)
 
 onMounted(() => {
   loadInitialState()
@@ -1521,15 +1554,22 @@ onUnmounted(() => {
               </span>
               <span class="piece-color" :style="{ background: entry.piece.color, cursor: 'pointer' }" :title="t('highlight_hint')" @click="toggleSelect(entry.piece.id)">{{ entry.index + 1 }}</span>
               <div class="piece-edit-fields">
-                <input class="piece-edit-label" type="text" v-model="entry.piece.label" :placeholder="t('name')" maxlength="200" />
+                <input
+                  class="piece-edit-label"
+                  type="text"
+                  :value="entry.piece.label"
+                  :placeholder="t('name')"
+                  maxlength="200"
+                  @input="updatePieceLabel(entry.piece, ($event.target as HTMLInputElement).value)"
+                />
                 <div class="piece-edit-dims">
-                  <NumberField v-model="entry.piece.width" :min="1" :step="1" />
+                  <NumberField :model-value="entry.piece.width" @update:model-value="v => updatePieceWidth(entry.piece, v)" :min="1" :step="1" />
                   <span class="unit">&times;</span>
-                  <NumberField v-model="entry.piece.height" :min="1" :step="1" />
+                  <NumberField :model-value="entry.piece.height" @update:model-value="v => updatePieceHeight(entry.piece, v)" :min="1" :step="1" />
                   <span class="unit">mm</span>
                   <NumberField
                     :model-value="entry.piece.quantity"
-                    @update:model-value="v => entry.piece.quantity = Math.max(1, Math.round(v))"
+                    @update:model-value="v => updatePieceQuantity(entry.piece, v)"
                     :min="1"
                     :step="1"
                   />
@@ -1538,7 +1578,7 @@ onUnmounted(() => {
                     class="btn btn-primary btn-sm piece-edit-rot"
                     :class="{ 'rot-on': entry.piece.allowRotation }"
                     :title="t('rotation')"
-                    @click="entry.piece.allowRotation = !entry.piece.allowRotation"
+                    @click="togglePieceRotation(entry.piece)"
                   >&#8635;</button>
                   <button
                     type="button"

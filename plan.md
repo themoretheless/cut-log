@@ -8,7 +8,7 @@ Master roadmap and idea backlog. Companion docs:
 
 ## Roadmap (priority order)
 
-1. Finish the high-severity audit fixes (see recommendation.md). Done so far: #2, #3, #4, #7, #12, #14, #18, #40, #51, #52. Remaining high: #5 (deep watcher per keystroke) and the accessibility set (#9, #10, #11, #26-#29).
+1. Finish the high-severity audit fixes (see recommendation.md). Done so far: #2, #3, #4, #5, #7, #12, #14, #18, #40, #51, #52, #53, #54, #74. Remaining high: #1 (three.js disposal), #6/#8/#13 (architecture/box model, covered by phases), and the accessibility set (#9, #10, #11, #26-#29).
 2. Work the medium/low audit tail plus the third-wave additions (#74-#83 in recommendation.md).
 3. Execute refactor phases 0-6 in ARCHITECTURE.md (decompose Home.vue into composables, etc.).
 4. Pull from the idea backlog below by value-to-effort, starting with the top picks.
