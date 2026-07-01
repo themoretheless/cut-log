@@ -6,7 +6,7 @@ model, dependency rules); this one is the ordered to-do with status. Keep the tw
 in sync: the phase names and order here are the same spine.
 
 Baseline: version 0.1.38 (after PR #65, which grew `Home.vue` to ~1907 lines).
-Progress so far: 0 of 6 phases done.
+Progress so far: 1 of 6 phases done (Phase 0, shipped in #80).
 
 Two things live here: the **phased refactoring plan** (structural, below) and a
 **ranked top-50 audit** of concrete issues found by a ten-reviewer pass (bugs,
@@ -35,7 +35,7 @@ independently. The master roadmap and the idea/suggestion backlog live in
 
 | # | Phase | What lands | Risk | Status |
 |---|-------|-----------|------|--------|
-| 0 | Free wins | drop `jspdf`/`svg2pdf`; `lib/downloadFile.ts` (+test); use it in both pages | very low | TODO |
+| 0 | Free wins | drop `jspdf`/`svg2pdf`; `lib/downloadFile.ts` (+test); use it in both pages | very low | Done (#80) |
 | 1 | Palette + sheet SVG | `lib/palette.ts`, `lib/sheetSvg.ts` (+tests), `components/SheetCard.vue` replaces inline SVG | medium | TODO |
 | 2 | Shared UI composables | `composables/useToast.ts`, `composables/useKeyboardShortcuts.ts` | low-medium | TODO |
 | 3 | Persistence + history + snapshots | `useHomeProject`, `useHomeHistory`, `useProjectSnapshots` (wrap #65 `projectSnapshots.ts`) | high | TODO |
@@ -96,6 +96,8 @@ Resolved items, removed from the active lists below (numbers are the stable audi
 - **#75 - galPieces[galIdx] out-of-range crash** (`box/useBoxModel.ts`, BoxBuilder.vue): a clamp watcher keeps galIdx in range when the gallery shrinks (bevel toggle / fewer shelves), plus defensive `?.` in the template and a guard in galDlSvg. Shipped in #77.
 - **#76 - CSV round-trip loses the rotation flag** (`lib/parsePieceList.ts`, Home.vue): ParsedRow gains an optional allowRotation parsed from the 4th column (0 = locked), and importPieces applies it, so export then re-import preserves rotation. Shipped in #78.
 - **#77 - WASM swallowed malformed input** (`crates/wasm/src/lib.rs`): run_optimize returns Result and both wasm entry points surface Err (thrown), so a bad payload raises the calc-error toast instead of a silent empty layout. Shipped in #79.
+- **#31 - duplicate blob-download helper** (`lib/downloadFile.ts`): extracted one shared, tested `downloadFile` used by both pages. Shipped in #80 (Phase 0).
+- **#48 - unused jspdf/svg2pdf deps** (`package.json`): removed (27 packages dropped from the lockfile). Shipped in #80 (Phase 0).
 - **#51 - calculate() result race**: a monotonic generation id discards superseded runs. Shipped in #70.
 - **#52 - unbounded piece count** (`lib/homeState.ts`): parseHomeState caps the list at 1000. Shipped in #71.
 - **#18 - unbounded label length** (`lib/homeState.ts`, Home.vue): label sliced to 200 at parse, plus `maxlength` on the inputs. Shipped in #71.
@@ -117,7 +119,7 @@ already address; the rest are standalone fixes. Locations are approximate and
 may drift as code changes.
 
 Item numbers are stable ids: a missing number means the item is fixed and moved
-to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #5, #7, #12, #14, #18, #40, #51, #52, #53, #54, #74, #75, #76, #77.
+to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #5, #7, #12, #14, #18, #31, #40, #48, #51, #52, #53, #54, #74, #75, #76, #77.
 
 ### High (7)
 
@@ -129,7 +131,7 @@ to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #5, #7, #12, #14, #
 11. **Layout SVGs have no accessible names** [a11y] `Home.vue:1642-1763`, `BoxBuilder.vue:159-221`. Placed-piece rects/text have no `title`/`desc`/`role`. Fix: `role="img"` plus per-piece `title`/`desc`.
 13. **No round-trip test for the label-based piece matching** [testing] `box/useBoxModel.ts:77-90`. Nothing feeds every `allPieces()` label back through `pieceData()`, so a label change ships broken. Fix: add that round-trip test. (Phase 5)
 
-### Medium (24)
+### Medium (23)
 
 15. **localStorage.setItem failures swallowed** [error-handling] `Home.vue:172-176`. QuotaExceeded and private-mode errors are discarded; the user silently stops persisting. Fix: detect quota and warn.
 16. **Palette command errors dropped** [error-handling] `Home.vue:904-908`. `runPaletteCommand` has no catch and the caller does not await. Fix: try/catch + error toast + await.
@@ -146,7 +148,6 @@ to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #5, #7, #12, #14, #
 28. **3D canvases have no accessible label** [a11y] `BoxBuilder.vue:145,181`. Visual-only meaning. Fix: `aria-label` plus a shortcut-hints region.
 29. **Inline piece-editor fields lack labels** [a11y] `Home.vue:1493-1527`. Per-row inputs are unlabeled. Fix: an `aria-label` per field.
 30. **Render loop runs while the tab is hidden** [performance] `box/three/useAssemblyScene.ts:120-140`. Burns GPU/battery offscreen. Fix: pause on `visibilitychange`.
-31. **Duplicate blob-download helper in both pages** [duplication] `Home.vue:433`, `BoxBuilder.vue:64`. Maintained twice. Fix: shared `downloadFile(name, content, mime)`. (Phase 0)
 32. **TrackballControls internals via `as any`** [type-safety] `usePieceGallery.ts:116-133,266-268`. Reads `_position0` etc.; a three.js rename breaks silently. Fix: one typed accessor.
 33. **validPiece/validSnapshot take `any`** [type-safety] `homeState.ts:36`, `projectSnapshots.ts:25`. A typo'd property compiles. Fix: take `unknown` and narrow.
 34. **t() accepts any string** [type-safety] `stores/l10n.ts`. Typo'd or removed keys render the raw key. Fix: type keys as a union.
@@ -156,7 +157,7 @@ to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #5, #7, #12, #14, #
 38. **Bulk-transform summaries diverge under a filter change** [correctness] `Home.vue:775-825`. Reads the visible set twice; a mid-op filter change misreports counts. Fix: snapshot the target set once and test it.
 39. **l10n parity test ignores placeholder counts** [testing] `stores/l10n.parity.test.ts`. A `{0}`/`{1}` mismatch between locales passes. Fix: assert matching `{N}` placeholders across locales.
 
-### Low (10)
+### Low (9)
 
 41. **ResizeObserver has no zero-size guard** [error-handling] `useAssemblyScene.ts:142-152`, `usePieceGallery.ts:146-155`. A 0-size container yields a NaN camera aspect. Fix: guard `w > 0 && h > 0`.
 42. **validSnapshot can pass undefined state to serialize** [correctness] `projectSnapshots.ts:52-54`. An undefined `state` stringifies to invalid JSON that fails on load. Fix: reject when `state` is missing or not an object.
@@ -165,7 +166,6 @@ to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #5, #7, #12, #14, #
 45. **pieceMatchesQuery toFixed(0) rounding mismatch** [correctness] `lib/pieceEditor.ts:39-40`. Search may not match the displayed value. Fix: `String(Math.round(...))`.
 46. **shelfColor undefined for a negative index** [error-handling] `box/useBoxModel.ts:73-74`. `i % len` is negative for negative `i`. Fix: `((i % len) + len) % len`.
 47. **Clipboard fallback shows a success toast on failure** [error-handling] `Home.vue:475-486`. Misleads the user into thinking the link was copied. Fix: distinct toasts for real copy vs address-bar fallback.
-48. **Unused jspdf/svg2pdf dependencies** [dead-code] `package.json:13-14`. Roughly 200KB of footprint, never imported. Fix: remove them. (Phase 0)
 49. **Color palettes scattered with no shared source** [duplication] `helpers/svg.ts`, `box/useBoxModel.ts`. No single palette to keep the two pages consistent. Fix: consolidate into `lib/palette.ts`. (Phase 1)
 50. **readinessScore is opaque magic numbers, untested** [architecture] `Home.vue:535-545`. Inline `30/18/12/18/24` deductions with no constants or tests. Fix: extract a pure `scoreReadiness()` into `lib/readiness.ts` with tests.
 

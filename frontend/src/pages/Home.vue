@@ -35,6 +35,7 @@ import { computeCostSummary } from '@/lib/costSummary'
 import { buildPiecesCsv } from '@/lib/piecesCsv'
 import { duplicatePiece as duplicatePieceList, reorderByDrag } from '@/lib/pieceOps'
 import { isEditableTarget } from '@/lib/keyboard'
+import { downloadFile } from '@/lib/downloadFile'
 import { useL10n } from '@/stores/l10n'
 
 const { t } = useL10n()
@@ -462,15 +463,6 @@ async function calculate() {
 }
 
 // ── Export (cut-ready SVG / DXF / print) ───────────────────────────────────────
-function downloadFile(name: string, content: string, mime: string) {
-  const blob = new Blob([content], { type: mime })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = name
-  a.click()
-  URL.revokeObjectURL(url)
-}
 
 function exportPiecesCsv() {
   if (pieces.length) downloadFile('cutlog-parts.csv', buildPiecesCsv([...pieces]), 'text/csv;charset=utf-8')
