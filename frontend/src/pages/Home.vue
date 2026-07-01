@@ -381,7 +381,7 @@ function importPieces() {
   saveAutoProjectSnapshot(t('snapshot.auto_before_import'))
   for (const r of valid) {
     const color = PIECE_COLORS[colorIdx++ % PIECE_COLORS.length]
-    pieces.push(newPiece(r.label, r.width, r.height, r.quantity, true, color))
+    pieces.push(newPiece(r.label, r.width, r.height, r.quantity, r.allowRotation ?? true, color))
   }
   const totalSkipped = skipped + (rows.length - valid.length)
   importText.value = ''

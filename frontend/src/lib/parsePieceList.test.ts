@@ -58,6 +58,17 @@ describe('parsePieceList', () => {
     expect(skipped).toBe(2) // header + "just text" (blank lines don't count)
   })
 
+  it('reads an explicit rotation column (0 = locked, else allowed)', () => {
+    const { rows } = parsePieceList('Side,760,300,2,0\nShelf,760,300,4,1')
+    expect(rows[0]).toEqual({ label: 'Side', width: 760, height: 300, quantity: 2, allowRotation: false })
+    expect(rows[1]).toEqual({ label: 'Shelf', width: 760, height: 300, quantity: 4, allowRotation: true })
+  })
+
+  it('leaves allowRotation unset when there is no rotation column', () => {
+    const { rows } = parsePieceList('Side, 760, 300, 2')
+    expect(rows[0].allowRotation).toBeUndefined()
+  })
+
   it('rejects rows with non-positive dimensions', () => {
     const { rows, skipped } = parsePieceList('Bad, 0, 300\nBad2, -5, 300')
     expect(rows).toHaveLength(0)
