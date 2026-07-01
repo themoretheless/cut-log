@@ -104,10 +104,12 @@ fn convert_sheet(s: &Sheet) -> SheetOutput {
     }
 }
 
-fn run_optimize(input_json: &str) -> String {
-    let input: OptimizeInput = serde_json::from_str(input_json).unwrap_or_else(|_| OptimizeInput {
-        sheet_width: 2440.0, sheet_height: 1220.0, kerf: 3.0, strategy: 0, pieces: vec![],
-    });
+fn run_optimize(input_json: &str) -> Result<String, String> {
+    // Surface a parse failure instead of swallowing it into an empty default:
+    // a malformed payload (e.g. a NaN dimension serialized as null) must reach
+    // the caller as an error, not a valid-looking zero-piece result.
+    let input: OptimizeInput = serde_json::from_str(input_json)
+        .map_err(|e| format!("invalid optimizer input JSON: {e}"))?;
 
     let pieces: Vec<CutPiece> = input.pieces.into_iter().map(|p| CutPiece {
         id: uuid::Uuid::parse_str(&p.id).unwrap_or_else(|_| uuid::Uuid::new_v4()),
@@ -139,7 +141,7 @@ fn run_optimize(input_json: &str) -> String {
         overall_efficiency,
     };
 
-    serde_json::to_string(&output).unwrap()
+    serde_json::to_string(&output).map_err(|e| format!("failed to serialize optimizer output: {e}"))
 }
 
 // ── Async API (returns Promise<string>) ──────────────────────────────────────
@@ -149,7 +151,10 @@ fn run_optimize(input_json: &str) -> String {
 pub fn optimize(input_json: String) -> js_sys::Promise {
     ensure_tracing();
     future_to_promise(async move {
-        Ok(JsValue::from_str(&run_optimize(&input_json)))
+        match run_optimize(&input_json) {
+            Ok(s) => Ok(JsValue::from_str(&s)),
+            Err(e) => Err(JsValue::from_str(&e)),
+        }
     })
 }
 
@@ -157,8 +162,8 @@ pub fn optimize(input_json: String) -> js_sys::Promise {
 
 /// Synchronous optimize for small inputs.
 #[wasm_bindgen]
-pub fn optimize_sync(input_json: &str) -> String {
+pub fn optimize_sync(input_json: &str) -> Result<String, JsValue> {
     ensure_tracing();
-    run_optimize(input_json)
+    run_optimize(input_json).map_err(|e| JsValue::from_str(&e))
 }
 

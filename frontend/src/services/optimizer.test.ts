@@ -22,13 +22,16 @@ const rawResult = {
   overall_efficiency: 8.06,
 }
 
-// Mutable so individual tests can make the optimizer return malformed output.
+// Mutable so individual tests can make the optimizer return malformed output,
+// or throw the way the wasm binding does when Rust returns Err (bad input JSON).
 let wasmOutput = JSON.stringify(rawResult)
+let wasmThrows = false
 
 vi.mock('./rustService', () => ({
   ensureWasm: async () => ({
     optimize_sync: (input: string) => {
       captured = input
+      if (wasmThrows) throw new Error('invalid optimizer input JSON')
       return wasmOutput
     },
   }),
@@ -38,7 +41,7 @@ const piece: CutPiece = {
   id: 'p1', label: 'A', width: 400, height: 300, quantity: 2, allowRotation: false, color: '#111',
 }
 
-beforeEach(() => { captured = ''; wasmOutput = JSON.stringify(rawResult) })
+beforeEach(() => { captured = ''; wasmOutput = JSON.stringify(rawResult); wasmThrows = false })
 
 describe('optimize() service glue', () => {
   it('builds the wasm request with snake_case fields', async () => {
@@ -71,6 +74,11 @@ describe('optimize() service glue', () => {
   it('throws when the wasm output shape is unexpected', async () => {
     wasmOutput = JSON.stringify({ sheets: 'nope' })
     await expect(optimize(2440, 1220, [piece], 3)).rejects.toThrow(/unexpected shape/i)
+  })
+
+  it('propagates a thrown wasm error (Rust Err on bad input) instead of swallowing it', async () => {
+    wasmThrows = true
+    await expect(optimize(2440, 1220, [piece], 3)).rejects.toThrow()
   })
 
   it('maps unplaced pieces and top-level totals', async () => {
