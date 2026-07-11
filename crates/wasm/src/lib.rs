@@ -1,7 +1,7 @@
-use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::future_to_promise;
 use serde::{Deserialize, Serialize};
 use std::sync::Once;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::future_to_promise;
 
 use cutter_core::models::{CutPiece, Sheet, UnplacedPiece};
 use cutter_core::optimizer::{self, CuttingStrategy};
@@ -94,13 +94,20 @@ fn convert_sheet(s: &Sheet) -> SheetOutput {
         used_area: s.used_area(),
         total_area: s.total_area(),
         efficiency: s.efficiency(),
-        placed_pieces: s.placed_pieces.iter().map(|p| PlacedOutput {
-            source_id: p.source_id.to_string(),
-            source_label: p.label.clone(),
-            source_color: p.color.clone(),
-            x: p.x, y: p.y, width: p.width, height: p.height,
-            is_rotated: p.is_rotated,
-        }).collect(),
+        placed_pieces: s
+            .placed_pieces
+            .iter()
+            .map(|p| PlacedOutput {
+                source_id: p.source_id.to_string(),
+                source_label: p.label.clone(),
+                source_color: p.color.clone(),
+                x: p.x,
+                y: p.y,
+                width: p.width,
+                height: p.height,
+                is_rotated: p.is_rotated,
+            })
+            .collect(),
     }
 }
 
@@ -111,16 +118,28 @@ fn run_optimize(input_json: &str) -> Result<String, String> {
     let input: OptimizeInput = serde_json::from_str(input_json)
         .map_err(|e| format!("invalid optimizer input JSON: {e}"))?;
 
-    let pieces: Vec<CutPiece> = input.pieces.into_iter().map(|p| CutPiece {
-        id: uuid::Uuid::parse_str(&p.id).unwrap_or_else(|_| uuid::Uuid::new_v4()),
-        label: p.label, width: p.width, height: p.height,
-        quantity: p.quantity, allow_rotation: p.allow_rotation, color: p.color,
-    }).collect();
+    let pieces: Vec<CutPiece> = input
+        .pieces
+        .into_iter()
+        .map(|p| CutPiece {
+            id: uuid::Uuid::parse_str(&p.id).unwrap_or_else(|_| uuid::Uuid::new_v4()),
+            label: p.label,
+            width: p.width,
+            height: p.height,
+            quantity: p.quantity,
+            allow_rotation: p.allow_rotation,
+            color: p.color,
+        })
+        .collect();
 
-    let result = optimizer::optimize(
-        input.sheet_width, input.sheet_height,
-        &pieces, input.kerf, to_strategy(input.strategy),
-    );
+    let result = optimizer::try_optimize(
+        input.sheet_width,
+        input.sheet_height,
+        &pieces,
+        input.kerf,
+        to_strategy(input.strategy),
+    )
+    .map_err(|e| e.to_string())?;
 
     let total_sheets = result.total_sheets();
     let total_used_area = result.total_used_area();
@@ -166,4 +185,3 @@ pub fn optimize_sync(input_json: &str) -> Result<String, JsValue> {
     ensure_tracing();
     run_optimize(input_json).map_err(|e| JsValue::from_str(&e))
 }
-

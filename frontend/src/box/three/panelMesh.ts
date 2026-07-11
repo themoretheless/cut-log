@@ -20,9 +20,16 @@ export function disposeObj(obj: THREE.Object3D) {
     (obj as THREE.Mesh).geometry.dispose()
   if ('material' in obj) {
     const mat = (obj as THREE.Mesh).material
-    if (Array.isArray(mat)) mat.forEach(m => m.dispose())
-    else if (mat) (mat as THREE.Material).dispose()
+    if (Array.isArray(mat)) mat.forEach(disposeMaterial)
+    else if (mat) disposeMaterial(mat as THREE.Material)
   }
+}
+
+export function disposeMaterial(material: THREE.Material) {
+  for (const value of Object.values(material)) {
+    if (value instanceof THREE.Texture) value.dispose()
+  }
+  material.dispose()
 }
 
 export interface PanelData {

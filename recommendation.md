@@ -1,229 +1,591 @@
-# CutLog recommendations: what to do next
+# CutLog improvement catalog
 
-The operational checklist for the refactoring described in
-[ARCHITECTURE.md](ARCHITECTURE.md). That document is the rationale (why, target
-model, dependency rules); this one is the ordered to-do with status. Keep the two
-in sync: the phase names and order here are the same spine.
+This is the canonical backlog for CutLog. It contains exactly **500 distinct,
+actionable observations**: defects, design debt, improvements, product ideas,
+and work completed in the v0.1.50 review. `ARCHITECTURE.md` explains the module
+boundaries; `README.md` gives the short reading path. Keeping the detailed list
+here avoids copying 500 lines across three documents and follows DRY.
 
-Baseline: version 0.1.38 (after PR #65, which grew `Home.vue` to ~1907 lines).
-Progress so far: 1 of 6 phases done (Phase 0, shipped in #80).
+Legend: `Bug`, `Debt`, `Improve`, `Idea`, or `Done`; priority `P0` (protect data
+or correctness) through `P3` (optional); effort `S`, `M`, or `L`. Checked items
+landed in the current v0.1.50 change set. Unchecked items are candidates, not
+promises; take them in small, independently testable slices.
 
-Two things live here: the **phased refactoring plan** (structural, below) and a
-**ranked top-50 audit** of concrete issues found by a ten-reviewer pass (bugs,
-security, accessibility, i18n, performance), in the
-[Top 50 issues](#top-50-issues-audit) section, plus a deeper second-wave
-addendum (issues 51-73) and a third wave (issues 74-83). The phases address the
-structural items; many audit issues are standalone fixes that can ship
-independently. The master roadmap and the idea/suggestion backlog live in
-[plan.md](plan.md).
+## Current focus
 
-## How to work this list
+1. Extract history, project snapshots, and piece-list orchestration from
+   `Home.vue` without changing behavior (`CL-106` to `CL-108`).
+2. Give pieces stable IDs and make box piece identity locale-independent
+   (`CL-117`, `CL-214`).
+3. Add optimizer progress, cooperative cancellation, and protocol tests
+   (`CL-059`, `CL-060`, `CL-070`).
+4. Version persisted/share state and add migrations before the schema grows
+   (`CL-129` to `CL-131`).
+5. Make SVG/DXF units and production metadata explicit (`CL-181` to `CL-187`).
 
-- One phase per pull request. Each phase is behavior-preserving and shippable on
-  its own; do not batch phases.
-- Follow the repo flow: branch, implement, `npx vue-tsc --noEmit`, `npx vitest run`,
-  `npm run build`, bump `version.json`, open a PR, let the single `build` check
-  pass, squash-merge, then sync `main`.
-- Pure logic goes in `lib/*` with a co-located `*.test.ts` in the same PR. The
-  Vue wiring (composables, components) is verified by build, type-check, the lib
-  tests it leans on, and a short manual smoke check, since the wiring itself is
-  not unit-tested.
-- Respect the dependency rules in ARCHITECTURE.md section 3.2 (dependencies point
-  inward only; no `vue` import inside `lib/`).
+## 1. Runtime safety and trust boundaries (CL-001..CL-025)
 
-## Status
+- [x] **CL-001 · Done · P0 · S** — Cap the quantity of one piece before expansion so a typo cannot allocate an unbounded queue.
+- [x] **CL-002 · Done · P0 · S** — Cap total expanded quantity before JavaScript crosses into WASM.
+- [x] **CL-003 · Done · P0 · M** — Add a fallible Rust optimizer entry point that returns a typed capacity error.
+- [x] **CL-004 · Done · P0 · S** — Make the CLI print optimizer failures and exit nonzero instead of continuing silently.
+- [x] **CL-005 · Done · P0 · S** — Convert Rust optimizer errors into JavaScript errors at the WASM boundary.
+- [x] **CL-006 · Done · P0 · S** — Apply the same quantity budget to current, shared, and persisted project state.
+- [ ] **CL-007 · Bug · P0 · S** — Reject `NaN`, infinity, and non-numeric dimensions at every import and deserialization boundary.
+- [ ] **CL-008 · Improve · P1 · S** — Define a documented maximum physical dimension instead of accepting arbitrarily large millimeter values.
+- [ ] **CL-009 · Improve · P1 · S** — Centralize kerf bounds and reject values larger than the selected stock dimensions.
+- [ ] **CL-010 · Bug · P0 · S** — Enforce integer quantities after every transform, not only while parsing the initial form.
+- [ ] **CL-011 · Debt · P1 · M** — Add an explicit schema version to local state, snapshots, and share links.
+- [ ] **CL-012 · Improve · P1 · S** — Limit generated export size and warn before creating a browser-freezing SVG or DXF.
+- [ ] **CL-013 · Improve · P1 · S** — Limit import rows separately from expanded quantity so malformed files fail early.
+- [ ] **CL-014 · Bug · P1 · S** — Reject unknown optimization strategy values instead of silently selecting a default.
+- [ ] **CL-015 · Improve · P2 · M** — Parse decimal separators deliberately so locale-formatted numbers cannot change meaning.
+- [ ] **CL-016 · Bug · P1 · S** — Quarantine corrupted localStorage records and preserve the last known valid state.
+- [ ] **CL-017 · Debt · P1 · M** — Give validation failures stable error codes rather than coupling UI behavior to messages.
+- [ ] **CL-018 · Bug · P1 · S** — Remove the legacy infallible optimizer fallback once all callers handle `Result` explicitly.
+- [ ] **CL-019 · Improve · P1 · M** — Fuzz project-state decoding with malformed JSON, extreme numbers, and missing fields.
+- [ ] **CL-020 · Improve · P2 · M** — Set a memory budget for result sheets and stop before result serialization becomes excessive.
+- [x] **CL-021 · Done · P1 · S** — Prevent a cancelled run or later input edit from clearing or replacing a newer valid result.
+- [ ] **CL-022 · Improve · P3 · S** — Normalize negative zero in dimensions and exported coordinates.
+- [ ] **CL-023 · Improve · P2 · S** — Bound labels by Unicode code points and export bytes, not JavaScript UTF-16 length alone.
+- [x] **CL-024 · Done · P0 · S** — JSON-round-trip Worker payloads so Vue proxies never reach structured clone.
+- [ ] **CL-025 · Debt · P1 · S** — Publish all runtime limits in one user-facing and developer-facing table.
 
-| # | Phase | What lands | Risk | Status |
-|---|-------|-----------|------|--------|
-| 0 | Free wins | drop `jspdf`/`svg2pdf`; `lib/downloadFile.ts` (+test); use it in both pages | very low | Done (#80) |
-| 1 | Palette + sheet SVG | `lib/palette.ts`, `lib/sheetSvg.ts` (+tests), `components/SheetCard.vue` replaces inline SVG | medium | TODO |
-| 2 | Shared UI composables | `composables/useToast.ts`, `composables/useKeyboardShortcuts.ts` | low-medium | TODO |
-| 3 | Persistence + history + snapshots | `useHomeProject`, `useHomeHistory`, `useProjectSnapshots` (wrap #65 `projectSnapshots.ts`) | high | TODO |
-| 4 | Piece list | `usePieceList` (wrap `pieceOps` + #65 `pieceEditor.ts`) | medium | TODO |
-| 5 | De-i18n box geometry | `box/usePieceCatalog.ts` with a `PieceId` enum; refactor `useBoxModel` | medium | TODO |
-| 6 | three.js disposal (+ optional base) | dispose-traverse fix; optional `box/three/useThreeScene.ts` | low / medium | TODO |
+## 2. Optimizer correctness and algorithms (CL-026..CL-050)
 
-Recommended order: 0, then 1, then 3 (highest value, do before 4), then 2, 4, 5,
-and 6 last (6 is optional, but the disposal fix alone is cheap and worth doing
-any time).
+- [ ] **CL-026 · Improve · P0 · M** — Add golden layouts for exact-fit, one-pixel-gap, and unavoidable-overflow cases.
+- [ ] **CL-027 · Bug · P0 · S** — Verify that an exact stock-sized part fits when kerf is zero and fails predictably otherwise.
+- [ ] **CL-028 · Bug · P0 · M** — Test kerf accounting between adjacent pieces and at stock boundaries independently.
+- [ ] **CL-029 · Bug · P0 · M** — Assert that rotation never changes labels, quantities, or reported source dimensions.
+- [ ] **CL-030 · Improve · P1 · M** — Guarantee deterministic output for identical input, strategy, and optimizer version.
+- [ ] **CL-031 · Bug · P0 · M** — Add a post-layout invariant that no two placed rectangles overlap.
+- [ ] **CL-032 · Bug · P0 · M** — Add a post-layout invariant that every rectangle remains inside its sheet.
+- [ ] **CL-033 · Improve · P1 · S** — Cross-check used area, waste area, and efficiency so their totals cannot diverge.
+- [ ] **CL-034 · Improve · P2 · M** — Build a benchmark matrix comparing all strategies on representative workshop jobs.
+- [ ] **CL-035 · Bug · P1 · S** — Stop using duplicate labels as identity when reconciling optimized pieces with source rows.
+- [ ] **CL-036 · Bug · P1 · M** — Cover floating-point dimensions near comparison thresholds and normalize epsilon handling.
+- [ ] **CL-037 · Improve · P1 · S** — Define and test the supported semantics of zero kerf instead of relying on incidental math.
+- [ ] **CL-038 · Improve · P1 · S** — Return a specific “part exceeds stock” reason for every rejected orientation.
+- [ ] **CL-039 · Improve · P1 · L** — Add property-based tests for random layouts and validate all placement invariants.
+- [ ] **CL-040 · Improve · P2 · L** — Compare small jobs against an exact solver to measure heuristic quality.
+- [ ] **CL-041 · Bug · P1 · M** — Derive leftovers from occupied geometry and test that no usable area is double-counted.
+- [ ] **CL-042 · Improve · P2 · S** — Stabilize tie-breaking so source-order changes do not create surprising layouts.
+- [ ] **CL-043 · Improve · P1 · M** — Add cooperative cancellation checkpoints inside long Rust search loops.
+- [ ] **CL-044 · Idea · P2 · L** — Emit meaningful progress phases rather than an indeterminate spinner for long runs.
+- [ ] **CL-045 · Idea · P2 · L** — Support multiple stock sizes in one optimization while keeping material groups isolated.
+- [ ] **CL-046 · Idea · P2 · L** — Accept saved offcuts as bounded stock inputs and report which offcuts were consumed.
+- [ ] **CL-047 · Idea · P2 · L** — Model grain direction as an orientation constraint separate from rotation permission.
+- [ ] **CL-048 · Improve · P2 · L** — Validate that a proposed layout admits a practical guillotine cutting sequence when requested.
+- [ ] **CL-049 · Improve · P1 · M** — Fail CI when optimizer runtime or allocations regress beyond an agreed benchmark threshold.
+- [ ] **CL-050 · Improve · P1 · M** — Explain every unplaced part with dimensions, attempted orientations, and the limiting constraint.
 
-## Next action: Phase 0
+## 3. WASM, Workers, and concurrency (CL-051..CL-075)
 
-1. Remove `"jspdf"` and `"svg2pdf.js"` from `frontend/package.json` dependencies
-   (confirmed unused: no `import` of either anywhere in `frontend/src`). Run
-   `npm install` so the lockfile updates.
-2. Create `frontend/src/lib/downloadFile.ts` exporting
-   `downloadFile(name: string, content: string, mime: string): void` (the
-   blob/object-URL/anchor/click/revoke sequence), with a small test that asserts
-   the anchor `download` name and that the object URL is revoked.
-3. Replace the inline copy in `Home.vue` (around the export functions) and the
-   `downloadSvg` in `BoxBuilder.vue` with calls to the shared helper.
-4. Bump `version.json`, run the full gate, ship.
+- [x] **CL-051 · Done · P0 · M** — Run optimization in a dedicated Worker so the editor remains responsive.
+- [x] **CL-052 · Done · P0 · S** — Give each run an owned Worker and terminate it on completion, cancellation, or failure.
+- [x] **CL-053 · Done · P0 · S** — Strip reactive proxies before `postMessage` to avoid `DataCloneError` in real browsers.
+- [x] **CL-054 · Done · P0 · S** — Cancel stale work when a newer calculation starts or the page unmounts.
+- [x] **CL-055 · Done · P0 · S** — Catch synchronous `postMessage` failures and reject while cleaning up the Worker.
+- [x] **CL-056 · Done · P1 · S** — Surface Worker and optimizer failures as a visible localized error toast.
+- [ ] **CL-057 · Improve · P2 · M** — Reuse a warm Worker only after measuring whether startup dominates typical calculations.
+- [ ] **CL-058 · Improve · P2 · M** — Cache WASM initialization inside the Worker and expose initialization state.
+- [ ] **CL-059 · Improve · P1 · M** — Define progress messages with phase, completed work, and optional total work.
+- [ ] **CL-060 · Improve · P1 · L** — Connect UI cancellation to cooperative Rust cancellation rather than termination alone.
+- [ ] **CL-061 · Debt · P1 · S** — Add request IDs to every Worker message so late messages can be proven stale.
+- [ ] **CL-062 · Debt · P1 · S** — Define the Worker protocol as a discriminated union shared by both endpoints.
+- [ ] **CL-063 · Improve · P1 · S** — Add a configurable timeout with a clear recovery path for pathological runs.
+- [ ] **CL-064 · Improve · P1 · M** — Retry initialization once after a Worker crash, then preserve the user’s inputs.
+- [ ] **CL-065 · Improve · P2 · S** — Add a build-time guard preventing browser-only APIs from leaking into Worker modules.
+- [ ] **CL-066 · Improve · P3 · M** — Chunk very large input payloads only if serialization profiling shows a bottleneck.
+- [ ] **CL-067 · Improve · P3 · M** — Evaluate transferable typed arrays for geometry-heavy protocols instead of JSON objects.
+- [ ] **CL-068 · Debt · P2 · S** — Handshake Worker and UI protocol versions before starting optimization.
+- [ ] **CL-069 · Improve · P1 · M** — Serialize structured Rust error codes and details instead of flattening them to text.
+- [x] **CL-070 · Done · P1 · M** — Unit-test success, construction/runtime failure, cancellation, plain snapshots, and cleanup with a fake Worker.
+- [ ] **CL-071 · Improve · P2 · M** — Provide a documented fallback or compatibility message when module Workers are unavailable.
+- [ ] **CL-072 · Debt · P3 · S** — Document cross-origin and MIME requirements for deployed WASM and Worker assets.
+- [ ] **CL-073 · Improve · P1 · M** — Test the production Content Security Policy against WASM and module Worker loading.
+- [ ] **CL-074 · Improve · P2 · M** — Measure Worker startup, WASM initialization, serialization, and optimizer time separately.
+- [ ] **CL-075 · Bug · P1 · S** — Assert that route changes leave no live optimizer Worker behind.
 
-Definition of done: `vue-tsc` clean; `vitest` green including the new test;
-`vite build` clean; no `jspdf`/`svg2pdf` in `package.json`; one SVG export still
-downloads correctly on each page.
+## 4. Rust core, models, and CLI (CL-076..CL-100)
 
-## Verification per later phase
+- [x] **CL-076 · Done · P0 · M** — Keep excessive expansion from panicking or allocating through the Rust core API.
+- [x] **CL-077 · Done · P0 · S** — Represent optimizer capacity failures with a typed Rust error.
+- [x] **CL-078 · Done · P0 · S** — Return a failing CLI exit code when optimization cannot run.
+- [x] **CL-079 · Done · P0 · S** — Preserve Rust error context when crossing the WASM boundary.
+- [x] **CL-080 · Done · P0 · S** — Use one Rust expansion limit for core, CLI, and WASM paths.
+- [ ] **CL-081 · Debt · P1 · M** — Introduce stable input/output schema structs instead of treating serialized JSON as an implicit contract.
+- [ ] **CL-082 · Improve · P1 · M** — Add `serde` defaults and explicit rejection rules for every optional or unknown field.
+- [ ] **CL-083 · Improve · P1 · S** — Validate model invariants at construction so invalid pieces cannot reach optimizer internals.
+- [ ] **CL-084 · Bug · P1 · S** — Audit integer conversions between JavaScript numbers, Rust integers, and exported values for truncation.
+- [ ] **CL-085 · Improve · P2 · M** — Separate placement generation from result statistics to test both independently.
+- [ ] **CL-086 · Debt · P2 · M** — Replace string strategy dispatch with an enum serialized by an explicit wire name.
+- [ ] **CL-087 · Improve · P1 · M** — Add snapshot tests for CLI JSON output and human-readable diagnostics.
+- [ ] **CL-088 · Improve · P2 · S** — Add `--version` output sourced from the same release version as the web app.
+- [ ] **CL-089 · Idea · P3 · M** — Add `--format json` for machine-readable CLI errors and result metadata.
+- [ ] **CL-090 · Improve · P2 · S** — Support reading input from stdin so the CLI composes with workshop scripts.
+- [ ] **CL-091 · Improve · P2 · S** — Make output-file overwrite behavior explicit and safe.
+- [ ] **CL-092 · Improve · P1 · M** — Add end-to-end CLI tests for valid input, invalid schema, excessive quantity, and write failure.
+- [ ] **CL-093 · Debt · P2 · M** — Keep feature flags minimal and document which crates are browser-only or native-only.
+- [ ] **CL-094 · Improve · P2 · S** — Run Clippy with warnings denied for workspace code in CI.
+- [ ] **CL-095 · Improve · P2 · S** — Run `cargo audit` or an equivalent advisory check on a schedule.
+- [ ] **CL-096 · Improve · P3 · M** — Record optimizer benchmark baselines with criterion and representative fixtures.
+- [ ] **CL-097 · Debt · P2 · S** — Document coordinate units and numeric precision in public Rust types.
+- [ ] **CL-098 · Bug · P1 · M** — Test serialization round trips for non-ASCII labels and extreme legal dimensions.
+- [ ] **CL-099 · Improve · P2 · S** — Add rustdoc examples for the fallible optimizer API.
+- [ ] **CL-100 · Improve · P2 · S** — Add a complete CLI example to README with input, command, output, and failure behavior.
 
-- Phase 1: `sheetSvg` unit tests (including a label with `<` and `&`); visual
-  parity of `SheetCard` against the old inline SVG for a sample layout; selection
-  highlight still toggles.
-- Phase 2: a dispatch + input-field-skip unit test for `useKeyboardShortcuts`;
-  manual pass of every shortcut on both pages (Enter adds only outside inputs,
-  Ctrl+Enter calculates, Ctrl+Z/Y undo/redo, Ctrl+D duplicates, Esc clears,
-  arrows navigate the gallery).
-- Phase 3: a focused test that record -> undo -> redo -> restore does not
-  self-record; manual edit/undo/redo, reload from localStorage, open a share
-  link (hash stripped), save and reload a named project.
-- Phase 4: existing `pieceOps`/`pieceEditor` tests stay green; manual
-  add/import/duplicate/sort/search/drag-reorder checks.
-- Phase 5: geometry golden snapshots unchanged; a catalog test that ids are
-  locale-independent; manual RU and EN parity of box pieces, gallery, cut sheet,
-  and SVG download.
-- Phase 6: `renderer.info.memory.geometries`/`textures` stay flat across repeated
-  box-param changes and navigate-away-and-back; visual parity of explode and ring.
+## 5. Home editor architecture and state (CL-101..CL-125)
 
-## Fixed
+- [x] **CL-101 · Done · P1 · M** — Extract each result sheet into an accessible `SheetCard` component.
+- [x] **CL-102 · Done · P1 · S** — Consolidate piece and shelf colors in a tested palette module.
+- [x] **CL-103 · Done · P1 · M** — Move sheet scaling, grain lines, labels, and badges into pure presentation helpers.
+- [x] **CL-104 · Done · P1 · S** — Extract toast timing and tone into a reusable composable with cleanup.
+- [x] **CL-105 · Done · P1 · M** — Extract debounced Home persistence and surface storage failures.
+- [ ] **CL-106 · Debt · P1 · L** — Extract undo/redo orchestration into `useHomeHistory` with restore-loop tests.
+- [ ] **CL-107 · Debt · P1 · M** — Extract named project snapshots into a persistence-focused composable.
+- [ ] **CL-108 · Debt · P1 · L** — Extract piece CRUD, color allocation, filtering, sorting, and bulk edits into `usePieceList`.
+- [ ] **CL-109 · Debt · P2 · M** — Replace the page-level keydown chain with a tested shortcut composable.
+- [ ] **CL-110 · Debt · P2 · M** — Move export orchestration out of `Home.vue` while keeping serializers pure.
+- [ ] **CL-111 · Debt · P2 · M** — Extract command-palette state and command execution from the page.
+- [ ] **CL-112 · Debt · P2 · M** — Move cost inputs and summary derivation behind a small `useCosting` interface.
+- [ ] **CL-113 · Debt · P2 · S** — Isolate result selection and selected-piece reconciliation from rendering.
+- [ ] **CL-114 · Debt · P2 · M** — Put import preview, validation, and commit into one transactional boundary.
+- [ ] **CL-115 · Debt · P1 · L** — Establish one owner for project state with explicit `read`, `apply`, and `reset` operations.
+- [ ] **CL-116 · Bug · P1 · M** — Replace the broad deep watcher with intentional event-based history and persistence triggers.
+- [ ] **CL-117 · Bug · P1 · M** — Give every source piece a stable ID that survives duplicate labels, sorting, and optimization.
+- [ ] **CL-118 · Improve · P2 · L** — Express complex multi-field edits as named actions so state transitions are traceable.
+- [ ] **CL-119 · Debt · P1 · S** — Keep translation access out of pure modules by passing display strings at the component edge.
+- [ ] **CL-120 · Improve · P2 · M** — Add dependency-boundary lint rules for `lib`, `services`, composables, and pages.
+- [ ] **CL-121 · Improve · P2 · M** — Add a route-level error boundary that preserves the current project after a render failure.
+- [ ] **CL-122 · Debt · P2 · L** — Reduce `Home.vue` below 800 lines through cohesive extractions, not line-shuffling wrappers.
+- [ ] **CL-123 · Improve · P2 · M** — Add focused component tests for SheetCard selection, labels, and keyboard behavior.
+- [ ] **CL-124 · Improve · P2 · M** — Model optimization as idle/running/success/error/cancelled states instead of related booleans.
+- [ ] **CL-125 · Debt · P1 · S** — Require page actions to declare side effects rather than hiding persistence in unrelated watchers.
 
-Resolved items, removed from the active lists below (numbers are the stable audit ids):
+## 6. Persistence, history, and recovery (CL-126..CL-150)
 
-- **#7 - CSV formula injection** (`lib/piecesCsv.ts`): formula-lead labels are neutralized with a leading quote. Shipped in #69.
-- **#2 - calculate() error handling** (`Home.vue`): wrapped in try/catch, resets state and shows an error toast on failure. Shipped in #70.
-- **#3 - WASM init never reset on failure** (`services/rustService.ts`): `initPromise` is cleared on error so the next call retries. Shipped in #70.
-- **#4 - WASM output untyped/unguarded** (`services/optimizer.ts`): typed `RawOutput` interfaces, parse wrapped in try/catch, array-shape guard. Shipped in #70.
-- **#5 - Deep watcher fires save + history on every keystroke** (`Home.vue`): piece-row edits now commit through explicit mutation handlers, and the watcher only observes top-level scalar refs. Shipped in #76.
-- **#75 - galPieces[galIdx] out-of-range crash** (`box/useBoxModel.ts`, BoxBuilder.vue): a clamp watcher keeps galIdx in range when the gallery shrinks (bevel toggle / fewer shelves), plus defensive `?.` in the template and a guard in galDlSvg. Shipped in #77.
-- **#76 - CSV round-trip loses the rotation flag** (`lib/parsePieceList.ts`, Home.vue): ParsedRow gains an optional allowRotation parsed from the 4th column (0 = locked), and importPieces applies it, so export then re-import preserves rotation. Shipped in #78.
-- **#77 - WASM swallowed malformed input** (`crates/wasm/src/lib.rs`): run_optimize returns Result and both wasm entry points surface Err (thrown), so a bad payload raises the calc-error toast instead of a silent empty layout. Shipped in #79.
-- **#31 - duplicate blob-download helper** (`lib/downloadFile.ts`): extracted one shared, tested `downloadFile` used by both pages. Shipped in #80 (Phase 0).
-- **#48 - unused jspdf/svg2pdf deps** (`package.json`): removed (27 packages dropped from the lockfile). Shipped in #80 (Phase 0).
-- **#51 - calculate() result race**: a monotonic generation id discards superseded runs. Shipped in #70.
-- **#52 - unbounded piece count** (`lib/homeState.ts`): parseHomeState caps the list at 1000. Shipped in #71.
-- **#18 - unbounded label length** (`lib/homeState.ts`, Home.vue): label sliced to 200 at parse, plus `maxlength` on the inputs. Shipped in #71.
-- **#40 - currency control/bidi characters** (`lib/homeState.ts`): currency whitelisted to letters / currency symbols / dot. Shipped in #71.
-- **#14 - drag-reorder under filter/locked** (`lib/pieceOps.ts`, Home.vue): the locked-aware reorder is now a pure, tested `reorderByDrag`. The drag handlers already bound absolute indices, so the wrong-piece risk was overstated; this pins the behavior with tests. Shipped in #72.
-- **#53 - numbers not validated finite/positive** (`lib/validatePiece.ts`, Home.vue): validateNewPiece now rejects NaN/Infinity dims and quantity, and calculate() refuses non-finite/non-positive sheet dims before the WASM call. Shipped in #75.
-- **#54 - validateNewPiece ignores kerf** (`lib/validatePiece.ts`): the fit check now compares width+kerf / height+kerf in both orientations. Shipped in #75.
-- **#74 - imported pieces bypass validateNewPiece** (Home.vue): importPieces validates each row (kerf-aware) and skips invalid ones with a count in the toast. Shipped in #75.
-- **#12 - keyboard shortcuts hijack typing** (`lib/keyboard.ts`, Home.vue): a tested `isEditableTarget` guard (incl. contentEditable) now lets inputs handle Enter and their own Ctrl+Z/Y/D natively; only Ctrl+K and Ctrl+Enter stay global. Shipped in #73.
+- [x] **CL-126 · Done · P1 · M** — Debounce local project writes behind a dedicated storage composable.
+- [x] **CL-127 · Done · P1 · S** — Report quota and write failures instead of pretending the project was saved.
+- [ ] **CL-128 · Bug · P0 · M** — Keep a recoverable copy of malformed persisted data before resetting to defaults.
+- [ ] **CL-129 · Debt · P1 · M** — Version every persisted record and share-link payload.
+- [ ] **CL-130 · Improve · P1 · M** — Add sequential, tested migrations from every supported state version.
+- [ ] **CL-131 · Improve · P1 · M** — Move large projects and snapshot collections from localStorage to IndexedDB.
+- [ ] **CL-132 · Improve · P2 · S** — Show storage usage and the estimated size of the current project.
+- [ ] **CL-133 · Improve · P1 · S** — Cap snapshot count and prune by an explicit oldest-first policy.
+- [ ] **CL-134 · Bug · P1 · M** — Coalesce rapid field edits into one undo step without merging separate user actions.
+- [ ] **CL-135 · Improve · P2 · M** — Store a compact operation description alongside each history snapshot.
+- [ ] **CL-136 · Bug · P0 · M** — Test that restoring history never records another history entry recursively.
+- [ ] **CL-137 · Improve · P1 · M** — Write critical persisted records atomically with a temporary key and verified swap.
+- [ ] **CL-138 · Idea · P2 · L** — Add a first-class project list with create, rename, duplicate, archive, and delete.
+- [ ] **CL-139 · Idea · P2 · M** — Show a semantic snapshot diff for added, removed, and changed parts.
+- [ ] **CL-140 · Improve · P2 · S** — Create automatic recovery points before destructive bulk actions.
+- [ ] **CL-141 · Improve · P1 · M** — Support a versioned project JSON export/import for device-independent backup.
+- [ ] **CL-142 · Improve · P2 · L** — Compress large share links and warn before URLs exceed practical limits.
+- [ ] **CL-143 · Improve · P2 · S** — Offer “restore as copy” so opening old work cannot overwrite the current project accidentally.
+- [ ] **CL-144 · Improve · P2 · M** — Detect concurrent edits from another tab and ask which version to keep.
+- [ ] **CL-145 · Improve · P3 · M** — Add optional encrypted project export for commercially sensitive cut lists.
+- [ ] **CL-146 · Bug · P1 · S** — Derive the next palette color from state so undo and restore cannot desynchronize it.
+- [ ] **CL-147 · Improve · P2 · M** — Preserve undo history across route navigation during the same session.
+- [ ] **CL-148 · Improve · P1 · S** — Distinguish “saved”, “saving”, “save failed”, and “storage unavailable” in UI state.
+- [ ] **CL-149 · Improve · P2 · S** — Add a one-click recovery action when persisted state fails validation.
+- [ ] **CL-150 · Improve · P1 · M** — Test reload, share restore, snapshot restore, and undo together as one browser workflow.
 
-## Top 50 issues (audit)
+## 7. Piece editor and import (CL-151..CL-175)
 
-Ranked output of a ten-reviewer audit (correctness, security, error-handling,
-performance, architecture, dead-code, duplication, testing, type-safety, a11y,
-i18n), deduped from 101 raw findings (originally 14 high, 25 medium, 11 low; no
-criticals). These are findings to triage; the high-severity ones were
-spot-checked against the code. A `(Phase N)` tag marks issues the phases above
-already address; the rest are standalone fixes. Locations are approximate and
-may drift as code changes.
+- [ ] **CL-151 · Bug · P1 · M** — Introduce stable piece IDs independent of labels and array positions.
+- [ ] **CL-152 · Bug · P0 · M** — Validate every imported row before mutating the current project.
+- [ ] **CL-153 · Improve · P1 · M** — Report import failures by line, field, rejected value, and recovery hint.
+- [ ] **CL-154 · Bug · P1 · M** — Parse quoted CSV fields containing delimiters, newlines, and escaped quotes correctly.
+- [ ] **CL-155 · Improve · P2 · S** — Treat tab-separated spreadsheet paste as a documented import format.
+- [ ] **CL-156 · Improve · P2 · S** — Detect common localized and English header rows without importing them as parts.
+- [ ] **CL-157 · Improve · P2 · M** — Detect exact and near-duplicate parts before committing an import.
+- [ ] **CL-158 · Idea · P2 · M** — Preview imported rows with accept/reject controls and a total quantity budget.
+- [ ] **CL-159 · Improve · P1 · S** — Stop parsing after the import row limit and explain how many rows were ignored.
+- [ ] **CL-160 · Idea · P3 · L** — Detect source units from headers and require confirmation before converting inches or centimeters.
+- [ ] **CL-161 · Improve · P2 · S** — Normalize surrounding whitespace while preserving intentional internal label spacing.
+- [ ] **CL-162 · Bug · P1 · S** — Reject empty labels only when identity or exports truly require one; keep the rule consistent.
+- [x] **CL-163 · Done · P1 · S** — Add keyboard-accessible move-up and move-down controls to each piece row.
+- [x] **CL-164 · Done · P1 · S** — Route keyboard reordering through the same lock-aware ordering logic as drag and drop.
+- [x] **CL-165 · Done · P1 · S** — Give piece quantity inputs specific accessible names and enforce the shared maximum.
+- [x] **CL-166 · Done · P1 · S** — Keep button and drag reordering behavior aligned in browser smoke tests.
+- [ ] **CL-167 · Improve · P1 · M** — Design a compact mobile piece row instead of relying on uncontrolled wrapping.
+- [ ] **CL-168 · Improve · P2 · L** — Virtualize the piece list after profiling a realistic large project.
+- [ ] **CL-169 · Idea · P2 · M** — Show a dry-run diff before applying bulk allowances, swaps, or rounding.
+- [ ] **CL-170 · Bug · P2 · M** — Preserve selection predictably when filtering, sorting, and clearing filters.
+- [ ] **CL-171 · Improve · P3 · S** — Avoid adjacent indistinguishable colors while keeping palette assignment deterministic.
+- [ ] **CL-172 · Improve · P1 · M** — Check piece colors and selection outlines against contrast requirements.
+- [ ] **CL-173 · Idea · P3 · S** — Copy a stable piece reference from the row for workshop cross-referencing.
+- [ ] **CL-174 · Idea · P2 · L** — Add a reusable personal parts library with search and material defaults.
+- [ ] **CL-175 · Improve · P1 · M** — Treat each import as one reversible transaction in history.
 
-Item numbers are stable ids: a missing number means the item is fixed and moved
-to the [Fixed](#fixed) section. Resolved so far: #2, #3, #4, #5, #7, #12, #14, #18, #31, #40, #48, #51, #52, #53, #54, #74, #75, #76, #77.
+## 8. Export, CAD, and printing (CL-176..CL-200)
 
-### High (7)
+- [ ] **CL-176 · Bug · P0 · M** — Round-trip CSV export through the importer and assert every supported field survives.
+- [ ] **CL-177 · Bug · P1 · M** — Validate generated CSV quoting for commas, semicolons, quotes, and multiline labels.
+- [ ] **CL-178 · Improve · P1 · S** — Include a format version and units in machine-readable exports.
+- [ ] **CL-179 · Bug · P1 · S** — Validate color strings before inserting them into raw SVG output.
+- [ ] **CL-180 · Improve · P1 · M** — Share one tested piece label and badge model between on-screen and exported layouts.
+- [ ] **CL-181 · Bug · P0 · S** — Declare millimeter units explicitly in exported SVG width and height.
+- [ ] **CL-182 · Bug · P0 · M** — Emit and test the DXF `$INSUNITS` header for millimeters.
+- [ ] **CL-183 · Improve · P1 · M** — Validate exported DXF with at least one independent parser in CI.
+- [ ] **CL-184 · Improve · P2 · M** — Add optional cut-order numbers and a legend to production drawings.
+- [ ] **CL-185 · Improve · P2 · M** — Include grain direction and rotation state in SVG, DXF, and print output.
+- [ ] **CL-186 · Idea · P2 · M** — Export a bill of materials grouped by material, thickness, and edge treatment.
+- [ ] **CL-187 · Improve · P1 · S** — Add project name, timestamp, optimizer version, and strategy to export metadata.
+- [ ] **CL-188 · Improve · P2 · S** — Offer copy-to-clipboard alongside download for textual exports.
+- [ ] **CL-189 · Bug · P1 · M** — Test print pagination so a sheet diagram or parts row is never clipped across pages.
+- [ ] **CL-190 · Improve · P1 · M** — Add print styles for monochrome output without losing piece identity.
+- [ ] **CL-191 · Improve · P2 · S** — Auto-fit labels within tiny parts and expose the full label in a legend.
+- [ ] **CL-192 · Idea · P3 · L** — Add a GLB export of the assembled box with real dimensions and material names.
+- [ ] **CL-193 · Idea · P3 · L** — Evaluate a CNC-specific toolpath export only after defining machine and safety constraints.
+- [ ] **CL-194 · Improve · P1 · M** — Reject exports that exceed safe browser memory and suggest splitting the project.
+- [ ] **CL-195 · Bug · P1 · S** — Use locale-independent decimal punctuation in machine-readable CAD formats.
+- [ ] **CL-196 · Improve · P2 · S** — Sanitize file names while retaining meaningful project identifiers.
+- [ ] **CL-197 · Improve · P1 · M** — Test non-ASCII project and piece names in every export format.
+- [ ] **CL-198 · Idea · P3 · M** — Provide an export preset system for common workshop software.
+- [ ] **CL-199 · Improve · P2 · M** — Add an export preview with file type, units, dimensions, and estimated size.
+- [ ] **CL-200 · Debt · P2 · S** — Keep download mechanics in one helper and serializers free of DOM side effects.
 
-1. **three.js scenes leak GPU memory on dispose** [performance] `box/three/useAssemblyScene.ts:284-294`, `usePieceGallery.ts:309-322`. dispose() calls only `renderer.dispose()` and never traverses the groups, so geometries/materials/sprite textures stay in WebGL memory and accumulate on rebuilds. Fix: clearGroup/disposeObj every group first. (Phase 6)
-6. **God component Home.vue (~1907 lines)** [architecture] `Home.vue:1-1908`. UI, persistence, history, snapshots, export, commands, sort/filter, and bulk transforms over shared mutable state; untestable. Fix: extract composables and modules. (Phases 3-5)
-8. **Box piece identity matched by translated label** [correctness] `box/useBoxModel.ts:77-90`. `pieceData()` compares against `t()` labels; a translation edit, a language switch, or an old saved label falls through to wrong geometry silently. Fix: match on a stable `pieceKind` enum. (Phase 5)
-9. **Dimension field labels not associated with the input** [a11y] `Home.vue` form rows, `BoxBuilder.vue:97-129`. `<label>` and NumberField are siblings with no `for`/`id`, and even nested the first labelable descendant is NumberField's "minus" button, so the number input is unlabeled. Fix: expose an `id` on NumberField's input and use `for`/`id`.
-10. **No keyboard alternative to drag-drop reorder** [a11y] `Home.vue:1474-1540`. Reordering is drag-only; keyboard and AT users cannot reorder. Fix: Alt+ArrowUp/Down on focused rows with an ARIA live announce.
-11. **Layout SVGs have no accessible names** [a11y] `Home.vue:1642-1763`, `BoxBuilder.vue:159-221`. Placed-piece rects/text have no `title`/`desc`/`role`. Fix: `role="img"` plus per-piece `title`/`desc`.
-13. **No round-trip test for the label-based piece matching** [testing] `box/useBoxModel.ts:77-90`. Nothing feeds every `allPieces()` label back through `pieceData()`, so a label change ships broken. Fix: add that round-trip test. (Phase 5)
+## 9. Box geometry and constraints (CL-201..CL-225)
 
-### Medium (23)
+- [x] **CL-201 · Done · P0 · M** — Centralize interdependent box parameter constraints in a pure tested module.
+- [x] **CL-202 · Done · P0 · S** — Clamp width, height, depth, thickness, kerf, tabs, shelves, and bevel synchronously.
+- [x] **CL-203 · Done · P1 · S** — Feed dynamic geometric maxima into NumberField instead of displaying impossible ranges.
+- [x] **CL-204 · Done · P0 · M** — Cover coupled limits and extreme values with model and pure constraint tests.
+- [ ] **CL-205 · Bug · P0 · M** — Validate every generated polygon for self-intersection before rendering or export.
+- [x] **CL-206 · Done · P0 · M** — Enforce positive spacing between tabs instead of allowing zero-gap degenerate contours.
+- [ ] **CL-207 · Improve · P1 · M** — Return explicit constraint reasons so the UI can explain each clamp.
+- [ ] **CL-208 · Improve · P1 · S** — Show the legal range beside a focused parameter when its maximum is dynamic.
+- [ ] **CL-209 · Bug · P1 · M** — Test shelf spacing at zero, one, and maximum shelf counts.
+- [ ] **CL-210 · Bug · P1 · M** — Verify bevel geometry at both limits and around zero with golden fixtures.
+- [ ] **CL-211 · Improve · P2 · M** — Separate requested parameters from effective clamped parameters for transparent feedback.
+- [ ] **CL-212 · Improve · P1 · M** — Add dimensional invariants shared by SVG and Three.js outputs.
+- [ ] **CL-213 · Bug · P1 · M** — Test that SVG panel dimensions agree with generated 3D geometry within tolerance.
+- [ ] **CL-214 · Debt · P1 · M** — Identify box pieces with locale-independent IDs rather than translated labels.
+- [ ] **CL-215 · Debt · P2 · M** — Extract a piece catalog that maps IDs to geometry, colors, and edge labels at the boundary.
+- [ ] **CL-216 · Idea · P2 · L** — Support per-panel thickness only with a constraint model for every affected joint.
+- [ ] **CL-217 · Idea · P3 · M** — Add presets for common box sizes as data, not hardcoded buttons.
+- [ ] **CL-218 · Improve · P2 · S** — Allow reset to defaults and reset one field without rebuilding unrelated state.
+- [ ] **CL-219 · Improve · P2 · M** — Persist box parameters with the same versioned storage policy as cut projects.
+- [ ] **CL-220 · Bug · P1 · M** — Test decimal dimensions and kerf values for cumulative rounding drift.
+- [ ] **CL-221 · Improve · P2 · M** — Add a fit-tolerance parameter distinct from physical tool kerf.
+- [ ] **CL-222 · Idea · P2 · L** — Preview joint clearance and flag likely press-fit or loose-fit combinations.
+- [ ] **CL-223 · Improve · P1 · M** — Export a dimensioned panel list alongside the box SVG.
+- [ ] **CL-224 · Improve · P2 · S** — Make invalid pasted values resolve consistently with typed and stepped values.
+- [ ] **CL-225 · Improve · P1 · M** — Add property tests generating legal parameter sets and checking geometric invariants.
 
-15. **localStorage.setItem failures swallowed** [error-handling] `Home.vue:172-176`. QuotaExceeded and private-mode errors are discarded; the user silently stops persisting. Fix: detect quota and warn.
-16. **Palette command errors dropped** [error-handling] `Home.vue:904-908`. `runPaletteCommand` has no catch and the caller does not await. Fix: try/catch + error toast + await.
-17. **Imported/shared quantity reaches optimizer unvalidated** [correctness] `services/optimizer.ts:20-28`. `0`/`-1`/`0.5`/`NaN` from a link or paste hit the Rust packer. Fix: `Math.max(1, Math.round(q))` before serializing.
-19. **useBoxModel injects t() into geometry logic** [architecture] `box/useBoxModel.ts:23,78-109`. Couples geometry to the l10n store. Fix: pass a kind enum, localize labels in the component. (Phase 5)
-20. **colorIdx is module-level mutable, not restored on undo** [correctness] `Home.vue` (several sites). The color counter desyncs after undo/redo/import. Fix: store it in state or derive color from array position.
-21. **labelMatCache materials/textures never disposed** [performance] `box/three/useAssemblyScene.ts:38-62,284`. Cached SpriteMaterial + CanvasTexture grow unbounded. Fix: dispose and clear the cache in `dispose()`. (Phase 6)
-22. **Dates and costs ignore the app language** [i18n] `Home.vue:623,1601-1609`. `toLocaleString`/`toFixed` use the browser locale, not RU/EN. Fix: pass `ru-RU`/`en-US` and use `Intl.NumberFormat`.
-23. **CSV header hardcoded English** [i18n] `lib/piecesCsv.ts:14`. RU users get English columns. Fix: translate the header or document it as a stable machine format for re-import.
-24. **BoxBuilder stats use positional {0}/{1} replace** [i18n] `BoxBuilder.vue:194-198`. Fragile if placeholder order differs between locales. Fix: named-parameter interpolation.
-25. **Currency, separator, and empty-label fallback hardcoded** [i18n] `Home.vue:60`, `exportLayout.ts:28,55`. Ruble, multiply sign, and dash regardless of language. Fix: derive from `lang` and translation keys.
-26. **Command palette has no arrow-key navigation** [a11y] `Home.vue:915-923`. Only Enter/Escape; can only run the first match. Fix: ArrowUp/Down highlight and run the highlighted command.
-27. **Clickable spans/divs/rects instead of buttons** [a11y] `Home.vue:1492,1672-1683`, `BoxBuilder.vue:154-170`. No focus or keyboard. Fix: real `<button>` or `role="button"` + tabindex + key handlers.
-28. **3D canvases have no accessible label** [a11y] `BoxBuilder.vue:145,181`. Visual-only meaning. Fix: `aria-label` plus a shortcut-hints region.
-29. **Inline piece-editor fields lack labels** [a11y] `Home.vue:1493-1527`. Per-row inputs are unlabeled. Fix: an `aria-label` per field.
-30. **Render loop runs while the tab is hidden** [performance] `box/three/useAssemblyScene.ts:120-140`. Burns GPU/battery offscreen. Fix: pause on `visibilitychange`.
-32. **TrackballControls internals via `as any`** [type-safety] `usePieceGallery.ts:116-133,266-268`. Reads `_position0` etc.; a three.js rename breaks silently. Fix: one typed accessor.
-33. **validPiece/validSnapshot take `any`** [type-safety] `homeState.ts:36`, `projectSnapshots.ts:25`. A typo'd property compiles. Fix: take `unknown` and narrow.
-34. **t() accepts any string** [type-safety] `stores/l10n.ts`. Typo'd or removed keys render the raw key. Fix: type keys as a union.
-35. **cleanText replaces non-string ids with a new UUID** [correctness] `lib/projectSnapshots.ts:35`. A numeric id loses its reference. Fix: `String(value.id)` first.
-36. **Auto-backup empty-list paths untested** [error-handling] `Home.vue:387,406,696-707`. A destructive op on an already-empty list silently skips backup. Fix: test the empty/non-empty backup behavior.
-37. **restoreSnapshot relies on a bypassable `restoring` flag** [correctness] `Home.vue:267,285-304`. A new `applyState` path or a pre-nextTick watcher can record the restore into undo. Fix: scope the guard in a `withHistoryGuard()` helper and test it.
-38. **Bulk-transform summaries diverge under a filter change** [correctness] `Home.vue:775-825`. Reads the visible set twice; a mid-op filter change misreports counts. Fix: snapshot the target set once and test it.
-39. **l10n parity test ignores placeholder counts** [testing] `stores/l10n.parity.test.ts`. A `{0}`/`{1}` mismatch between locales passes. Fix: assert matching `{N}` placeholders across locales.
+## 10. Three.js rendering and lifecycle (CL-226..CL-250)
 
-### Low (9)
+- [x] **CL-226 · Done · P0 · S** — Dispose mesh textures as well as materials and geometries during scene teardown.
+- [x] **CL-227 · Done · P0 · S** — Traverse every assembly and gallery group before replacing or destroying it.
+- [x] **CL-228 · Done · P1 · S** — Dispose controls, renderers, and renderer render lists on unmount.
+- [x] **CL-229 · Done · P0 · S** — Dispose cached label textures when their scene lifecycle ends.
+- [x] **CL-230 · Done · P1 · S** — Skip animation rendering while the document is hidden to reduce GPU and battery use.
+- [x] **CL-231 · Done · P1 · M** — Verify desktop and mobile canvases contain rendered pixels instead of a blank WebGL surface.
+- [ ] **CL-232 · Improve · P1 · M** — Assert renderer memory returns to a stable baseline after repeated parameter rebuilds.
+- [ ] **CL-233 · Bug · P1 · M** — Handle WebGL context loss with a visible retry action and state restoration.
+- [ ] **CL-234 · Improve · P2 · M** — Cap device pixel ratio for predictable GPU cost on high-density displays.
+- [ ] **CL-235 · Improve · P2 · S** — Pause rendering when the canvas is offscreen, not only when the tab is hidden.
+- [ ] **CL-236 · Improve · P2 · M** — Render only on demand when neither controls nor animation are changing.
+- [ ] **CL-237 · Bug · P1 · M** — Keep camera framing valid for extreme legal box aspect ratios.
+- [ ] **CL-238 · Improve · P2 · M** — Add deterministic visual fixtures for camera, lighting, and exploded positions.
+- [ ] **CL-239 · Improve · P2 · S** — Respect reduced-motion preferences in explode and rotation animations.
+- [ ] **CL-240 · Improve · P1 · M** — Add keyboard equivalents for essential rotate, zoom, and reset-camera controls.
+- [ ] **CL-241 · Improve · P2 · M** — Verify pinch zoom and orbit gestures on touch devices without page-scroll traps.
+- [ ] **CL-242 · Improve · P2 · M** — Reuse immutable geometry only where ownership and disposal remain explicit.
+- [ ] **CL-243 · Debt · P2 · M** — Extract shared scene lifecycle after measuring remaining duplication between both views.
+- [ ] **CL-244 · Improve · P1 · S** — Show a useful static fallback when WebGL initialization fails.
+- [ ] **CL-245 · Improve · P2 · S** — Add an explicit reset-view icon with a localized tooltip.
+- [ ] **CL-246 · Improve · P3 · M** — Add screenshot export with transparent and workshop-white background options.
+- [ ] **CL-247 · Improve · P2 · M** — Instrument frame time and memory in development without shipping telemetry by default.
+- [ ] **CL-248 · Bug · P1 · M** — Test rapid route switching and parameter edits for orphaned animation frames.
+- [ ] **CL-249 · Improve · P3 · L** — Evaluate OffscreenCanvas only after profiling proves main-thread rendering is limiting.
+- [ ] **CL-250 · Debt · P2 · S** — Document scene ownership rules for geometries, materials, textures, controls, and loops.
 
-41. **ResizeObserver has no zero-size guard** [error-handling] `useAssemblyScene.ts:142-152`, `usePieceGallery.ts:146-155`. A 0-size container yields a NaN camera aspect. Fix: guard `w > 0 && h > 0`.
-42. **validSnapshot can pass undefined state to serialize** [correctness] `projectSnapshots.ts:52-54`. An undefined `state` stringifies to invalid JSON that fails on load. Fix: reject when `state` is missing or not an object.
-43. **makeLabel calls t() per loop iteration** [correctness] `useAssemblyScene.ts:265-273`. Stale shelf labels on a runtime locale change. Fix: hoist the label before the loop. (Phase 5/6)
-44. **costPerPart shows float artifacts** [correctness] `lib/costSummary.ts:32`. Unrounded division. Fix: round to 2 decimals.
-45. **pieceMatchesQuery toFixed(0) rounding mismatch** [correctness] `lib/pieceEditor.ts:39-40`. Search may not match the displayed value. Fix: `String(Math.round(...))`.
-46. **shelfColor undefined for a negative index** [error-handling] `box/useBoxModel.ts:73-74`. `i % len` is negative for negative `i`. Fix: `((i % len) + len) % len`.
-47. **Clipboard fallback shows a success toast on failure** [error-handling] `Home.vue:475-486`. Misleads the user into thinking the link was copied. Fix: distinct toasts for real copy vs address-bar fallback.
-49. **Color palettes scattered with no shared source** [duplication] `helpers/svg.ts`, `box/useBoxModel.ts`. No single palette to keep the two pages consistent. Fix: consolidate into `lib/palette.ts`. (Phase 1)
-50. **readinessScore is opaque magic numbers, untested** [architecture] `Home.vue:535-545`. Inline `30/18/12/18/24` deductions with no constants or tests. Fix: extract a pure `scoreReadiness()` into `lib/readiness.ts` with tests.
+## 11. Accessibility and keyboard use (CL-251..CL-275)
 
-## Second wave: additional issues (deduped vs the top 50)
+- [x] **CL-251 · Done · P0 · S** — Expose NumberField IDs so visible labels can target the real input.
+- [x] **CL-252 · Done · P0 · S** — Give increment and decrement controls localized names containing the field context.
+- [x] **CL-253 · Done · P1 · S** — Disable steppers at effective minimum and maximum values.
+- [x] **CL-254 · Done · P0 · M** — Associate major Home and Box form labels with their inputs.
+- [x] **CL-255 · Done · P1 · S** — Replace the clickable color swatch container with a real button.
+- [x] **CL-256 · Done · P0 · S** — Add accessible names to icon-only editor actions.
+- [x] **CL-257 · Done · P0 · S** — Make list reordering possible without drag and drop.
+- [x] **CL-258 · Done · P0 · S** — Give each sheet SVG a descriptive title and role.
+- [x] **CL-259 · Done · P1 · M** — Make rendered piece rectangles keyboard-selectable with spoken piece names.
+- [x] **CL-260 · Done · P0 · M** — Give the command palette proper combobox and listbox relationships.
+- [x] **CL-261 · Done · P0 · M** — Support Arrow Up, Arrow Down, Home, End, and Enter in command results.
+- [x] **CL-262 · Done · P1 · S** — Keep `aria-activedescendant` synchronized with the active command.
+- [x] **CL-263 · Done · P0 · S** — Render Box gallery thumbnails as buttons with pressed state.
+- [x] **CL-264 · Done · P0 · S** — Add accessible names to both 3D view containers.
+- [x] **CL-265 · Done · P0 · S** — Add a localized title and label to the box cutting SVG.
+- [ ] **CL-266 · Bug · P0 · M** — Trap focus inside the command palette and restore it to the trigger on close.
+- [ ] **CL-267 · Improve · P1 · S** — Add a skip link from navigation to the active editor’s main heading.
+- [ ] **CL-268 · Improve · P1 · M** — Announce optimization start, completion, failure, and cancellation through a polite live region.
+- [ ] **CL-269 · Improve · P1 · M** — Announce row add, duplicate, delete, and reorder operations with useful context.
+- [ ] **CL-270 · Bug · P1 · M** — Audit tab order after filters and conditional controls hide or reveal content.
+- [ ] **CL-271 · Improve · P1 · S** — Ensure every validation error is programmatically linked to its input.
+- [ ] **CL-272 · Improve · P2 · M** — Provide text alternatives for color and grain indicators.
+- [ ] **CL-273 · Bug · P0 · M** — Test the full editor with VoiceOver or NVDA and document blocking issues.
+- [ ] **CL-274 · Improve · P1 · M** — Meet 44 by 44 CSS pixel touch targets for primary mobile actions.
+- [ ] **CL-275 · Improve · P2 · S** — Avoid conveying selected, invalid, or locked state by color alone.
 
-A deeper second audit pass (ten reviewers over the Rust optimizer, the WASM/build
-boundary, numerical edge cases, CSS, async timing, security/DoS, persistence, and
-test quality). It mostly re-confirmed the top-50 criticals (omitted here), which
-is a good signal those are real; below are only the genuinely new findings. With
-both passes, the audit is considered complete for the current code; further
-issues will surface as code changes.
+## 12. Visual and interaction design (CL-276..CL-300)
 
-### Medium (12)
-55. **Optimizer expands quantity with no total-count guard (Rust OOM)** [error-handling] `crates/core/src/optimizer.rs:236`, `crates/wasm/src/lib.rs:112-116`. `repeat_n(p, quantity as usize)` on an untrusted u32 can materialize billions of entries and hang the WASM thread. Fix: clamp quantity and the total expanded count after deserialization.
-56. **Export SVG fill color not hex-validated on the WASM path** [security] `lib/exportLayout.ts:51`. Synthetic pieces built from raw WASM `source_color` (optimizer.ts) bypass the `isHexColor` gate; export only `escapeXml`s it, so `url(...)`/malformed colors pass through. Fix: validate against the hex regex and fall back to a default.
-57. **Snapshot fallback aliases live state** [data-integrity] `lib/projectSnapshots.ts:69`. `parseHomeState(serialize(state)) ?? input.state` returns the caller's live object by reference on parse failure, so later edits mutate the stored backup. Fix: drop the fallback (or structuredClone) so a snapshot never aliases live state.
-58. **Auto-backup taken after mutation on some delete paths** [correctness] `Home.vue` clearAll/removePiece. If the backup runs after the splice, undo loses the pre-delete list. Fix: always snapshot strictly before mutating, with a test.
-59. **partsList groups by rounded dimensions** [correctness] `lib/exportLayout.ts:22-36`. The key `${label}|${round(w)}x${round(h)}` merges distinct sizes that round alike, misreporting size and per-size quantity. Fix: key on unrounded dimensions, round only for display.
-60. **costSummary wasteCost double-counts** [correctness] `lib/costSummary.ts:34-37`. `totalCost * (1 - usedFraction)` mixes whole-sheet pricing with area waste and will not reconcile with `totalCost - usefulCost`. Fix: define wasteCost as totalCost minus placed-area value, or drop the metric.
-61. **DXF export has no HEADER/TABLES section** [correctness] `lib/exportLayout.ts:73-100`. Entities-only DXF declares no units; stricter CAM tools reject it or import at the wrong scale. Fix: emit a minimal HEADER (`$INSUNITS=4`, extents) and a TABLES layer-0 section.
-62. **BoxParams has no thickness-fits-box validation** [numerical] `box/geometry.ts:25-26`. When `t >= w/2` or `t >= h/2`, `wi`/`hi` go zero/negative and produce degenerate contours and broken 3D. Fix: validate/clamp `0 < t < min(w,h)/2` before generating geometry.
-63. **Negative tab/shelf gaps when counts exceed length** [numerical] `box/geometry.ts:31-37,48-57`. `gap=(L - n*tabH)/(n+1)` goes negative once the count does not fit, marching positions backward into self-intersecting paths. Fix: cap nTab/nShelves to what fits, or clamp gap and bail to empty.
-64. **svgScale/sheetScale divide with no near-zero floor** [numerical] `box/geometry.ts:213-214`, `Home.vue` sheetScale. A tiny/zero dimension makes the scale explode and overflow the canvas. Fix: clamp the denominator to a small positive floor.
-65. **BASE_URL wasm path has no fallback** [build] `services/rustService.ts:16`. A base/path mismatch 404s the `.wasm`, and (with the cached-rejection bug) kills the optimizer with only a console error. Fix: on init failure retry once with an origin-relative URL.
-66. **Version drift across manifests** [build] `version.json` vs `crates/wasm/Cargo.toml`, `frontend/package.json`. Only `version.json` is bumped; the crate/package versions are stale. Fix: a CI check that asserts they match (or derive them).
+- [x] **CL-276 · Done · P1 · S** — Normalize tool and repeated-item cards to a restrained maximum 8px radius.
+- [x] **CL-277 · Done · P0 · S** — Strengthen `focus-visible` treatment across buttons, inputs, links, and interactive SVG pieces.
+- [x] **CL-278 · Done · P1 · S** — Give NumberField a stable minimum height so focus and validation cannot shift layout.
+- [x] **CL-279 · Done · P1 · S** — Make disabled controls visually distinct while retaining readable contrast.
+- [x] **CL-280 · Done · P1 · S** — Add a clear active strip and scroll tracking to command results.
+- [x] **CL-281 · Done · P1 · S** — Integrate reorder icons into each piece row without resizing adjacent inputs.
+- [x] **CL-282 · Done · P0 · S** — Distinguish error toasts visually from successful and neutral feedback.
+- [ ] **CL-283 · Improve · P1 · M** — Establish a compact spacing scale and remove one-off gaps from editor CSS.
+- [ ] **CL-284 · Improve · P1 · M** — Make section hierarchy scannable without wrapping every section in a floating card.
+- [ ] **CL-285 · Improve · P2 · M** — Reduce competing accent colors while preserving categorical piece colors.
+- [ ] **CL-286 · Improve · P1 · M** — Create consistent empty, loading, success, error, and disabled states for both editors.
+- [ ] **CL-287 · Improve · P2 · S** — Use familiar icons for repeated actions and reserve text buttons for clear commands.
+- [ ] **CL-288 · Improve · P1 · S** — Add tooltips to unfamiliar icon actions without duplicating obvious visible labels.
+- [ ] **CL-289 · Improve · P2 · M** — Keep numeric units adjacent to values and aligned across related fields.
+- [ ] **CL-290 · Improve · P1 · M** — Design a persistent result summary that remains visible while comparing sheets.
+- [ ] **CL-291 · Idea · P2 · M** — Add a compact before/after utilization comparison when changing strategy.
+- [ ] **CL-292 · Improve · P2 · S** — Show active sort and filter state directly on their controls.
+- [ ] **CL-293 · Improve · P1 · M** — Replace ambiguous destructive icons with confirmation and reversible feedback.
+- [ ] **CL-294 · Improve · P2 · S** — Align command names, toolbar labels, and toast verbs to one terminology set.
+- [ ] **CL-295 · Improve · P1 · M** — Keep dense operational content left-aligned and reserve centered text for true empty states.
+- [ ] **CL-296 · Improve · P2 · M** — Add a high-contrast print-friendly piece palette independent of the screen theme.
+- [ ] **CL-297 · Improve · P2 · S** — Prevent long labels, currency codes, and translated commands from clipping controls.
+- [ ] **CL-298 · Idea · P3 · M** — Offer a compact-density preference for users managing many pieces.
+- [ ] **CL-299 · Improve · P2 · M** — Verify light and dark themes with the same semantic states and contrast targets.
+- [ ] **CL-300 · Improve · P1 · S** — Maintain a small visual-regression fixture page for core controls and states.
 
-### Low (7)
+## 13. Responsive and mobile behavior (CL-301..CL-325)
 
-67. **sortPiecesForEditor comparator is not stable** [correctness] `lib/pieceEditor.ts:85-96`. Ties in area/quantity sorts shuffle equal-key pieces, polluting undo with no-op reorders. Fix: add a deterministic secondary key (piece id).
-68. **copyShareLink fallback hijacks the address bar** [correctness] `Home.vue:475-486`. On clipboard failure it `history.replaceState`s a multi-KB hash and still toasts "copied". Fix: show a manual-copy message and do not claim success.
-69. **Rust packer fit checks use bare f64 comparisons** [numerical] `crates/core/src/optimizer.rs:335-338,408-418`. Accumulated rounding can reject a piece that exactly fits. Fix: compare with a small epsilon consistently.
-70. **compose() can panic via expect** [error-handling] `crates/core/src/optimizer.rs:84-89`. A future strategy added to one enum but not the table panics in WASM. Fix: return a default/Option, or assert ALL_STRATEGIES is exhaustive in a test.
-71. **makeLabel renders text to a fixed 256px canvas with no bound** [correctness] `box/three/useAssemblyScene.ts:41-69`. Long localized labels overflow/clip, and the never-disposed cache can grow across a session. Fix: measure/clamp the text and bound the cache.
-72. **Error toasts use role=status (polite)** [a11y] `Home.vue` toast. Failures may not be announced before the 2.2s node is removed. Fix: role=alert for error/critical toasts.
-73. **CI wasm copy does not verify required files** [build] `.github/workflows/build.yml:107-111`. A wasm-pack output rename would ship a broken `frontend/wasm` with a green build. Fix: assert the expected files exist after copy and fail otherwise.
+- [x] **CL-301 · Done · P0 · M** — Verify the 390px editor viewport has no document-level horizontal overflow.
+- [x] **CL-302 · Done · P0 · M** — Verify both Box canvases render with stable, nonzero mobile dimensions.
+- [ ] **CL-303 · Bug · P0 · M** — Test every modal at 320px width with zoomed text and an on-screen keyboard.
+- [ ] **CL-304 · Improve · P1 · M** — Switch piece rows to an intentional mobile grid below their content breakpoint.
+- [ ] **CL-305 · Improve · P1 · S** — Keep primary calculate and add-piece actions reachable without covering content.
+- [ ] **CL-306 · Bug · P1 · M** — Prevent NumberField controls from forcing labels or units outside narrow containers.
+- [ ] **CL-307 · Improve · P2 · M** — Make result sheets pan and zoom without hijacking vertical page scrolling.
+- [ ] **CL-308 · Improve · P1 · M** — Collapse secondary export actions into a menu on narrow screens.
+- [ ] **CL-309 · Improve · P1 · M** — Keep the command palette within safe-area insets and visible keyboard space.
+- [ ] **CL-310 · Improve · P2 · S** — Use logical padding that respects notches and browser bottom bars.
+- [ ] **CL-311 · Bug · P1 · M** — Test landscape phones where height, rather than width, constrains dialogs and 3D views.
+- [ ] **CL-312 · Improve · P2 · S** — Avoid hover-only affordances for selection, labels, and action discovery.
+- [ ] **CL-313 · Improve · P1 · M** — Ensure all touch targets remain separate when translated text wraps.
+- [ ] **CL-314 · Improve · P2 · M** — Preserve user scroll position when optimization results replace existing sheets.
+- [ ] **CL-315 · Improve · P2 · M** — Keep focused inputs visible while the mobile keyboard changes viewport height.
+- [ ] **CL-316 · Improve · P1 · S** — Set stable aspect ratios for previews so loading cannot cause layout shifts.
+- [ ] **CL-317 · Bug · P1 · M** — Test iOS Safari download, share, clipboard, Worker, and WebGL paths explicitly.
+- [ ] **CL-318 · Bug · P1 · M** — Test Android Chrome pointer gestures for drag reorder and orbit controls.
+- [ ] **CL-319 · Improve · P2 · S** — Make the navigation collapse state keyboard-operable and persistently understandable.
+- [ ] **CL-320 · Improve · P2 · M** — Offer a compact sheet list before rendering every full preview on small devices.
+- [ ] **CL-321 · Improve · P2 · S** — Avoid fixed viewport heights that conflict with browser chrome and safe areas.
+- [ ] **CL-322 · Improve · P3 · M** — Add installable PWA behavior only after offline assets and update semantics are defined.
+- [ ] **CL-323 · Improve · P2 · M** — Test 200% browser zoom at desktop and tablet widths for reflow compliance.
+- [ ] **CL-324 · Improve · P1 · S** — Ensure long unbroken imported labels wrap or truncate without widening the page.
+- [ ] **CL-325 · Improve · P2 · M** — Create a responsive screenshot matrix for Home and Box at agreed breakpoints.
 
-## Third wave: additional issues (deduped vs the first 73)
+## 14. Internationalization and formatting (CL-326..CL-350)
 
-A 12-domain survey raised 18 candidate new issues; 8 overlapped items already listed in the earlier waves and were dropped, leaving 10 genuinely new ones. Same stable-id scheme; locations approximate.
+- [x] **CL-326 · Done · P0 · S** — Add localized value, increase, decrease, and reorder names for assistive technology.
+- [x] **CL-327 · Done · P0 · S** — Localize command failure and storage failure feedback.
+- [x] **CL-328 · Done · P0 · S** — Localize 3D assembly, gallery, and cutting-layout accessible names.
+- [x] **CL-329 · Done · P1 · S** — Keep RU and EN dictionaries in key parity after new controls are added.
+- [x] **CL-330 · Done · P1 · S** — Trim surrounding whitespace from the free-form currency value.
+- [ ] **CL-331 · Bug · P1 · M** — Replace label-based domain decisions with stable IDs before translations evolve.
+- [ ] **CL-332 · Improve · P1 · M** — Format display numbers through cached locale-aware formatters.
+- [ ] **CL-333 · Bug · P1 · M** — Keep machine exports locale-independent while UI values remain localized.
+- [ ] **CL-334 · Improve · P2 · M** — Add plural forms for sheets, pieces, warnings, and selected items.
+- [ ] **CL-335 · Improve · P2 · S** — Use named interpolation placeholders instead of sentence fragments assembled in components.
+- [ ] **CL-336 · Improve · P2 · S** — Set the document `lang` whenever the application language changes.
+- [ ] **CL-337 · Improve · P3 · L** — Prepare layouts with logical CSS properties before adding a right-to-left locale.
+- [ ] **CL-338 · Improve · P1 · M** — Test every locale for missing keys, empty values, and placeholder parity.
+- [ ] **CL-339 · Bug · P1 · S** — Normalize currency codes for display without silently altering user-defined symbols.
+- [ ] **CL-340 · Improve · P2 · M** — Localize dates in snapshot UI while preserving ISO timestamps in stored data.
+- [ ] **CL-341 · Improve · P2 · S** — Keep decimal precision rules consistent across inputs, summaries, and exports.
+- [ ] **CL-342 · Improve · P2 · M** — Audit text expansion with pseudo-localized strings at 30–50% extra length.
+- [ ] **CL-343 · Debt · P2 · M** — Group translation keys by feature and remove keys whose names encode visual placement.
+- [ ] **CL-344 · Improve · P2 · S** — Translate validation reasons centrally instead of storing localized errors in domain state.
+- [ ] **CL-345 · Idea · P3 · M** — Add locale-aware measurement-unit display while preserving millimeters internally.
+- [ ] **CL-346 · Improve · P2 · S** — Document which import and export columns are stable English identifiers.
+- [ ] **CL-347 · Bug · P1 · M** — Test Unicode combining marks, emoji, Cyrillic, and CJK labels in SVG and canvas text.
+- [ ] **CL-348 · Improve · P3 · S** — Let users override locale without coupling it to browser language permanently.
+- [ ] **CL-349 · Improve · P2 · S** — Avoid abbreviations that become ambiguous or untranslatable in compact controls.
+- [ ] **CL-350 · Debt · P2 · S** — Add a contributor checklist for translation keys, aria strings, and export stability.
 
-### Low (6)
+## 15. Testing and quality engineering (CL-351..CL-375)
 
-78. **CSV export has no UTF-8 BOM, risking Cyrillic mojibake in Excel** [i18n] `frontend/src/lib/piecesCsv.ts:27-39 (output consumed by the download handler in Home.vue)`. buildPiecesCsv returns plain text with no leading BOM. Excel on Windows defaults to the system ANSI codepage when a CSV lacks a BOM, so Russian piece labels can render as mojibake on open. Verified no U+FEFF prefix is added here or at the download site. Fix: Prepend '﻿' to the CSV string before triggering the download (or add it in buildPiecesCsv).
-79. **CI does not compile or test the cli and ui crates** [build/testing] `.github/workflows/build.yml:90-91`. The Rust test step runs `cargo test -p cutter-core` only. The workspace also contains crates/cli and crates/ui (Cargo.toml members). They have no tests today, but `cargo test -p cutter-core` also never COMPILES them, so a type/build error introduced in cli or ui passes CI and only breaks a local/full build. Verified members list and absence of #[test] in cli/ui. Fix: Use `cargo test --workspace` (or at least `cargo build --workspace`) so every crate is compiled in CI.
-80. **Test files are excluded from type-checking and vitest does not type-check** [type-safety] `frontend/tsconfig.json:18-19; .github/workflows/build.yml:124-128`. tsconfig.json excludes src/**/*.test.ts (line 19), so the CI `vue-tsc --noEmit` step does not type-check tests. vitest runs via esbuild transpilation, which strips types without checking them. Net effect: a type error in a test (e.g. a test calling a refactored function with the wrong argument shape) is caught by NEITHER step and ships green. Verified tsconfig exclude and the two-command CI step. Fix: Add a tsconfig.test.json (or a typecheck-tests script) that includes *.test.ts with DOM/vitest libs and run it in CI alongside vue-tsc.
-81. **No vitest config file; tests run on implicit defaults with no coverage gate** [tooling] `frontend/ (no vitest.config.ts; vite.config.ts has no test block)`. Verified neither frontend/vitest.config.ts nor a test section in vite.config.ts exists. Tests run with Vitest defaults: no coverage provider/reporter, no environment pinning, no thresholds. This is fine functionally but blocks adopting coverage gating and makes the test environment implicit/non-reproducible. Fix: Add a vitest.config.ts (or a test block in vite.config.ts) pinning environment, enabling a coverage provider/reporter, and optionally thresholds.
-82. **badgeWidth does not size for 3-digit piece indices** [visual] `frontend/src/pages/Home.vue:1019-1020`. badgeWidth(idx) returns 12 for <10 and 16 otherwise, with no case for idx >= 100. Projects can have 100+ distinct pieces (the badge shows the 1-based source index), so the index text overflows the fixed rounded background on the result sheet. Minor cosmetic clipping. Fix: Size by digit count, e.g. return String(idx).length * 5 + 7, or add an idx >= 100 ? 20 branch.
-83. **Currency input is not whitespace-trimmed on screen** [ux] `frontend/src/pages/Home.vue:1167`. The currency <input> uses a bare v-model with maxlength=3, allowing a trailing space (e.g. '$ '). homeState.ts trims on persistence, but the visible input keeps the space until a reload, so the displayed value and the stored value disagree and the field looks broken. Verified no trim modifier on the v-model. Fix: Use v-model.trim, or trim in an @input/@change handler so the displayed value matches what gets stored.
+- [x] **CL-351 · Done · P0 · M** — Add tests for frontend per-piece and total quantity limits.
+- [x] **CL-352 · Done · P0 · M** — Add a Rust regression test for excessive expanded quantity.
+- [x] **CL-353 · Done · P1 · S** — Test shared palette order and indexed color access.
+- [x] **CL-354 · Done · P1 · M** — Test sheet scaling, grain lines, long badge values, and accessible piece names.
+- [x] **CL-355 · Done · P1 · M** — Test toast tone, replacement, expiry, and cleanup behavior.
+- [x] **CL-356 · Done · P0 · M** — Test debounced storage load/save and surfaced storage errors.
+- [x] **CL-357 · Done · P0 · M** — Test pure box constraints and model-level clamping.
+- [x] **CL-358 · Done · P0 · S** — Test Three.js material and texture disposal ownership.
+- [x] **CL-359 · Done · P0 · M** — Smoke-test Worker optimization, keyboard commands, reorder, and box limits in a browser.
+- [x] **CL-360 · Done · P0 · M** — Check real canvas pixels at desktop and mobile sizes to catch blank 3D output.
+- [x] **CL-361 · Done · P0 · M** — Add direct optimizer Worker client tests rather than relying only on browser smoke.
+- [ ] **CL-362 · Improve · P1 · M** — Add SheetCard component tests for mouse, keyboard, and selected state.
+- [ ] **CL-363 · Improve · P1 · L** — Add Playwright workflows for create, optimize, share, reload, undo, export, and box build.
+- [ ] **CL-364 · Improve · P1 · M** — Add accessibility checks with axe for both routes and every modal.
+- [ ] **CL-365 · Improve · P1 · M** — Add visual snapshots for representative sheets and box parameter sets.
+- [ ] **CL-366 · Improve · P0 · L** — Add property tests for placement and box geometry invariants.
+- [ ] **CL-367 · Improve · P1 · M** — Test storage migration and recovery against fixture data from older versions.
+- [ ] **CL-368 · Improve · P2 · M** — Track flaky tests explicitly and fail builds that silently retry without reporting.
+- [ ] **CL-369 · Improve · P2 · S** — Require every fixed defect to include a regression test at the lowest practical layer.
+- [ ] **CL-370 · Improve · P2 · M** — Split fast unit, browser smoke, and extended benchmark suites by purpose.
+- [ ] **CL-371 · Improve · P1 · M** — Test production-built assets, base path, Worker URL, and WASM MIME behavior.
+- [ ] **CL-372 · Improve · P2 · S** — Seed all randomized tests and print the seed on failure.
+- [ ] **CL-373 · Improve · P2 · M** — Measure branch coverage around validation, cancellation, and storage errors.
+- [ ] **CL-374 · Improve · P2 · S** — Add a pre-release exploratory checklist for keyboard, touch, print, and export.
+- [ ] **CL-375 · Debt · P2 · S** — Keep test fixtures small, named by behavior, and free from duplicated opaque snapshots.
 
-## Known doc and code corrections folded in
+## 16. CI, build, and release engineering (CL-376..CL-400)
 
-- The earlier plan claimed Phase 1 fixes an on-screen XML-escape bug. That was a
-  false positive: the inline sheet SVG uses Vue `{{ }}` interpolation, which sets
-  escaped text content, and the export path already calls `escapeXml`. Phase 1 is
-  justified by modularity and de-duplication only. (Corrected in ARCHITECTURE.md.)
-- Line counts were refreshed for the post-#65 code (`Home.vue` ~1907 lines).
+- [ ] **CL-376 · Improve · P0 · S** — Run frontend type-checking as a named required CI step.
+- [ ] **CL-377 · Improve · P0 · S** — Run the full Rust workspace tests in pull requests, not only frontend build checks.
+- [ ] **CL-378 · Improve · P1 · S** — Run Clippy with warnings denied on changed Rust code.
+- [ ] **CL-379 · Improve · P1 · S** — Check Rust and frontend formatting without rewriting files in CI.
+- [ ] **CL-380 · Improve · P1 · S** — Add dependency vulnerability scans with a documented triage policy.
+- [ ] **CL-381 · Improve · P1 · S** — Use locked dependency installation and fail when lockfiles drift.
+- [ ] **CL-382 · Bug · P1 · M** — Keep `version.json`, package metadata, CLI version, and release tag synchronized.
+- [ ] **CL-383 · Improve · P2 · S** — Validate that every release pull request bumps the version exactly once.
+- [ ] **CL-384 · Improve · P2 · M** — Generate a concise changelog from merged work while keeping human-curated highlights.
+- [ ] **CL-385 · Improve · P2 · S** — Include migration, risk, and rollback notes in every release description.
+- [ ] **CL-386 · Improve · P2 · M** — Retain production build artifacts long enough to reproduce deployed failures.
+- [ ] **CL-387 · Improve · P0 · M** — Smoke-test the deployed base path, Worker, WASM, routes, and assets after publish.
+- [ ] **CL-388 · Idea · P2 · M** — Publish pull-request previews for visual and browser review before merge.
+- [ ] **CL-389 · Improve · P1 · S** — Protect `main` with required checks and prevent accidental force pushes.
+- [ ] **CL-390 · Improve · P2 · S** — Cache Rust, npm, and WASM build outputs with keys tied to lockfiles and toolchains.
+- [ ] **CL-391 · Improve · P2 · S** — Automate dependency update pull requests in small, reviewable groups.
+- [ ] **CL-392 · Debt · P1 · S** — Pin the WASM toolchain and document its upgrade procedure.
+- [ ] **CL-393 · Debt · P1 · S** — Declare supported Node, npm, and Rust versions in repository metadata.
+- [ ] **CL-394 · Improve · P2 · M** — Retain private source maps for debugging without exposing them unintentionally.
+- [ ] **CL-395 · Improve · P1 · S** — Set initial and route chunk budgets and explain justified exceptions.
+- [ ] **CL-396 · Debt · P2 · M** — Reduce or deliberately isolate the oversized BoxBuilder chunk reported by Vite.
+- [ ] **CL-397 · Bug · P1 · S** — Add an explicit repository license or state clearly that no license is granted.
+- [ ] **CL-398 · Improve · P3 · M** — Produce a software bill of materials for tagged releases.
+- [ ] **CL-399 · Improve · P3 · M** — Sign release tags or attest build provenance when distribution expands.
+- [ ] **CL-400 · Improve · P1 · M** — Document and rehearse rollback to the previous known-good static deployment.
 
-## Open doc gaps (small, optional)
+## 17. Performance and observability (CL-401..CL-425)
 
-- `README.ru.md` does not yet carry the Layering section or links to these two
-  docs; the English `README.md` does. Sync it when convenient.
+- [x] **CL-401 · Done · P0 · M** — Remove optimizer computation from the UI thread through a module Worker.
+- [x] **CL-402 · Done · P1 · S** — Pause Three.js rendering while the page is hidden.
+- [ ] **CL-403 · Improve · P1 · M** — Define realistic performance budgets for first load, first optimize, and interaction latency.
+- [ ] **CL-404 · Improve · P2 · M** — Preload WASM during idle time only when network and device conditions make it beneficial.
+- [ ] **CL-405 · Improve · P2 · M** — Cache locale number formatters used repeatedly during rendering.
+- [ ] **CL-406 · Improve · P1 · M** — Profile deep watchers and computed invalidation during rapid piece edits.
+- [ ] **CL-407 · Improve · P2 · L** — Virtualize result sheets only after projects large enough to need it are measured.
+- [ ] **CL-408 · Improve · P2 · M** — Memoize box geometry by normalized parameter tuple with bounded cache ownership.
+- [ ] **CL-409 · Improve · P1 · M** — Track WebGL geometries, textures, programs, and active loops in development diagnostics.
+- [ ] **CL-410 · Improve · P2 · M** — Split serialization time from optimizer time in performance measurements.
+- [ ] **CL-411 · Improve · P1 · M** — Add User Timing marks around WASM load, optimization, rendering, and export.
+- [ ] **CL-412 · Improve · P2 · S** — Batch result-state updates so one optimizer completion produces one coherent render.
+- [ ] **CL-413 · Improve · P2 · M** — Avoid rebuilding unchanged sheet SVG view models after unrelated UI changes.
+- [ ] **CL-414 · Improve · P2 · M** — Measure label texture cache hit rate and enforce a bounded lifecycle.
+- [ ] **CL-415 · Improve · P1 · M** — Add a long-task observer in development to identify interactions exceeding 50ms.
+- [ ] **CL-416 · Improve · P2 · S** — Defer noncritical snapshot serialization without delaying visible save state incorrectly.
+- [ ] **CL-417 · Improve · P2 · M** — Measure memory before and after repeated optimize, route, and box rebuild cycles.
+- [ ] **CL-418 · Improve · P2 · S** — Avoid allocating duplicate expanded piece arrays across JavaScript and Rust where practical.
+- [ ] **CL-419 · Improve · P2 · M** — Analyze production bundles on release and store size history.
+- [ ] **CL-420 · Improve · P3 · M** — Add opt-in local performance diagnostics export without collecting user projects.
+- [ ] **CL-421 · Debt · P2 · S** — Define which metrics are stable enough to compare across versions.
+- [ ] **CL-422 · Improve · P2 · M** — Keep observability failures isolated so metrics can never break optimization.
+- [ ] **CL-423 · Improve · P3 · M** — Evaluate incremental result rendering only if users need partial layouts.
+- [ ] **CL-424 · Improve · P1 · M** — Add regression fixtures for slow devices using CPU throttling in browser tests.
+- [ ] **CL-425 · Improve · P2 · S** — Publish measured performance findings before introducing caching or concurrency complexity.
+
+## 18. Security and privacy (CL-426..CL-450)
+
+- [ ] **CL-426 · Improve · P0 · M** — Define a production Content Security Policy covering scripts, Workers, WASM, styles, and blobs.
+- [ ] **CL-427 · Improve · P1 · S** — Audit every raw SVG/HTML string interpolation and keep escaping at the serializer boundary.
+- [ ] **CL-428 · Bug · P0 · M** — Sanitize imported project objects against prototype pollution and unexpected nested values.
+- [ ] **CL-429 · Improve · P1 · S** — Treat share-link state as untrusted input and run the full validator after decoding.
+- [ ] **CL-430 · Improve · P1 · M** — Limit decompression and decoding work before compressed share links are introduced.
+- [ ] **CL-431 · Improve · P1 · S** — Validate URL schemes before opening any future project or help link from imported data.
+- [ ] **CL-432 · Improve · P1 · M** — Review third-party dependencies for maintenance, permissions, and browser supply-chain risk.
+- [ ] **CL-433 · Improve · P2 · S** — Remove unused dependencies promptly to reduce update and attack surface.
+- [ ] **CL-434 · Improve · P1 · S** — Prevent source maps and debug fixtures from exposing real project data in production.
+- [ ] **CL-435 · Improve · P1 · S** — Keep clipboard writes user-initiated and report permission failures clearly.
+- [ ] **CL-436 · Improve · P2 · M** — Add a privacy statement explaining local storage, share links, and whether telemetry exists.
+- [ ] **CL-437 · Improve · P1 · S** — Never include project contents in remote error reporting without explicit consent.
+- [ ] **CL-438 · Improve · P2 · M** — Add “clear local data” with an exact preview and confirmation.
+- [ ] **CL-439 · Improve · P2 · S** — Avoid storing sensitive project names in URL query parameters.
+- [ ] **CL-440 · Improve · P1 · M** — Verify static hosting headers prevent MIME sniffing and unsafe framing.
+- [ ] **CL-441 · Improve · P2 · S** — Add `rel="noopener noreferrer"` to external links opened in a new context.
+- [ ] **CL-442 · Improve · P1 · M** — Fuzz CSV, JSON, hash, SVG label, and numeric parsers for denial-of-service inputs.
+- [ ] **CL-443 · Improve · P1 · M** — Set practical label and project-name lengths before DOM or export rendering.
+- [ ] **CL-444 · Improve · P2 · S** — Keep security-sensitive limits duplicated across language boundaries only with parity tests.
+- [ ] **CL-445 · Improve · P2 · M** — Document responsible disclosure and supported-version policy.
+- [ ] **CL-446 · Improve · P1 · M** — Audit Worker error messages so stack traces are not shown to end users.
+- [ ] **CL-447 · Improve · P2 · M** — Provide integrity or provenance guarantees for deployed static assets when feasible.
+- [ ] **CL-448 · Improve · P2 · S** — Review generated download names and MIME types for browser interpretation hazards.
+- [ ] **CL-449 · Improve · P1 · M** — Add security checks to the release checklist rather than relying on ad hoc audits.
+- [ ] **CL-450 · Debt · P2 · S** — Record the local-first trust model and every boundary where external data enters.
+
+## 19. Product and workshop workflows (CL-451..CL-475)
+
+- [ ] **CL-451 · Idea · P2 · L** — Track reusable offcuts and offer them as stock in future projects.
+- [ ] **CL-452 · Idea · P2 · L** — Support multiple materials and stock sizes in one named project.
+- [ ] **CL-453 · Idea · P2 · M** — Add a material library with thickness, density, price, kerf, and grain defaults.
+- [ ] **CL-454 · Idea · P2 · M** — Mark edges requiring banding and include totals in production output.
+- [ ] **CL-455 · Idea · P3 · M** — Estimate project weight from material density and used area.
+- [ ] **CL-456 · Idea · P2 · M** — Compare waste cost by sheet and highlight unusually inefficient layouts.
+- [ ] **CL-457 · Idea · P3 · M** — Model supplier quantity discounts separately from optimizer geometry.
+- [ ] **CL-458 · Idea · P2 · M** — Save reusable project templates with parts, stock, material, and strategy.
+- [ ] **CL-459 · Idea · P3 · L** — Add optional sync behind a separate adapter without coupling core logic to a vendor.
+- [ ] **CL-460 · Idea · P2 · M** — Generate a printable cut sequence with sheet and piece references.
+- [ ] **CL-461 · Idea · P2 · M** — Display rotated-piece count and utilization per result sheet.
+- [ ] **CL-462 · Idea · P2 · M** — Explain readiness or quality scores with every contributing rule.
+- [ ] **CL-463 · Idea · P3 · M** — Compare two optimizer strategies side by side on the same project.
+- [ ] **CL-464 · Idea · P2 · S** — Add sheet presets that users can create, reorder, and share.
+- [ ] **CL-465 · Idea · P3 · M** — Simulate how alternate kerf values affect sheet count and waste.
+- [ ] **CL-466 · Idea · P2 · M** — Add project tags and search for users with many saved jobs.
+- [ ] **CL-467 · Idea · P3 · M** — Archive actual material usage and cost after production for estimate calibration.
+- [ ] **CL-468 · Idea · P2 · M** — Add a workshop mode with large labels and only the next cutting step.
+- [ ] **CL-469 · Idea · P3 · M** — Export a QR code that opens a read-only project view on a shop-floor device.
+- [ ] **CL-470 · Idea · P2 · M** — Allow comments or notes on pieces without overloading the identity label.
+- [ ] **CL-471 · Idea · P3 · L** — Support hardware and assembly notes as a separate bill-of-materials domain.
+- [ ] **CL-472 · Idea · P2 · M** — Add a deliberate “new project” flow that protects unsaved changes.
+- [ ] **CL-473 · Idea · P3 · M** — Show an optimization history so users can return to a prior strategy result.
+- [ ] **CL-474 · Idea · P2 · S** — Provide a compact result summary suitable for copying into an estimate or message.
+- [ ] **CL-475 · Idea · P3 · L** — Design plugin-like import/export adapters only after two real external integrations exist.
+
+## 20. Documentation, onboarding, and maintenance (CL-476..CL-500)
+
+- [x] **CL-476 · Done · P1 · M** — Maintain one canonical, exactly 500-item improvement catalog with stable IDs.
+- [x] **CL-477 · Done · P1 · M** — Document a small-step architecture reading order and dependency direction.
+- [x] **CL-478 · Done · P1 · S** — Add a concise README route from setup to core modules, tests, and deeper documents.
+- [x] **CL-479 · Done · P1 · S** — Record which SOLID/DRY extractions landed and which remain.
+- [ ] **CL-480 · Improve · P1 · S** — Keep README commands executable from a clean checkout and test them periodically.
+- [ ] **CL-481 · Improve · P2 · M** — Add a contributor guide covering scope, tests, versioning, PRs, and review expectations.
+- [ ] **CL-482 · Improve · P2 · M** — Write an architecture decision record for the Rust/WASM optimizer boundary.
+- [ ] **CL-483 · Improve · P2 · S** — Document Worker ownership, cancellation, and error propagation with a sequence diagram.
+- [ ] **CL-484 · Improve · P1 · S** — Document project-state fields, defaults, limits, and migration policy.
+- [ ] **CL-485 · Improve · P2 · S** — Add examples for every supported import and export format.
+- [ ] **CL-486 · Improve · P2 · M** — Keep screenshots current across RU/EN, desktop/mobile, and both routes.
+- [ ] **CL-487 · Improve · P2 · S** — Add module headers only where ownership or invariants are not obvious from code.
+- [ ] **CL-488 · Improve · P1 · S** — Define “done” as implementation, tests, docs, browser smoke, and rollback awareness.
+- [ ] **CL-489 · Improve · P2 · M** — Add a troubleshooting guide for Worker, WASM, WebGL, storage, and download failures.
+- [ ] **CL-490 · Improve · P2 · S** — Document browser support and explicitly tested mobile platforms.
+- [ ] **CL-491 · Improve · P2 · S** — Keep public terminology consistent: piece, sheet, stock, kerf, project, and snapshot.
+- [ ] **CL-492 · Improve · P1 · S** — Link catalog IDs from pull requests and commits when an item is addressed.
+- [ ] **CL-493 · Improve · P2 · S** — Close or rewrite stale recommendations instead of leaving contradictory status text.
+- [ ] **CL-494 · Improve · P2 · M** — Add a generated module dependency graph as a review aid, not as architecture authority.
+- [ ] **CL-495 · Improve · P1 · S** — Keep examples free of personal, customer, or commercially sensitive data.
+- [ ] **CL-496 · Improve · P2 · S** — Record non-goals so future refactors do not introduce speculative infrastructure.
+- [ ] **CL-497 · Improve · P2 · M** — Add a release runbook from branch creation through merge, tag, deployment, and verification.
+- [ ] **CL-498 · Improve · P2 · S** — Archive obsolete plans or label them historical to prevent competing backlogs.
+- [ ] **CL-499 · Improve · P1 · S** — Review architecture docs whenever a dependency direction or state owner changes.
+- [ ] **CL-500 · Improve · P1 · S** — Re-rank this catalog after each release using evidence, user impact, and measured risk.
+
+## Working rule
+
+Select one ID or a tightly related handful, write the failing test or invariant,
+change the smallest owning module, run the relevant unit and browser checks, and
+only then mark the item complete. New discoveries should replace obsolete or
+duplicate entries rather than growing several competing lists.

@@ -7,6 +7,8 @@
  */
 import { ref, computed, watch } from 'vue'
 import * as G from '@/box/geometry'
+import { boxParamLimits, clampBoxParams } from '@/box/constraints'
+import { SHELF_COLORS, SHELF_EDGE_COLORS, colorAt } from '@/lib/palette'
 
 export type Translate = (key: string) => string
 
@@ -16,9 +18,6 @@ export interface GalPiece {
   id: string; title: string; count: number; pw: number; ph: number
   d: string; s: number; color: string; xOff: number
 }
-
-const SHELF_COLORS = ['#e67e22', '#e74c3c', '#9b59b6', '#1abc9c', '#f1c40f', '#3498db']
-const SHELF_EDGE_COLORS = ['#ca6f1e', '#c0392b', '#7d3c98', '#148f77', '#d4ac0d', '#2471a3']
 
 export function useBoxModel(t: Translate) {
   // ── Parameters ────────────────────────────────────────────────────────────
@@ -40,6 +39,25 @@ export function useBoxModel(t: Translate) {
   // assembly view (the selected piece is highlighted there).
   const galIdx = ref(0)
 
+  function rawParams(): G.BoxParams {
+    return { w: W.value, h: H.value, d: D.value, t: T.value, kerf: Kerf.value, tabH: TabH.value, nTab: NTab.value, nShelves: NShelves.value, bevel: Bevel.value }
+  }
+
+  const paramLimits = computed(() => boxParamLimits(clampBoxParams(rawParams())))
+
+  watch([W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel], () => {
+    const safe = clampBoxParams(rawParams())
+    W.value = safe.w
+    H.value = safe.h
+    D.value = safe.d
+    T.value = safe.t
+    Kerf.value = safe.kerf
+    TabH.value = safe.tabH
+    NTab.value = safe.nTab
+    NShelves.value = safe.nShelves
+    Bevel.value = safe.bevel
+  }, { flush: 'sync' })
+
   // ── Derived dimensions ────────────────────────────────────────────────────
   const TF = computed(() => T.value + Kerf.value)
   const Wi = computed(() => W.value - 2 * T.value)
@@ -51,7 +69,7 @@ export function useBoxModel(t: Translate) {
 
   // ── Geometry (thin wrappers over the pure module src/box/geometry.ts) ─────
   function bp(): G.BoxParams {
-    return { w: W.value, h: H.value, d: D.value, t: T.value, kerf: Kerf.value, tabH: TabH.value, nTab: NTab.value, nShelves: NShelves.value, bevel: Bevel.value }
+    return clampBoxParams(rawParams())
   }
   const tabPositions = (L: number) => G.tabPositions(bp(), L)
   const shelfSlotYs = () => G.shelfSlotYs(bp())
@@ -70,8 +88,8 @@ export function useBoxModel(t: Translate) {
   const sideHoles3D = (x0: number) => G.sideHoles3D(bp(), x0)
   const backHoles3D = (y0: number) => G.backHoles3D(bp(), y0)
 
-  function shelfColor(i: number) { return SHELF_COLORS[i % SHELF_COLORS.length] }
-  function shelfEdgeColor(i: number) { return SHELF_EDGE_COLORS[i % SHELF_EDGE_COLORS.length] }
+  function shelfColor(i: number) { return colorAt(SHELF_COLORS, i) }
+  function shelfEdgeColor(i: number) { return colorAt(SHELF_EDGE_COLORS, i) }
 
   // ── Piece data lookup by label ────────────────────────────────────────────
   function pieceData(label: string): { ow: number; oh: number; path: string; xOff: number } {
@@ -204,7 +222,7 @@ export function useBoxModel(t: Translate) {
 
   return {
     // parameters
-    W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, SheetW, SheetH, CutGap, galIdx,
+    W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, SheetW, SheetH, CutGap, galIdx, paramLimits,
     // derived dimensions
     TF, Wi, Hi, SideOW, SideOff, TopD, BotD,
     // geometry wrappers

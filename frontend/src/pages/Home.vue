@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref, reactive, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import NumberField from '@/components/NumberField.vue'
-import { optimize } from '@/services/optimizer'
+import SheetCard from '@/components/SheetCard.vue'
+import { startOptimization, type OptimizationTask } from '@/services/optimizerWorker'
 import { type CutPiece, type CuttingResult, CuttingStrategy, newPiece } from '@/services/types'
-import { PIECE_COLORS, truncate, efficiencyClass } from '@/helpers/svg'
-import { type HomeState, HOME_STATE_KEY, serializeHomeState, parseHomeState } from '@/lib/homeState'
+import { PIECE_COLORS } from '@/lib/palette'
+import { type HomeState, serializeHomeState, parseHomeState } from '@/lib/homeState'
 import { validateNewPiece } from '@/lib/validatePiece'
 import { buildLayoutSvg, buildLayoutDxf, buildPrintHtml } from '@/lib/exportLayout'
 import { buildShareUrl, readShareFromHash } from '@/lib/shareLink'
@@ -36,9 +37,13 @@ import { buildPiecesCsv } from '@/lib/piecesCsv'
 import { duplicatePiece as duplicatePieceList, reorderByDrag } from '@/lib/pieceOps'
 import { isEditableTarget } from '@/lib/keyboard'
 import { downloadFile } from '@/lib/downloadFile'
+import { MAX_PIECE_QUANTITY, assertOptimizerCapacity, normalizeQuantity } from '@/lib/optimizerLimits'
+import { useToast } from '@/composables/useToast'
+import { useHomeStorage } from '@/composables/useHomeStorage'
 import { useL10n } from '@/stores/l10n'
 
 const { t } = useL10n()
+const { message: toast, tone: toastTone, show: showToast, showError, clear: clearToast } = useToast()
 
 // ── Sheet presets ────────────────────────────────────────────────────────────
 const sheetPresets: { key: string; w: number; h: number }[] = [
@@ -88,12 +93,15 @@ const pieces = reactive<CutPiece[]>([])
 const result = ref<CuttingResult | null>(null)
 const calculated = ref(false)
 let colorIdx = 0
+let calcGen = 0
+let activeOptimization: OptimizationTask | null = null
 
 // ── Editor controls ──────────────────────────────────────────────────────────
 const pieceQuery = ref('')
 const pieceSortMode = ref<PieceSortMode>('manual')
 const commandPaletteOpen = ref(false)
 const commandQuery = ref('')
+const activePaletteIndex = ref(0)
 const commandInputRef = ref<HTMLInputElement | null>(null)
 const projectSnapshots = ref<ProjectSnapshot[]>([])
 const snapshotName = ref('')
@@ -159,30 +167,12 @@ const dragStartIdx = ref(-1)
 const dragOverIdx = ref(-1)
 const isDragging = ref(false)
 
-// ── SVG constants ────────────────────────────────────────────────────────────
-const SVG_MAX_W = 520
-const SVG_MAX_H = 420
-
-// ── localStorage persistence ─────────────────────────────────────────────────
-let saveTimer: ReturnType<typeof setTimeout> | undefined
-
-function saveState() {
-  clearTimeout(saveTimer)
-  saveTimer = setTimeout(saveStateNow, 300)
-}
-
-function saveStateNow() {
-  try {
-    localStorage.setItem(HOME_STATE_KEY, serializeHomeState(currentState()))
-  } catch { /* ignore */ }
-}
-
 function currentState(): HomeState {
   return {
     sheetWidth: sheetWidth.value,
     sheetHeight: sheetHeight.value,
     kerf: kerf.value,
-    pieces: [...pieces],
+    pieces: pieces.map(piece => ({ ...piece })),
     pricePerSheet: pricePerSheet.value,
     currency: currency.value,
   }
@@ -198,10 +188,14 @@ function applyState(saved: HomeState) {
   colorIdx = pieces.length
 }
 
-function loadState() {
-  const saved = parseHomeState(localStorage.getItem(HOME_STATE_KEY))
-  if (saved) applyState(saved)
-}
+const homeStorage = useHomeStorage({
+  capture: currentState,
+  apply: applyState,
+  onError: () => showError(t('storage_error')),
+})
+const saveState = homeStorage.scheduleSave
+const saveStateNow = homeStorage.saveNow
+const loadState = homeStorage.load
 
 function loadProjectSnapshots() {
   projectSnapshots.value = parseProjectSnapshots(localStorage.getItem(PROJECT_SNAPSHOTS_KEY))
@@ -293,9 +287,22 @@ function recordHistory() {
   }, 350)
 }
 
-function commitProjectEdit() {
+function persistProjectEdit() {
   saveState()
   recordHistory()
+}
+
+function invalidateOptimization() {
+  ++calcGen
+  activeOptimization?.cancel()
+  activeOptimization = null
+  result.value = null
+  calculated.value = false
+}
+
+function commitProjectEdit() {
+  invalidateOptimization()
+  persistProjectEdit()
 }
 
 function restoreSnapshot(snap: string) {
@@ -432,22 +439,37 @@ function clearAll() {
   recordOperation(t('operation.clear'), t('operation.clear_detail').replace('{0}', String(count)))
 }
 
-// Monotonic id so an out-of-order resolve from a superseded run cannot overwrite
-// the latest result, and so a failure is surfaced instead of leaving a dead UI.
-let calcGen = 0
+// The generation also changes whenever project inputs change, so a result can
+// never be committed for dimensions or pieces that are no longer on screen.
 async function calculate() {
+  activeOptimization?.cancel()
+  activeOptimization = null
+  const gen = ++calcGen
   // Refuse non-finite / non-positive sheet inputs before they reach the WASM
   // packer, which has no such guard and would return an empty/garbage layout.
   if (!Number.isFinite(sheetWidth.value) || sheetWidth.value <= 0
     || !Number.isFinite(sheetHeight.value) || sheetHeight.value <= 0
     || !Number.isFinite(kerf.value) || kerf.value < 0) {
-    showToast(t('calc_error'))
+    showError(t('calc_error'))
     return
   }
-  const gen = ++calcGen
-  calculated.value = true
   try {
-    const res = await optimize(sheetWidth.value, sheetHeight.value, [...pieces], kerf.value, selectedStrategy.value)
+    assertOptimizerCapacity(pieces)
+  } catch {
+    showError(t('qty_limit'))
+    return
+  }
+  calculated.value = true
+  const task = startOptimization({
+    sheetWidth: sheetWidth.value,
+    sheetHeight: sheetHeight.value,
+    pieces: [...pieces],
+    kerf: kerf.value,
+    strategy: selectedStrategy.value,
+  })
+  activeOptimization = task
+  try {
+    const res = await task.promise
     if (gen !== calcGen) return // a newer calculate() superseded this one
     result.value = res
     recordOperation(
@@ -455,10 +477,14 @@ async function calculate() {
       `${res.totalSheets} ${t('sheets')} · ${res.overallEfficiency.toFixed(1)}%`,
     )
   } catch (e) {
+    if ((e as Error).name === 'AbortError') return
     if (gen !== calcGen) return
+    console.error('Optimization failed', e)
     result.value = null
     calculated.value = false
-    showToast(t('calc_error'))
+    showError(t('calc_error'))
+  } finally {
+    if (activeOptimization === task) activeOptimization = null
   }
 }
 
@@ -488,14 +514,6 @@ function printLayout() {
 }
 
 // ── Share link (encode the project into a copyable URL hash) ───────────────────
-const toast = ref('')
-let toastTimer: ReturnType<typeof setTimeout> | undefined
-function showToast(msg: string) {
-  toast.value = msg
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toast.value = '' }, 2200)
-}
-
 async function copyShareLink() {
   const url = buildShareUrl(location.origin, location.pathname, currentState())
   try {
@@ -814,7 +832,7 @@ function updatePieceHeight(piece: CutPiece, height: number) {
 }
 
 function updatePieceQuantity(piece: CutPiece, quantity: number) {
-  const clean = Math.max(1, Math.round(quantity))
+  const clean = normalizeQuantity(quantity)
   if (piece.quantity === clean) return
   piece.quantity = clean
   commitProjectEdit()
@@ -945,9 +963,17 @@ const visiblePaletteCommands = computed(() => {
   return paletteCommands.value.filter(command => command.label.toLocaleLowerCase().includes(q))
 })
 
+function firstEnabledCommandIndex(): number {
+  const index = visiblePaletteCommands.value.findIndex(command => !command.disabled)
+  return index >= 0 ? index : 0
+}
+
+watch(commandQuery, () => { activePaletteIndex.value = firstEnabledCommandIndex() })
+
 function openCommandPalette() {
   commandPaletteOpen.value = true
   commandQuery.value = ''
+  activePaletteIndex.value = firstEnabledCommandIndex()
   nextTick(() => commandInputRef.value?.focus())
 }
 
@@ -958,18 +984,51 @@ function closeCommandPalette() {
 async function runPaletteCommand(command: PaletteCommand) {
   if (command.disabled) return
   closeCommandPalette()
-  await command.run()
+  try {
+    await command.run()
+  } catch {
+    showError(t('command_error'))
+  }
 }
 
-function runFirstPaletteCommand() {
-  const command = visiblePaletteCommands.value.find(c => !c.disabled)
+function runActivePaletteCommand() {
+  const command = visiblePaletteCommands.value[activePaletteIndex.value]
   if (command) runPaletteCommand(command)
+}
+
+function movePaletteSelection(direction: -1 | 1) {
+  const commands = visiblePaletteCommands.value
+  if (!commands.length) return
+  let index = activePaletteIndex.value
+  for (let attempts = 0; attempts < commands.length; attempts++) {
+    index = (index + direction + commands.length) % commands.length
+    if (!commands[index].disabled) {
+      activePaletteIndex.value = index
+      nextTick(() => document.getElementById(`command-option-${index}`)?.scrollIntoView({ block: 'nearest' }))
+      return
+    }
+  }
 }
 
 function onPaletteKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter') {
     e.preventDefault()
-    runFirstPaletteCommand()
+    runActivePaletteCommand()
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    movePaletteSelection(1)
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    movePaletteSelection(-1)
+  } else if (e.key === 'Home') {
+    e.preventDefault()
+    activePaletteIndex.value = firstEnabledCommandIndex()
+  } else if (e.key === 'End') {
+    e.preventDefault()
+    const commands = visiblePaletteCommands.value
+    let index = commands.length - 1
+    while (index > 0 && commands[index].disabled) index--
+    activePaletteIndex.value = Math.max(0, index)
   } else if (e.key === 'Escape') {
     e.preventDefault()
     closeCommandPalette()
@@ -1008,6 +1067,30 @@ function onDragLeave() {
   dragOverIdx.value = -1
 }
 
+function reorderTarget(sourceIndex: number, direction: -1 | 1): number | null {
+  const visibleIndex = visiblePieces.value.findIndex(entry => entry.index === sourceIndex)
+  if (visibleIndex < 0) return null
+  for (let next = visibleIndex + direction; next >= 0 && next < visiblePieces.value.length; next += direction) {
+    const target = visiblePieces.value[next]
+    if (!target.piece.locked) return target.index
+  }
+  return null
+}
+
+function canMovePiece(sourceIndex: number, direction: -1 | 1): boolean {
+  return !pieces[sourceIndex]?.locked && reorderTarget(sourceIndex, direction) !== null
+}
+
+function movePiece(sourceIndex: number, direction: -1 | 1) {
+  const targetIndex = reorderTarget(sourceIndex, direction)
+  if (targetIndex === null || pieces[sourceIndex]?.locked) return
+  const next = reorderByDrag([...pieces], sourceIndex, targetIndex)
+  pieces.splice(0, pieces.length, ...next)
+  pieceSortMode.value = 'manual'
+  commitProjectEdit()
+  recordOperation(t('operation.reorder'), t('operation.visible_count').replace('{0}', '1'))
+}
+
 function dropPiece(targetIdx: number) {
   if (dragStartIdx.value < 0 || dragStartIdx.value === targetIdx || dragStartIdx.value >= pieces.length) return
   if (pieces[dragStartIdx.value]?.locked || pieces[targetIdx]?.locked) return
@@ -1027,39 +1110,18 @@ function onDragEnd() {
   isDragging.value = false
 }
 
-// ── SVG helpers ──────────────────────────────────────────────────────────────
-function svgScale(sheetW: number, sheetH: number) {
-  return Math.min(SVG_MAX_W / sheetW, SVG_MAX_H / sheetH)
-}
-
-// All sheets in a result share the same dimensions, so one scale serves them all.
-const sheetScale = computed(() => {
-  const s = result.value?.sheets[0]
-  return s ? svgScale(s.width, s.height) : 1
-})
-
 // Material cost for the current result; null until a layout is calculated.
 const costSummary = computed(() =>
   result.value ? computeCostSummary(result.value, pricePerSheet.value) : null)
 
-const pieceIndexById = computed(() => {
-  const m = new Map<string, number>()
-  pieces.forEach((p, i) => m.set(p.id, i + 1))
-  return m
+const pieceIndexes = computed<Record<string, number>>(() => {
+  const indexes: Record<string, number> = {}
+  pieces.forEach((piece, index) => { indexes[piece.id] = index + 1 })
+  return indexes
 })
 
-function grainLines(svgH: number): number[] {
-  const lines: number[] = []
-  for (let g = 1; g < 10; g++) lines.push(svgH * g / 10)
-  return lines
-}
-
 function pieceIndex(source: CutPiece): number {
-  return pieceIndexById.value.get(source.id) ?? 0
-}
-
-function badgeWidth(idx: number): number {
-  return idx >= 10 ? 16 : 12
+  return pieceIndexes.value[source.id] ?? 0
 }
 
 // ── Strategy display ─────────────────────────────────────────────────────────
@@ -1136,7 +1198,8 @@ function onKeydown(e: KeyboardEvent) {
 // ── Lifecycle ────────────────────────────────────────────────────────────────
 // Persist top-level scalar edits here. Piece mutations call commitProjectEdit()
 // from their concrete handlers so typing in a row does not trigger a deep watch.
-watch([sheetWidth, sheetHeight, kerf, pricePerSheet, currency], commitProjectEdit)
+watch([sheetWidth, sheetHeight, kerf], commitProjectEdit)
+watch([pricePerSheet, currency], persistProjectEdit)
 
 onMounted(() => {
   loadInitialState()
@@ -1150,9 +1213,10 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  activeOptimization?.cancel()
   window.removeEventListener('keydown', onKeydown)
-  clearTimeout(saveTimer)
-  clearTimeout(toastTimer)
+  homeStorage.dispose()
+  clearToast()
   clearTimeout(recordTimer)
   saveStateNow()
   saveOperationLogNow()
@@ -1182,34 +1246,34 @@ onUnmounted(() => {
         <section class="card">
           <h2>{{ t('sheet_params') }}</h2>
           <div class="form-row">
-            <label>{{ t('sheet_preset') }}</label>
-            <select class="form-select" :value="selectedPreset" @change="onPresetChanged">
+            <label for="sheet-preset">{{ t('sheet_preset') }}</label>
+            <select id="sheet-preset" class="form-select" :value="selectedPreset" @change="onPresetChanged">
               <option value="">{{ t('preset.custom') }}</option>
               <option v-for="p in sheetPresets" :key="p.key" :value="p.key">{{ t(`preset.${p.key}`) }}</option>
             </select>
           </div>
           <div class="form-row">
-            <label>{{ t('width_mm') }}</label>
-            <NumberField :model-value="sheetWidth" @update:model-value="onSheetWidthChanged" :min="1" :step="1" />
+            <label for="sheet-width">{{ t('width_mm') }}</label>
+            <NumberField id="sheet-width" :aria-label="t('width_mm')" :model-value="sheetWidth" @update:model-value="onSheetWidthChanged" :min="1" :step="1" />
           </div>
           <div class="form-row">
-            <label>{{ t('height_mm') }}</label>
-            <NumberField :model-value="sheetHeight" @update:model-value="onSheetHeightChanged" :min="1" :step="1" />
+            <label for="sheet-height">{{ t('height_mm') }}</label>
+            <NumberField id="sheet-height" :aria-label="t('height_mm')" :model-value="sheetHeight" @update:model-value="onSheetHeightChanged" :min="1" :step="1" />
           </div>
           <div class="form-row">
-            <label>{{ t('kerf_mm') }}</label>
-            <NumberField v-model="kerf" :min="0" :step="1" />
+            <label for="sheet-kerf">{{ t('kerf_mm') }}</label>
+            <NumberField id="sheet-kerf" :aria-label="t('kerf_mm')" v-model="kerf" :min="0" :step="1" />
           </div>
           <div class="form-row">
-            <label>{{ t('cost.price_per_sheet') }}</label>
+            <label for="sheet-price">{{ t('cost.price_per_sheet') }}</label>
             <div class="price-row">
-              <NumberField v-model="pricePerSheet" :min="0" :step="1" />
-              <input class="currency-input" type="text" v-model="currency" maxlength="3" :title="t('cost.currency')" />
+              <NumberField id="sheet-price" :aria-label="t('cost.price_per_sheet')" v-model="pricePerSheet" :min="0" :step="1" />
+              <input class="currency-input" type="text" v-model.trim="currency" maxlength="3" :title="t('cost.currency')" :aria-label="t('cost.currency')" />
             </div>
           </div>
           <div class="form-row">
-            <label>{{ t('strategy') }}</label>
-            <select class="form-select" v-model.number="selectedStrategy">
+            <label for="cut-strategy">{{ t('strategy') }}</label>
+            <select id="cut-strategy" class="form-select" v-model.number="selectedStrategy">
               <option :value="CuttingStrategy.Auto">{{ t('strategy.auto') }}</option>
               <optgroup v-for="g in strategyGroups" :key="g.labelKey" :label="t(g.labelKey)">
                 <option v-for="it in g.items" :key="it.value" :value="it.value">{{ t(g.labelKey) }} &middot; {{ t(it.sortKey) }}</option>
@@ -1222,20 +1286,20 @@ onUnmounted(() => {
         <section class="card">
           <h2>{{ t('add_piece') }}</h2>
           <div class="form-row">
-            <label>{{ t('name') }}</label>
-            <input type="text" v-model="newLabel" :placeholder="t('name_placeholder')" maxlength="200" />
+            <label for="new-piece-name">{{ t('name') }}</label>
+            <input id="new-piece-name" type="text" v-model="newLabel" :placeholder="t('name_placeholder')" maxlength="200" />
           </div>
           <div class="form-row">
-            <label>{{ t('width_mm') }}</label>
-            <NumberField v-model="newWidth" :min="1" :step="1" />
+            <label for="new-piece-width">{{ t('width_mm') }}</label>
+            <NumberField id="new-piece-width" :aria-label="t('width_mm')" v-model="newWidth" :min="1" :step="1" />
           </div>
           <div class="form-row">
-            <label>{{ t('height_mm') }}</label>
-            <NumberField v-model="newHeight" :min="1" :step="1" />
+            <label for="new-piece-height">{{ t('height_mm') }}</label>
+            <NumberField id="new-piece-height" :aria-label="t('height_mm')" v-model="newHeight" :min="1" :step="1" />
           </div>
           <div class="form-row">
-            <label>{{ t('quantity') }}</label>
-            <NumberField :model-value="newQty" @update:model-value="v => newQty = Math.max(1, Math.round(v))" :min="1" :step="1" />
+            <label for="new-piece-quantity">{{ t('quantity') }}</label>
+            <NumberField id="new-piece-quantity" :aria-label="t('quantity')" :model-value="newQty" @update:model-value="v => newQty = normalizeQuantity(v)" :min="1" :max="MAX_PIECE_QUANTITY" :step="1" />
           </div>
           <div class="form-row form-row-check">
             <label>
@@ -1430,6 +1494,7 @@ onUnmounted(() => {
             <div class="transform-group">
               <span>{{ t('transform.allowance') }}</span>
               <NumberField
+                :aria-label="t('transform.allowance')"
                 :model-value="transformStep"
                 @update:model-value="v => transformStep = Math.max(1, Math.round(v))"
                 :min="1"
@@ -1448,6 +1513,7 @@ onUnmounted(() => {
             <div class="transform-group">
               <span>{{ t('transform.round') }}</span>
               <NumberField
+                :aria-label="t('transform.round')"
                 :model-value="roundStep"
                 @update:model-value="v => roundStep = Math.max(1, Math.round(v))"
                 :min="1"
@@ -1459,6 +1525,7 @@ onUnmounted(() => {
             <div class="transform-group transform-group-machine">
               <span>{{ t('machine_min') }}</span>
               <NumberField
+                :aria-label="t('machine_min')"
                 :model-value="minMachineCut"
                 @update:model-value="v => minMachineCut = Math.max(1, Math.round(v))"
                 :min="1"
@@ -1537,6 +1604,10 @@ onUnmounted(() => {
               @drop="dropPiece(entry.index)"
               @dragend="onDragEnd"
             >
+              <div class="piece-reorder-actions">
+                <button type="button" :disabled="!canMovePiece(entry.index, -1)" :aria-label="`${t('move_up')}: ${entry.piece.label || t('unnamed_piece')}`" @click="movePiece(entry.index, -1)">↑</button>
+                <button type="button" :disabled="!canMovePiece(entry.index, 1)" :aria-label="`${t('move_down')}: ${entry.piece.label || t('unnamed_piece')}`" @click="movePiece(entry.index, 1)">↓</button>
+              </div>
               <span class="drag-handle" :title="t('drag_hint')">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                   <circle cx="9" cy="6" r="2"/><circle cx="15" cy="6" r="2"/>
@@ -1544,25 +1615,28 @@ onUnmounted(() => {
                   <circle cx="9" cy="18" r="2"/><circle cx="15" cy="18" r="2"/>
                 </svg>
               </span>
-              <span class="piece-color" :style="{ background: entry.piece.color, cursor: 'pointer' }" :title="t('highlight_hint')" @click="toggleSelect(entry.piece.id)">{{ entry.index + 1 }}</span>
+              <button type="button" class="piece-color" :style="{ background: entry.piece.color }" :title="t('highlight_hint')" :aria-label="`${t('highlight_hint')}: ${entry.piece.label || t('unnamed_piece')}`" @click="toggleSelect(entry.piece.id)">{{ entry.index + 1 }}</button>
               <div class="piece-edit-fields">
                 <input
                   class="piece-edit-label"
                   type="text"
                   :value="entry.piece.label"
                   :placeholder="t('name')"
+                  :aria-label="`${t('name')}: ${entry.index + 1}`"
                   maxlength="200"
                   @input="updatePieceLabel(entry.piece, ($event.target as HTMLInputElement).value)"
                 />
                 <div class="piece-edit-dims">
-                  <NumberField :model-value="entry.piece.width" @update:model-value="v => updatePieceWidth(entry.piece, v)" :min="1" :step="1" />
+                  <NumberField :aria-label="`${t('width_mm')}: ${entry.piece.label || entry.index + 1}`" :model-value="entry.piece.width" @update:model-value="v => updatePieceWidth(entry.piece, v)" :min="1" :step="1" />
                   <span class="unit">&times;</span>
-                  <NumberField :model-value="entry.piece.height" @update:model-value="v => updatePieceHeight(entry.piece, v)" :min="1" :step="1" />
+                  <NumberField :aria-label="`${t('height_mm')}: ${entry.piece.label || entry.index + 1}`" :model-value="entry.piece.height" @update:model-value="v => updatePieceHeight(entry.piece, v)" :min="1" :step="1" />
                   <span class="unit">mm</span>
                   <NumberField
+                    :aria-label="`${t('quantity')}: ${entry.piece.label || entry.index + 1}`"
                     :model-value="entry.piece.quantity"
                     @update:model-value="v => updatePieceQuantity(entry.piece, v)"
                     :min="1"
+                    :max="MAX_PIECE_QUANTITY"
                     :step="1"
                   />
                   <button
@@ -1570,6 +1644,7 @@ onUnmounted(() => {
                     class="btn btn-primary btn-sm piece-edit-rot"
                     :class="{ 'rot-on': entry.piece.allowRotation }"
                     :title="t('rotation')"
+                    :aria-label="`${t('rotation')}: ${entry.piece.label || t('unnamed_piece')}`"
                     @click="togglePieceRotation(entry.piece)"
                   >&#8635;</button>
                   <button
@@ -1577,6 +1652,7 @@ onUnmounted(() => {
                     class="btn btn-ghost btn-sm piece-lock-btn"
                     :class="{ active: entry.piece.locked }"
                     :title="entry.piece.locked ? t('unlock') : t('lock')"
+                    :aria-label="`${entry.piece.locked ? t('unlock') : t('lock')}: ${entry.piece.label || t('unnamed_piece')}`"
                     @click="togglePieceLock(entry.piece)"
                   >
                     <svg v-if="entry.piece.locked" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -1588,12 +1664,12 @@ onUnmounted(() => {
                   </button>
                 </div>
               </div>
-              <button class="btn btn-ghost btn-sm" @click="duplicate(entry.piece.id)" :title="t('duplicate')">
+              <button class="btn btn-ghost btn-sm" @click="duplicate(entry.piece.id)" :title="t('duplicate')" :aria-label="`${t('duplicate')}: ${entry.piece.label || t('unnamed_piece')}`">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                 </svg>
               </button>
-              <button class="btn btn-danger btn-sm" @click="removePiece(entry.piece)" :title="t('delete')">
+              <button class="btn btn-danger btn-sm" @click="removePiece(entry.piece)" :title="t('delete')" :aria-label="`${t('delete')}: ${entry.piece.label || t('unnamed_piece')}`">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
                 </svg>
@@ -1693,141 +1769,14 @@ onUnmounted(() => {
 
           <!-- Sheets grid -->
           <div class="sheets-grid">
-            <div v-for="sheet in result.sheets" :key="sheet.index" class="sheet-card">
-              <div class="sheet-header">
-                <span>{{ t('sheet') }} {{ sheet.index + 1 }}</span>
-                <span class="efficiency-badge" :class="efficiencyClass(sheet.efficiency)">
-                  {{ sheet.efficiency.toFixed(1) }}%
-                </span>
-              </div>
-              <div class="sheet-svg-wrap" :id="`sheet-svg-${sheet.index}`">
-                <svg
-                  :width="(sheet.width * sheetScale).toFixed(0)"
-                  :height="(sheet.height * sheetScale).toFixed(0)"
-                  :viewBox="`0 0 ${(sheet.width * sheetScale).toFixed(0)} ${(sheet.height * sheetScale).toFixed(0)}`"
-                  style="display:block;margin:auto;"
-                >
-                  <!-- Sheet background -->
-                  <rect
-                    :width="(sheet.width * sheetScale).toFixed(0)"
-                    :height="(sheet.height * sheetScale).toFixed(0)"
-                    fill="#f5f0e8"
-                    stroke="#8B7355"
-                    stroke-width="2"
-                  />
-
-                  <!-- Wood grain lines -->
-                  <line
-                    v-for="(gy, gi) in grainLines(sheet.height * sheetScale)"
-                    :key="'g' + gi"
-                    x1="0"
-                    :y1="gy.toFixed(1)"
-                    :x2="(sheet.width * sheetScale).toFixed(0)"
-                    :y2="gy.toFixed(1)"
-                    stroke="#d4c9a8"
-                    stroke-width="0.5"
-                  />
-
-                  <!-- Placed pieces -->
-                  <template v-for="(pp, ppi) in sheet.placedPieces" :key="'p' + ppi">
-                    <!-- Piece rect -->
-                    <rect
-                      :x="(pp.x * sheetScale).toFixed(1)"
-                      :y="(pp.y * sheetScale).toFixed(1)"
-                      :width="(pp.width * sheetScale).toFixed(1)"
-                      :height="(pp.height * sheetScale).toFixed(1)"
-                      :fill="pp.source.color"
-                      :fill-opacity="selectedPieceId === null ? 0.82 : (pp.source.id === selectedPieceId ? 0.95 : 0.2)"
-                      :stroke="pp.source.id === selectedPieceId ? '#4a90d9' : '#fff'"
-                      :stroke-width="pp.source.id === selectedPieceId ? 2 : 0.1"
-                      style="cursor:pointer"
-                      @click="toggleSelect(pp.source.id)"
-                    />
-
-                    <!-- Badge background -->
-                    <rect
-                      :x="(pp.x * sheetScale + 3).toFixed(1)"
-                      :y="(pp.y * sheetScale + 3).toFixed(1)"
-                      :width="badgeWidth(pieceIndex(pp.source))"
-                      height="13"
-                      rx="3"
-                      fill="rgba(0,0,0,0.35)"
-                    />
-
-                    <!-- Badge text -->
-                    <text
-                      :x="(pp.x * sheetScale + 3 + badgeWidth(pieceIndex(pp.source)) / 2).toFixed(1)"
-                      :y="(pp.y * sheetScale + 3 + 13 / 2).toFixed(1)"
-                      text-anchor="middle"
-                      dominant-baseline="middle"
-                      font-size="8"
-                      font-weight="700"
-                      fill="#fff"
-                    >{{ pieceIndex(pp.source) }}</text>
-
-                    <!-- Rotation indicator -->
-                    <text
-                      v-if="pp.isRotated"
-                      :x="(pp.x * sheetScale + pp.width * sheetScale - 6).toFixed(1)"
-                      :y="(pp.y * sheetScale + 12).toFixed(1)"
-                      font-size="10"
-                      fill="#fff"
-                      opacity="0.9"
-                    >&#8635;</text>
-
-                    <!-- Label and dimensions (only if piece is big enough) -->
-                    <template v-if="pp.width * sheetScale > 40 && pp.height * sheetScale > 22">
-                      <!-- Label text -->
-                      <text
-                        v-if="pp.source.label?.trim()"
-                        :x="(pp.x * sheetScale + pp.width * sheetScale / 2).toFixed(1)"
-                        :y="(pp.y * sheetScale + pp.height * sheetScale / 2 - 5).toFixed(1)"
-                        text-anchor="middle"
-                        dominant-baseline="middle"
-                        :font-size="Math.min(13, pp.width * sheetScale / 6).toFixed(0)"
-                        font-weight="600"
-                        fill="#fff"
-                        style="text-shadow:0 1px 2px rgba(0,0,0,.5)"
-                      >{{ truncate(pp.source.label.trim(), Math.floor(pp.width * sheetScale / 7)) }}</text>
-
-                      <!-- Dimensions text -->
-                      <text
-                        :x="(pp.x * sheetScale + pp.width * sheetScale / 2).toFixed(1)"
-                        :y="(pp.y * sheetScale + pp.height * sheetScale / 2 + (pp.source.label?.trim() ? 9 : 0)).toFixed(1)"
-                        text-anchor="middle"
-                        dominant-baseline="middle"
-                        :font-size="Math.min(11, pp.width * sheetScale / 7).toFixed(0)"
-                        fill="#fff"
-                        opacity="0.85"
-                      >{{ pp.width.toFixed(0) }}&times;{{ pp.height.toFixed(0) }}</text>
-                    </template>
-                  </template>
-
-                  <!-- Bottom dimension label -->
-                  <text
-                    :x="(sheet.width * sheetScale / 2).toFixed(0)"
-                    :y="(sheet.height * sheetScale - 4).toFixed(0)"
-                    text-anchor="middle"
-                    font-size="11"
-                    fill="#8B7355"
-                  >{{ sheet.width.toFixed(0) }} mm</text>
-
-                  <!-- Left dimension label -->
-                  <text
-                    x="4"
-                    :y="(sheet.height * sheetScale / 2).toFixed(0)"
-                    text-anchor="middle"
-                    dominant-baseline="middle"
-                    font-size="11"
-                    fill="#8B7355"
-                    :transform="`rotate(-90,4,${(sheet.height * sheetScale / 2).toFixed(0)})`"
-                  >{{ sheet.height.toFixed(0) }} mm</text>
-                </svg>
-              </div>
-              <div class="sheet-footer">
-                <span>{{ sheet.placedPieces.length }} {{ t('pieces_short') }} &middot; {{ t('waste') }} {{ (sheet.totalArea - sheet.usedArea).toFixed(0) }} mm&sup2;</span>
-              </div>
-            </div>
+            <SheetCard
+              v-for="sheet in result.sheets"
+              :key="sheet.index"
+              :sheet="sheet"
+              :selected-piece-id="selectedPieceId"
+              :piece-indexes="pieceIndexes"
+              @select="toggleSelect"
+            />
           </div>
         </template>
       </main>
@@ -1844,16 +1793,26 @@ onUnmounted(() => {
               ref="commandInputRef"
               v-model="commandQuery"
               type="search"
+              role="combobox"
+              aria-controls="command-options"
+              aria-autocomplete="list"
+              :aria-expanded="commandPaletteOpen"
+              :aria-activedescendant="visiblePaletteCommands.length ? `command-option-${activePaletteIndex}` : undefined"
               :placeholder="t('command_search')"
               @keydown="onPaletteKeydown"
             />
           </label>
-          <div class="command-list">
+          <div id="command-options" class="command-list" role="listbox">
             <button
-              v-for="command in visiblePaletteCommands"
+              v-for="(command, commandIndex) in visiblePaletteCommands"
               :key="command.id"
+              :id="`command-option-${commandIndex}`"
               class="command-item"
+              :class="{ active: commandIndex === activePaletteIndex }"
               :disabled="command.disabled"
+              role="option"
+              :aria-selected="commandIndex === activePaletteIndex"
+              @mouseenter="activePaletteIndex = commandIndex"
               @click="runPaletteCommand(command)"
             >
               <span>{{ command.label }}</span>
@@ -1866,7 +1825,7 @@ onUnmounted(() => {
     </transition>
 
     <transition name="toast-fade">
-      <div v-if="toast" class="toast" role="status">{{ toast }}</div>
+      <div v-if="toast" class="toast" :class="`toast-${toastTone}`" :role="toastTone === 'error' ? 'alert' : 'status'">{{ toast }}</div>
     </transition>
   </div>
 </template>
@@ -1956,6 +1915,10 @@ onUnmounted(() => {
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
   z-index: 1000;
   pointer-events: none;
+}
+.toast-error {
+  border-color: var(--eff-poor-tx);
+  box-shadow: 0 12px 32px rgba(0,0,0,.25), inset 3px 0 0 var(--eff-poor-tx);
 }
 .toast-fade-enter-active,
 .toast-fade-leave-active {

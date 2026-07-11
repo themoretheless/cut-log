@@ -1,5 +1,7 @@
 use cutter_core::models::CutPiece;
-use cutter_core::optimizer::{optimize, CuttingStrategy};
+use cutter_core::optimizer::{
+    optimize, try_optimize, CuttingStrategy, OptimizeError, MAX_EXPANDED_PIECES,
+};
 
 fn base_piece(w: f64, h: f64, qty: u32) -> CutPiece {
     CutPiece {
@@ -18,11 +20,25 @@ fn piece(w: f64, h: f64, qty: u32) -> CutPiece {
 }
 
 fn piece_no_rot(w: f64, h: f64, qty: u32) -> CutPiece {
-    CutPiece { allow_rotation: false, ..base_piece(w, h, qty) }
+    CutPiece {
+        allow_rotation: false,
+        ..base_piece(w, h, qty)
+    }
 }
 
 fn piece_labeled(label: &str, w: f64, h: f64, qty: u32) -> CutPiece {
-    CutPiece { label: label.into(), ..base_piece(w, h, qty) }
+    CutPiece {
+        label: label.into(),
+        ..base_piece(w, h, qty)
+    }
+}
+
+#[test]
+fn rejects_an_excessive_expanded_quantity_without_allocating_it() {
+    let pieces = vec![piece(10.0, 10.0, MAX_EXPANDED_PIECES as u32 + 1)];
+    let error = try_optimize(1000.0, 1000.0, &pieces, 0.0, CuttingStrategy::Auto)
+        .expect_err("quantity over the hard limit must be rejected");
+    assert!(matches!(error, OptimizeError::TooManyPieces { .. }));
 }
 
 // ── Basic placement ─────────────────────────────────────────────
@@ -203,15 +219,24 @@ fn auto_at_least_as_good_as_any_single() {
     for strategy_val in 1..=9u8 {
         let s = CuttingStrategy::try_from(strategy_val).unwrap();
         let single = optimize(2440.0, 1220.0, &pieces, 3.0, s);
-        assert!(auto.total_sheets() <= single.total_sheets(),
-            "Auto should use <= sheets than {:?}", s);
+        assert!(
+            auto.total_sheets() <= single.total_sheets(),
+            "Auto should use <= sheets than {:?}",
+            s
+        );
     }
 }
 
 #[test]
 fn specific_strategy_returns_that_strategy() {
     let pieces = vec![piece(400.0, 300.0, 2)];
-    let result = optimize(2440.0, 1220.0, &pieces, 0.0, CuttingStrategy::BestAreaAreaDesc);
+    let result = optimize(
+        2440.0,
+        1220.0,
+        &pieces,
+        0.0,
+        CuttingStrategy::BestAreaAreaDesc,
+    );
     assert_eq!(result.strategy, CuttingStrategy::BestAreaAreaDesc);
     assert!(result.auto_picked_strategy.is_none());
 }
@@ -222,7 +247,11 @@ fn all_nine_strategies_produce_valid_results() {
     for strategy_val in 1..=9u8 {
         let s = CuttingStrategy::try_from(strategy_val).unwrap();
         let result = optimize(2440.0, 1220.0, &pieces, 3.0, s);
-        assert!(result.unplaced_pieces.is_empty(), "Strategy {:?} failed to place all pieces", s);
+        assert!(
+            result.unplaced_pieces.is_empty(),
+            "Strategy {:?} failed to place all pieces",
+            s
+        );
         assert!(result.total_sheets() > 0);
     }
 }
@@ -231,10 +260,7 @@ fn all_nine_strategies_produce_valid_results() {
 
 #[test]
 fn pieces_dont_overlap() {
-    let pieces = vec![
-        piece(500.0, 400.0, 4),
-        piece(300.0, 250.0, 6),
-    ];
+    let pieces = vec![piece(500.0, 400.0, 4), piece(300.0, 250.0, 6)];
     let result = optimize(2440.0, 1220.0, &pieces, 0.0, CuttingStrategy::Auto);
     for sheet in &result.sheets {
         let pp = &sheet.placed_pieces;
@@ -244,8 +270,13 @@ fn pieces_dont_overlap() {
                 let b = &pp[j];
                 let overlap_x = a.x < b.x + b.width && a.x + a.width > b.x;
                 let overlap_y = a.y < b.y + b.height && a.y + a.height > b.y;
-                assert!(!(overlap_x && overlap_y),
-                    "Pieces {} and {} overlap on sheet {}", i, j, sheet.index);
+                assert!(
+                    !(overlap_x && overlap_y),
+                    "Pieces {} and {} overlap on sheet {}",
+                    i,
+                    j,
+                    sheet.index
+                );
             }
         }
     }
@@ -259,10 +290,20 @@ fn pieces_within_sheet_bounds() {
         for pp in &sheet.placed_pieces {
             assert!(pp.x >= 0.0, "Piece x < 0");
             assert!(pp.y >= 0.0, "Piece y < 0");
-            assert!(pp.x + pp.width <= sheet.width + 0.01,
-                "Piece exceeds sheet width: {} + {} > {}", pp.x, pp.width, sheet.width);
-            assert!(pp.y + pp.height <= sheet.height + 0.01,
-                "Piece exceeds sheet height: {} + {} > {}", pp.y, pp.height, sheet.height);
+            assert!(
+                pp.x + pp.width <= sheet.width + 0.01,
+                "Piece exceeds sheet width: {} + {} > {}",
+                pp.x,
+                pp.width,
+                sheet.width
+            );
+            assert!(
+                pp.y + pp.height <= sheet.height + 0.01,
+                "Piece exceeds sheet height: {} + {} > {}",
+                pp.y,
+                pp.height,
+                sheet.height
+            );
         }
     }
 }
@@ -303,10 +344,7 @@ fn square_sheet_square_pieces() {
 
 #[test]
 fn mixed_fit_and_unfit() {
-    let pieces = vec![
-        piece(400.0, 300.0, 2),
-        piece(5000.0, 5000.0, 1),
-    ];
+    let pieces = vec![piece(400.0, 300.0, 2), piece(5000.0, 5000.0, 1)];
     let result = optimize(2440.0, 1220.0, &pieces, 0.0, CuttingStrategy::Auto);
     assert_eq!(result.unplaced_pieces.len(), 1);
     let total_placed: usize = result.sheets.iter().map(|s| s.placed_pieces.len()).sum();

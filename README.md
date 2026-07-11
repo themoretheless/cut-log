@@ -1,100 +1,145 @@
 # CutLog
 
-Two tools for anyone cutting flat sheet stock (plywood, MDF, acrylic) on a CNC
-or laser:
+CutLog is a local-first browser workspace for flat-sheet fabrication:
 
-- **Cutting Optimizer** — pack a list of rectangular parts onto stock sheets
-  with minimal waste (guillotine bin-packing, kerf-aware, optional rotation).
-- **Box Builder** — design a parametric finger-joint box (5 walls, optional
-  shelves and a bevel), preview it in 3D, and export laser-ready SVG cut paths.
+- **Cutting Optimizer** packs rectangular parts onto stock sheets with kerf,
+  optional rotation, and multiple guillotine heuristics.
+- **Box Builder** creates a parametric finger-joint box, previews the assembly
+  and individual panels in 3D, and exports laser-ready SVG paths.
 
-Bilingual UI (English / Russian). Runs entirely in the browser — the geometry
-and the packing run client-side, nothing is uploaded.
+The interface is available in English and Russian. Geometry, optimization, and
+project storage stay in the browser; no project data is uploaded.
 
 [Русская версия README](README.ru.md)
 
-> **License:** none yet. Until a `LICENSE` file is added the code is "all rights
-> reserved" by default — others may view it but not legally reuse it.
+> **License:** there is no `LICENSE` file yet. The repository is therefore not
+> offered for reuse under an open-source license.
 
-## Features
+## What is included
 
-**Cutting Optimizer**
-- Guillotine (shelf/free-rectangle) bin-packing with kerf and per-part rotation.
-- 9 strategies (3 fit heuristics × 3 sort orders) plus **Auto**, which runs all
-  of them and keeps the result with the fewest sheets, then best efficiency.
-- Common sheet presets, drag-to-reorder parts, localStorage persistence,
-  keyboard shortcuts, efficiency stats and an SVG layout per sheet.
+### Cutting Optimizer
 
-**Box Builder**
-- Finger-joint (tab-and-slot) geometry generated from width/height/depth,
-  material thickness, kerf, tab size, shelf count and a front/back bevel.
-- Live 3D assembly view (exploded, orbit, per-piece gallery) via three.js.
-- Per-piece and full-sheet SVG export for laser cutting.
+- Rust/WASM guillotine packing with kerf and per-part rotation.
+- Nine explicit strategies (three fit heuristics by three sort orders) plus
+  **Auto**, which chooses the fewest sheets and then the best efficiency.
+- A cancellable module Worker keeps calculation off the UI thread.
+- Quantity protection: at most 1,000 copies of one piece and 2,000 expanded
+  pieces in one run, enforced before WASM and again in Rust.
+- Sheet presets, import, duplicate/filter/sort/bulk edit, drag and keyboard
+  reorder, undo/redo, snapshots, share links, costing, and SVG/DXF/CSV/print
+  output.
+- Accessible result-sheet SVGs with keyboard-selectable pieces.
 
-## Architecture
+### Box Builder
 
+- Finger-joint geometry from width, height, depth, thickness, kerf, tab size,
+  shelf count, and front/back bevel.
+- One constraint model clamps interdependent values before geometry runs.
+- Live Three.js assembly and piece gallery with owned GPU cleanup and a
+  hidden-tab rendering pause.
+- Per-piece and full-layout SVG export.
+
+## Start here
+
+To understand the project in small pieces, do not begin with the large page
+components:
+
+1. Read `frontend/src/services/types.ts` for the data vocabulary.
+2. Read `frontend/src/lib/optimizerLimits.ts` and `validatePiece.ts` beside
+   their tests for the trust boundary.
+3. Follow `services/optimizer.ts` -> `optimizerWorker.ts` ->
+   `optimizer.worker.ts` -> `rustService.ts` for one calculation.
+4. Read `crates/core/src/models.rs` and `optimizer.rs`; the WASM and CLI crates
+   are thin adapters.
+5. Read `lib/sheetPresentation.ts` and `components/SheetCard.vue`, then open
+   `pages/Home.vue` only to see composition and remaining orchestration.
+6. For the box, follow `box/constraints.ts` -> `geometry.ts` ->
+   `useBoxModel.ts` -> `box/three/*` -> `pages/BoxBuilder.vue`.
+
+[ARCHITECTURE.md](ARCHITECTURE.md) expands this into layer rules, SOLID/DRY
+ownership, diagrams, the three completed iterations, and the next small
+refactoring slices.
+
+## Architecture at a glance
+
+```text
+pages/components -> composables -> services -> Worker/WASM -> Rust core
+        |                |              |
+        +----------------+------------> pure TypeScript/types
 ```
+
+```text
+frontend/src/
+  lib/             pure validation, state, history, piece ops, exports, display math
+  services/        optimizer adaptation, Worker ownership, lazy WASM loading
+  composables/     Vue-owned effects such as storage and toast lifetime
+  components/      reusable presentation controls and SheetCard
+  box/             pure constraints/geometry, reactive model, owned Three.js scenes
+  pages/           product composition; Home still contains the main refactoring debt
 crates/
-  core/   cutter-core  — cutting optimizer + data models (pure Rust, unit-tested)
-  ui/     cutter-ui    — SVG result rendering + color palette
-  cli/    cutter-cli   — stdin JSON -> stdout JSON/SVG
-  wasm/   cutter-wasm  — wasm-bindgen surface (optimize/optimize_sync)
-frontend/              — Vue 3 + TypeScript + Vite + three.js
-  src/box/geometry.ts  — box geometry (paths, 3D, layout), the single source of truth
-scripts/               — golden fixtures for the box geometry; benchmark notes
+  core/            pure Rust optimizer and models
+  wasm/            wasm-bindgen error/data adapter
+  cli/             stdin/stdout adapter
+  ui/              Rust SVG renderer
 ```
 
-The **cutting optimizer** lives in Rust and is compiled to WebAssembly. The
-**box geometry** lives in TypeScript (`src/box/geometry.ts`) — it was measured to
-be the faster place for it; see [scripts/bench/BENCH.md](scripts/bench/BENCH.md).
+Pure modules do not import Vue or browser effects. Pages depend inward on
+composables, services, pure modules, and contracts. Shared policy has one owner:
+quantity limits, palette, sheet display math, box constraints, geometry, and
+downloads are not reimplemented in pages.
 
-### Layering and the refactoring plan
+## 500-item review
 
-The intended dependency direction is strictly inward:
+The v0.1.50 review produced exactly **500 unique, ID-addressable items** across
+20 groups of 25:
 
-`pages -> composables -> services / lib -> types`
+| IDs | Area | IDs | Area |
+|---|---|---|---|
+| CL-001..025 | Runtime safety | CL-251..275 | Accessibility |
+| CL-026..050 | Optimizer correctness | CL-276..300 | Visual design |
+| CL-051..075 | WASM and Workers | CL-301..325 | Responsive/mobile |
+| CL-076..100 | Rust and CLI | CL-326..350 | Internationalization |
+| CL-101..125 | Home architecture | CL-351..375 | Testing |
+| CL-126..150 | Persistence/history | CL-376..400 | CI/release |
+| CL-151..175 | Piece editor/import | CL-401..425 | Performance |
+| CL-176..200 | Export/CAD/print | CL-426..450 | Security/privacy |
+| CL-201..225 | Box geometry | CL-451..475 | Product workflows |
+| CL-226..250 | Three.js lifecycle | CL-476..500 | Documentation |
 
-Pure logic (serialization, parsing, history, geometry, cost, export, piece-edit
-ops) already lives in framework-free, unit-tested `lib/*` modules and
-`box/geometry.ts`, and nothing in `lib/` or `services/` imports Vue. The
-composables layer is the target home for the Vue-reactive glue; today most of
-that glue still lives in the page components, chiefly `Home.vue` (~1907 lines),
-which the plan decomposes into composables and a `SheetCard` component.
+The canonical checklist, priorities, effort sizes, and 88 items delivered in
+this change set are in [recommendation.md](recommendation.md). The catalog is
+not copied here or into architecture; that duplication would immediately make
+status unreliable. `plan.md` remains historical brainstorming.
 
-The full from-scratch review (ten independent critics, one per lens) and the
-target model live in [ARCHITECTURE.md](ARCHITECTURE.md); the ordered,
-status-tracked to-do plus a ranked audit of concrete issues (bugs, security,
-accessibility, i18n, performance) are in
-[recommendation.md](recommendation.md); the master roadmap and the
-idea/suggestion backlog are in [plan.md](plan.md).
+## Build and run
 
-## Build & run
-
-Prerequisites: Rust (with the `wasm32-unknown-unknown` target), `wasm-pack`,
-`wasm-opt`, and Node 22+.
+Prerequisites: Rust with `wasm32-unknown-unknown`, `wasm-pack`, `wasm-opt`, and
+Node 22+.
 
 ```bash
-# 1. Build the WebAssembly bundle
+# Build and optimize WebAssembly
 cd crates/wasm
 wasm-pack build --target web --release
 wasm-opt -Oz --enable-bulk-memory pkg/cutter_wasm_bg.wasm -o pkg/cutter_wasm_bg.wasm
 
-# 2. Copy it into the frontend
+# Copy generated assets to the frontend
 cd ../..
 cp -r crates/wasm/pkg/* frontend/wasm/
 cp crates/wasm/pkg/cutter_wasm_bg.wasm frontend/public/
 
-# 3. Run the dev server
+# Install and start Vite
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-`npm run build` produces a static bundle in `frontend/dist`.
+`npm run build` writes the static site to `frontend/dist`.
 
 ## CLI
 
-The optimizer is also a standalone CLI that reads a JSON request on stdin:
+The CLI reads one JSON request from stdin and writes JSON, or SVG when
+`"svg": true` is present. Invalid or excessive input prints an error and exits
+nonzero.
 
 ```bash
 echo '{
@@ -106,16 +151,15 @@ echo '{
 }' | cargo run -p cutter-cli
 ```
 
-It prints the layout as JSON, or as an SVG when the request has `"svg": true`.
-
-## Tests
+## Verification
 
 ```bash
-cargo test --workspace      # optimizer unit tests
-cd frontend && npm test     # box geometry golden tests (vitest)
+cargo test --workspace
+cd frontend
+npm test
+npx vue-tsc --noEmit
+npm run build
 ```
 
-## Deployment
-
-GitHub Actions builds the wasm bundle and the frontend and publishes
-`frontend/dist` to GitHub Pages (`.github/workflows/`).
+GitHub Actions also rebuilds WASM, runs Rust and frontend checks, verifies the
+release version, and publishes the static bundle to GitHub Pages.

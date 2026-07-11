@@ -3,6 +3,27 @@ use tracing::{debug, info, instrument, warn};
 
 use crate::models::*;
 
+pub const MAX_EXPANDED_PIECES: u64 = 2_000;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OptimizeError {
+    ZeroQuantity { label: String },
+    TooManyPieces { total: u64, max: u64 },
+}
+
+impl std::fmt::Display for OptimizeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ZeroQuantity { label } => write!(f, "piece '{label}' has zero quantity"),
+            Self::TooManyPieces { total, max } => {
+                write!(f, "expanded piece count {total} exceeds the limit {max}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for OptimizeError {}
+
 // ── Enums ─────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,26 +84,64 @@ impl From<CuttingStrategy> for u8 {
 // ── Strategy helpers ──────────────────────────────────────────────────────────
 
 const ALL_STRATEGIES: [(FitHeuristic, SortOrder, CuttingStrategy); 9] = [
-    (FitHeuristic::BestArea, SortOrder::AreaDesc, CuttingStrategy::BestAreaAreaDesc),
-    (FitHeuristic::BestArea, SortOrder::MaxSideDesc, CuttingStrategy::BestAreaMaxSideDesc),
-    (FitHeuristic::BestArea, SortOrder::PerimeterDesc, CuttingStrategy::BestAreaPerimeterDesc),
-    (FitHeuristic::BestShortSide, SortOrder::AreaDesc, CuttingStrategy::BestShortSideAreaDesc),
-    (FitHeuristic::BestShortSide, SortOrder::MaxSideDesc, CuttingStrategy::BestShortSideMaxSideDesc),
-    (FitHeuristic::BestShortSide, SortOrder::PerimeterDesc, CuttingStrategy::BestShortSidePerimeterDesc),
-    (FitHeuristic::BestLongSide, SortOrder::AreaDesc, CuttingStrategy::BestLongSideAreaDesc),
-    (FitHeuristic::BestLongSide, SortOrder::MaxSideDesc, CuttingStrategy::BestLongSideMaxSideDesc),
-    (FitHeuristic::BestLongSide, SortOrder::PerimeterDesc, CuttingStrategy::BestLongSidePerimeterDesc),
+    (
+        FitHeuristic::BestArea,
+        SortOrder::AreaDesc,
+        CuttingStrategy::BestAreaAreaDesc,
+    ),
+    (
+        FitHeuristic::BestArea,
+        SortOrder::MaxSideDesc,
+        CuttingStrategy::BestAreaMaxSideDesc,
+    ),
+    (
+        FitHeuristic::BestArea,
+        SortOrder::PerimeterDesc,
+        CuttingStrategy::BestAreaPerimeterDesc,
+    ),
+    (
+        FitHeuristic::BestShortSide,
+        SortOrder::AreaDesc,
+        CuttingStrategy::BestShortSideAreaDesc,
+    ),
+    (
+        FitHeuristic::BestShortSide,
+        SortOrder::MaxSideDesc,
+        CuttingStrategy::BestShortSideMaxSideDesc,
+    ),
+    (
+        FitHeuristic::BestShortSide,
+        SortOrder::PerimeterDesc,
+        CuttingStrategy::BestShortSidePerimeterDesc,
+    ),
+    (
+        FitHeuristic::BestLongSide,
+        SortOrder::AreaDesc,
+        CuttingStrategy::BestLongSideAreaDesc,
+    ),
+    (
+        FitHeuristic::BestLongSide,
+        SortOrder::MaxSideDesc,
+        CuttingStrategy::BestLongSideMaxSideDesc,
+    ),
+    (
+        FitHeuristic::BestLongSide,
+        SortOrder::PerimeterDesc,
+        CuttingStrategy::BestLongSidePerimeterDesc,
+    ),
 ];
 
 fn decompose(s: CuttingStrategy) -> (FitHeuristic, SortOrder) {
-    ALL_STRATEGIES.iter()
+    ALL_STRATEGIES
+        .iter()
         .find(|(_, _, cs)| *cs == s)
         .map(|&(fit, sort, _)| (fit, sort))
         .unwrap_or((FitHeuristic::BestArea, SortOrder::AreaDesc))
 }
 
 fn compose(fit: FitHeuristic, sort: SortOrder) -> CuttingStrategy {
-    ALL_STRATEGIES.iter()
+    ALL_STRATEGIES
+        .iter()
         .find(|(f, s, _)| *f == fit && *s == sort)
         .map(|&(_, _, cs)| cs)
         .expect("invalid fit/sort combination")
@@ -109,15 +168,23 @@ struct SheetSpace {
 
 impl SheetSpace {
     fn new(rect: FreeRect) -> Self {
-        Self { free: vec![rect], max_w: rect.w, max_h: rect.h }
+        Self {
+            free: vec![rect],
+            max_w: rect.w,
+            max_h: rect.h,
+        }
     }
 
     fn refresh_bounds(&mut self) {
         self.max_w = 0.0;
         self.max_h = 0.0;
         for fr in &self.free {
-            if fr.w > self.max_w { self.max_w = fr.w; }
-            if fr.h > self.max_h { self.max_h = fr.h; }
+            if fr.w > self.max_w {
+                self.max_w = fr.w;
+            }
+            if fr.h > self.max_h {
+                self.max_h = fr.h;
+            }
         }
     }
 
@@ -151,7 +218,61 @@ pub fn optimize(
     kerf: f64,
     strategy: CuttingStrategy,
 ) -> CuttingResult {
-    info!(sheet_width, sheet_height, kerf, ?strategy, pieces = pieces.len(), "starting optimization");
+    try_optimize(sheet_width, sheet_height, pieces, kerf, strategy).unwrap_or_else(|error| {
+        warn!(%error, "optimizer input rejected");
+        let mut result = CuttingResult::new(strategy);
+        result.unplaced_pieces.extend(pieces.iter().map(unplaced));
+        result
+    })
+}
+
+pub fn try_optimize(
+    sheet_width: f64,
+    sheet_height: f64,
+    pieces: &[CutPiece],
+    kerf: f64,
+    strategy: CuttingStrategy,
+) -> Result<CuttingResult, OptimizeError> {
+    let mut total = 0_u64;
+    for piece in pieces {
+        if piece.quantity == 0 {
+            return Err(OptimizeError::ZeroQuantity {
+                label: piece.label.clone(),
+            });
+        }
+        total = total.saturating_add(u64::from(piece.quantity));
+        if total > MAX_EXPANDED_PIECES {
+            return Err(OptimizeError::TooManyPieces {
+                total,
+                max: MAX_EXPANDED_PIECES,
+            });
+        }
+    }
+
+    Ok(optimize_validated(
+        sheet_width,
+        sheet_height,
+        pieces,
+        kerf,
+        strategy,
+    ))
+}
+
+fn optimize_validated(
+    sheet_width: f64,
+    sheet_height: f64,
+    pieces: &[CutPiece],
+    kerf: f64,
+    strategy: CuttingStrategy,
+) -> CuttingResult {
+    info!(
+        sheet_width,
+        sheet_height,
+        kerf,
+        ?strategy,
+        pieces = pieces.len(),
+        "starting optimization"
+    );
 
     if pieces.is_empty() {
         debug!("no pieces, returning empty result");
@@ -176,12 +297,7 @@ pub fn optimize(
 }
 
 #[instrument(skip(pieces))]
-fn run_auto(
-    sheet_width: f64,
-    sheet_height: f64,
-    pieces: &[CutPiece],
-    kerf: f64,
-) -> CuttingResult {
+fn run_auto(sheet_width: f64, sheet_height: f64, pieces: &[CutPiece], kerf: f64) -> CuttingResult {
     debug!("trying all 9 strategies");
     let mut best: Option<CuttingResult> = None;
     let mut best_strategy = CuttingStrategy::Auto;
@@ -202,7 +318,8 @@ fn run_auto(
     for &(fit, sort, _) in &ALL_STRATEGIES {
         let result = run_packed(sheet_width, sheet_height, queue_for(sort), kerf, fit, sort);
         debug!(
-            ?fit, ?sort,
+            ?fit,
+            ?sort,
             sheets = result.total_sheets(),
             efficiency = format!("{:.1}%", result.overall_efficiency()),
             "strategy result"
@@ -258,7 +375,14 @@ fn run_single(
     sort_order: SortOrder,
 ) -> CuttingResult {
     let queue = build_queue(pieces, sort_order);
-    run_packed(sheet_width, sheet_height, &queue, kerf, heuristic, sort_order)
+    run_packed(
+        sheet_width,
+        sheet_height,
+        &queue,
+        kerf,
+        heuristic,
+        sort_order,
+    )
 }
 
 fn run_packed(
@@ -302,7 +426,12 @@ fn run_packed(
             continue;
         }
 
-        debug!(width = piece.width, height = piece.height, sheet = result.sheets.len(), "opening new sheet");
+        debug!(
+            width = piece.width,
+            height = piece.height,
+            sheet = result.sheets.len(),
+            "opening new sheet"
+        );
         open_new_sheet_and_place(&mut result, &mut sheet_free_rects, piece, &ctx);
     }
 
@@ -310,7 +439,11 @@ fn run_packed(
 }
 
 fn unplaced(piece: &CutPiece) -> UnplacedPiece {
-    UnplacedPiece { label: piece.label.clone(), width: piece.width, height: piece.height }
+    UnplacedPiece {
+        label: piece.label.clone(),
+        width: piece.width,
+        height: piece.height,
+    }
 }
 
 fn try_place_on_existing(
@@ -325,7 +458,15 @@ fn try_place_on_existing(
         }
         if let Some((fit_idx, rotated)) = find_best_fit(&space.free, piece, ctx) {
             let fit = space.free[fit_idx];
-            place_piece(&mut result.sheets[si], space, fit_idx, fit, piece, rotated, ctx);
+            place_piece(
+                &mut result.sheets[si],
+                space,
+                fit_idx,
+                fit,
+                piece,
+                rotated,
+                ctx,
+            );
             return true;
         }
     }
@@ -343,7 +484,12 @@ fn open_new_sheet_and_place(
     piece: &CutPiece,
     ctx: &PackCtx,
 ) {
-    sheet_free_rects.push(SheetSpace::new(FreeRect { x: 0.0, y: 0.0, w: ctx.sheet_w, h: ctx.sheet_h }));
+    sheet_free_rects.push(SheetSpace::new(FreeRect {
+        x: 0.0,
+        y: 0.0,
+        w: ctx.sheet_w,
+        h: ctx.sheet_h,
+    }));
 
     let sheet = Sheet {
         index: result.sheets.len(),
@@ -356,7 +502,15 @@ fn open_new_sheet_and_place(
     let si = sheet_free_rects.len() - 1;
     if let Some((fit_idx, rotated)) = find_best_fit(&sheet_free_rects[si].free, piece, ctx) {
         let fit = sheet_free_rects[si].free[fit_idx];
-        place_piece(&mut result.sheets[si], &mut sheet_free_rects[si], fit_idx, fit, piece, rotated, ctx);
+        place_piece(
+            &mut result.sheets[si],
+            &mut sheet_free_rects[si],
+            fit_idx,
+            fit,
+            piece,
+            rotated,
+            ctx,
+        );
     } else {
         result.unplaced_pieces.push(unplaced(piece));
     }
@@ -388,7 +542,13 @@ fn place_piece(
         is_rotated: rotated,
     });
 
-    split_free_rect(&mut space.free, fit_idx, pw + ctx.kerf, ph + ctx.kerf, ctx.min_dim);
+    split_free_rect(
+        &mut space.free,
+        fit_idx,
+        pw + ctx.kerf,
+        ph + ctx.kerf,
+        ctx.min_dim,
+    );
     space.refresh_bounds();
 }
 
@@ -451,17 +611,37 @@ fn split_free_rect(free_rects: &mut Vec<FreeRect>, idx: usize, pw: f64, ph: f64,
 
     if right_w < bottom_h {
         if right_w > 0.0 {
-            push(FreeRect { x: used.x + pw, y: used.y, w: right_w, h: ph });
+            push(FreeRect {
+                x: used.x + pw,
+                y: used.y,
+                w: right_w,
+                h: ph,
+            });
         }
         if bottom_h > 0.0 {
-            push(FreeRect { x: used.x, y: used.y + ph, w: used.w, h: bottom_h });
+            push(FreeRect {
+                x: used.x,
+                y: used.y + ph,
+                w: used.w,
+                h: bottom_h,
+            });
         }
     } else {
         if bottom_h > 0.0 {
-            push(FreeRect { x: used.x, y: used.y + ph, w: pw, h: bottom_h });
+            push(FreeRect {
+                x: used.x,
+                y: used.y + ph,
+                w: pw,
+                h: bottom_h,
+            });
         }
         if right_w > 0.0 {
-            push(FreeRect { x: used.x + pw, y: used.y, w: right_w, h: used.h });
+            push(FreeRect {
+                x: used.x + pw,
+                y: used.y,
+                w: right_w,
+                h: used.h,
+            });
         }
     }
 }
