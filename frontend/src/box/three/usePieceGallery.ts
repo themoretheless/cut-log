@@ -103,6 +103,7 @@ export function usePieceGallery(model: BoxModel) {
     const cam = pCamera, ctrl = pControls, rend = pRenderer, sc = pScene
     ;(function loop() {
       pAnimId = requestAnimationFrame(loop)
+      if (document.hidden) return
       if (pRing.active && pGroup) {
         pRing.t += 0.04
         if (pRing.t >= 1) {
@@ -310,10 +311,15 @@ export function usePieceGallery(model: BoxModel) {
     if (pAnimId) cancelAnimationFrame(pAnimId)
     if (pResizeObs) pResizeObs.disconnect()
     window.removeEventListener('pointerup', onWindowPointerUp)
+    if (pGroup) clearGroup(pGroup)
+    pControls?.dispose()
+    pScene?.clear()
     if (pRenderer) {
+      pRenderer.renderLists.dispose()
       pRenderer.dispose()
       pRenderer.domElement?.remove()
     }
+    pAnimId = 0
     pScene = pCamera = pRenderer = pControls = null
     pGroup = null
     pResizeObs = null

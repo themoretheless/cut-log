@@ -7,7 +7,7 @@
 import { ref } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { buildPanel, clearGroup, type PanelData } from './panelMesh'
+import { buildPanel, clearGroup, disposeMaterial, type PanelData } from './panelMesh'
 import type { BoxModel, Translate } from '@/box/useBoxModel'
 
 // Explode only translates objects, so geometry is built once at base
@@ -34,9 +34,14 @@ export function useAssemblyScene(model: BoxModel, t: Translate) {
   let explodeLabels: { sprite: THREE.Sprite; base: THREE.Vector3; axis: number; sign: number }[] = []
   let explodeGuides: { line: THREE.LineSegments; base: THREE.Vector3; axis: number; sign: number }[] = []
 
-  // Canvas textures are expensive to create and upload, so label materials are
-  // cached by content and never disposed (the set of labels is small).
+  // Canvas textures are expensive to create and upload, so labels share a
+  // scene-owned cache. dispose() releases the cache and every texture in it.
   const labelMatCache = new Map<string, THREE.SpriteMaterial>()
+
+  function clearLabelMaterialCache() {
+    for (const material of labelMatCache.values()) disposeMaterial(material)
+    labelMatCache.clear()
+  }
 
   function makeLabel(text: string, color: string, sub?: string): THREE.Sprite {
     const key = `${text}|${color}|${sub ?? ''}`
@@ -119,6 +124,7 @@ export function useAssemblyScene(model: BoxModel, t: Translate) {
     let lastFrameTime = 0
     ;(function loop(now = performance.now()) {
       animFrameId = requestAnimationFrame(loop)
+      if (document.hidden) return
       const dt = lastFrameTime > 0 ? Math.min((now - lastFrameTime) / 1000, 0.1) : 1 / 60
       lastFrameTime = now
       const target = isoExplode.value
@@ -179,6 +185,7 @@ export function useAssemblyScene(model: BoxModel, t: Translate) {
     clearGroup(panelGroup)
     clearGroup(guidesGroup)
     clearGroup(labelsGroup)
+    clearLabelMaterialCache()
     explodePanels = []
     explodeLabels = []
     explodeGuides = []
@@ -284,10 +291,21 @@ export function useAssemblyScene(model: BoxModel, t: Translate) {
   function dispose() {
     if (animFrameId) cancelAnimationFrame(animFrameId)
     if (resizeObs) resizeObs.disconnect()
+    if (panelGroup) clearGroup(panelGroup)
+    if (guidesGroup) clearGroup(guidesGroup)
+    if (labelsGroup) clearGroup(labelsGroup)
+    clearLabelMaterialCache()
+    controls?.dispose()
+    scene?.clear()
     if (renderer) {
+      renderer.renderLists.dispose()
       renderer.dispose()
       renderer.domElement?.remove()
     }
+    explodePanels = []
+    explodeLabels = []
+    explodeGuides = []
+    animFrameId = 0
     scene = camera = renderer = controls = null
     panelGroup = guidesGroup = labelsGroup = null
     resizeObs = null

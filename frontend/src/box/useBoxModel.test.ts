@@ -80,6 +80,22 @@ describe('useBoxModel', () => {
     expect(m.tooBigPieces.value.length).toBeGreaterThan(0)
   })
 
+  it('clamps interdependent parameters before geometry is generated', () => {
+    const m = useBoxModel(t)
+    m.W.value = 50
+    m.H.value = 50
+    m.D.value = 50
+    m.T.value = 500
+    m.Bevel.value = 500
+    m.NTab.value = 500
+    m.NShelves.value = 500
+    expect(m.Wi.value).toBeGreaterThan(0)
+    expect(m.Hi.value).toBeGreaterThan(0)
+    expect(m.TopD.value).toBeGreaterThan(0)
+    expect(m.NTab.value).toBeLessThanOrEqual(m.paramLimits.value.maxTabs)
+    expect(m.NShelves.value).toBeLessThanOrEqual(m.paramLimits.value.maxShelves)
+  })
+
   it('pieceData resolves every layout label to a cut path', () => {
     const m = useBoxModel(t)
     m.NShelves.value = 2

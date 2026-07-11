@@ -1,227 +1,314 @@
-# CutLog architecture and refactoring plan
+# CutLog architecture
 
-This document describes how CutLog is structured today, what a from-scratch
-design would look like, and an incremental, behavior-preserving plan to get
-there. It was produced from a review by ten independent architecture critics
-(one per lens) plus a synthesis pass, with a deliberate bias against
-over-engineering for a niche, static, single-developer app.
+Status: v0.1.50 review, after three implementation iterations. This document is
+the map of responsibilities and dependency rules. The canonical list of exactly
+500 findings and ideas is [recommendation.md](recommendation.md); the quick
+setup and reading path are in [README.md](README.md). `plan.md` is historical
+brainstorming, not a second source of backlog truth.
 
-The focus is modularity, code decomposition, and loose coupling.
+CutLog is intentionally a small, local-first application. Its architecture
+should make correctness visible and changes easy to review, not imitate a large
+distributed system.
 
-For the operational checklist (status, order, next action), see
-[recommendation.md](recommendation.md). This file is the rationale; that file is
-the to-do. recommendation.md also carries a ranked audit of concrete issues
-(bugs, security, accessibility, i18n, performance) in three waves; the phases
-below cover the structural ones, the rest are standalone fixes. The master
-roadmap and the idea/suggestion backlog are in [plan.md](plan.md).
+## 1. System map
 
-Status as of version 0.1.38: 0 of 6 phases done. The plan is written but not yet
-executed. PR #65 (editor UX iteration) since grew `Home.vue` from ~958 to ~1907
-lines, so the decomposition below is more needed, not less.
+```mermaid
+flowchart LR
+  UI["Pages and components"] --> FX["Vue composables"]
+  UI --> PURE["Pure TypeScript modules"]
+  FX --> PURE
+  FX --> SVC["Optimizer service"]
+  SVC --> WORKER["Module Worker"]
+  WORKER --> WASM["WASM adapter"]
+  WASM --> CORE["Rust optimizer core"]
+  UI --> BOX["Box model"]
+  BOX --> CONSTRAINTS["Pure constraints"]
+  BOX --> GEOMETRY["Pure geometry"]
+  UI --> THREE["Owned Three.js scenes"]
+  THREE --> GEOMETRY
+```
 
-## 1. Where we are
+There are two product flows:
 
-CutLog already has a sound three-tier shape: pure, tested `lib/*` modules, a
-thin `services/` wasm adapter, and Vue pages on top. The debt is concentrated,
-not systemic:
+- **Cutting Optimizer:** Vue editor -> validated state -> cancellable Worker ->
+  WASM adapter -> fallible Rust core -> typed result -> accessible sheet cards.
+- **Box Builder:** Vue controls -> normalized constraints -> one geometry source
+  -> SVG and Three.js renderers, each with explicit resource ownership.
 
-- `frontend/src/pages/Home.vue` is a ~1907-line god component. Its orchestration
-  (localStorage persistence, snapshot undo/redo, share links, named project
-  snapshots, bulk import, CSV/SVG/DXF/print export, drag-reorder, selection,
-  piece search/sort/bulk-edit, keyboard shortcuts, costing, and the inline sheet
-  SVG) lives in the component, so almost none of it is unit-tested. PR #65 added
-  two good pure libs (`lib/pieceEditor.ts`, `lib/projectSnapshots.ts`) but wired
-  both into the page, which is why the page keeps growing.
-- `frontend/src/box/useBoxModel.ts` entangles three reasons-to-change: pure
-  geometry wrappers (good), i18n label matching (`label === t('box.top_short')`
-  at lines 81-82, which silently breaks if a translation changes), and hardcoded
-  color palettes.
-- The three.js scenes (`box/three/useAssemblyScene.ts`, `usePieceGallery.ts`)
-  call `renderer.dispose()` but never traverse the scene graph, so per-mesh
-  geometry and materials leak on every box-parameter rebuild, even though
-  `panelMesh.ts` already exports a `disposeObj()`.
-- Smaller duplication: color palettes split across `helpers/svg.ts` and
-  `useBoxModel.ts`; `downloadFile` (Home.vue) and `downloadSvg` (BoxBuilder.vue)
-  are the same blob/anchor/revoke helper; the on-screen sheet SVG and
-  `lib/exportLayout.ts` independently implement scaling, badges, and labels.
-- `jspdf` and `svg2pdf.js` are declared in `package.json` but never imported.
+Nothing leaves the browser. Project persistence uses local browser storage;
+share links contain encoded state and must therefore be treated as untrusted
+input when opened.
 
-What is already good and should be preserved: the pure-lib + co-located-test
-pattern (now `homeState`, `shareLink`, `parsePieceList`, `history`,
-`costSummary`, `piecesCsv`, `pieceOps`, `pieceEditor`, `projectSnapshots`,
-`exportLayout`, `validatePiece`), the wasm adapter boundary, the box geometry as
-a single source of truth feeding both renderers, and the l10n key-parity guard.
+## 2. Layers and ownership
 
-Note on a non-issue: the on-screen sheet SVG renders labels with Vue `{{ }}`
-interpolation, which sets escaped text content, so there is no injection or
-broken-preview bug there. The export SVG, built as a raw string, already calls
-`escapeXml`. Extracting the sheet SVG (Phase 1) is justified by modularity and
-de-duplication, not by a safety fix.
+| Layer | Current paths | Owns | Must not own |
+|---|---|---|---|
+| Contracts | `frontend/src/services/types.ts` | Cross-layer data shapes | Vue refs, DOM, storage |
+| Pure domain/presentation logic | `frontend/src/lib/*`, `box/constraints.ts`, `box/geometry.ts` | Parsing, validation, limits, transforms, serialization, geometry, presentational calculations | Vue, browser effects, translations, Worker lifecycle |
+| Services | `frontend/src/services/*` | Worker protocol, WASM loading, JS/Rust adaptation | UI state, toasts, localStorage |
+| Reactive effects | `frontend/src/composables/*`, `box/useBoxModel.ts`, `box/three/*` | Timers, storage, listeners, reactive orchestration, WebGL lifecycle | Unrelated product concerns |
+| Presentation | `frontend/src/components/*`, `pages/*` | Labels, controls, layout, events, focus | Algorithms, persistence formats, resource allocation rules |
+| Rust core | `crates/core` | Packing models, algorithms, capacity invariant | Browser and CLI concerns |
+| Rust adapters | `crates/wasm`, `crates/cli`, `crates/ui` | Boundary conversion and output surfaces | Duplicate optimizer rules |
 
-## 2. The ten-critic review
+Dependency direction is inward:
 
-Each critic designed its concern as if from scratch, then judged the real code.
+```text
+pages/components -> composables -> services -> Worker/WASM -> Rust core
+        |                |              |
+        +----------------+------------> pure TypeScript/types
+```
 
-| # | Lens | Core finding |
-|---|------|--------------|
-| 1 | SRP / god-components | `Home.vue` mixes ~15+ concerns; the box scenes conflate lifecycle, animation, geometry, and interaction. |
-| 2 | Coupling and dependency direction | `useBoxModel` couples geometry + i18n + color; persistence and i18n leak across layers; box piece identity depends on translated strings. |
-| 3 | Cohesion and module boundaries | `Home.vue` groups things that change for different reasons; boundaries should be drawn by reason-to-change (persistence, history, share, import, export, selection, drag, keyboard, piece-edit). |
-| 4 | Layering | The pure-lib to composable to component stack is sound; the violations are page-local (inline SVG, orchestration in the page). |
-| 5 | Testability and seams | The pure libs are tested; the orchestration script in `Home.vue` is not. Extract composables at clear seams so most of it becomes testable without a DOM. |
-| 6 | State and data flow | No single owner for project state; refs, watchers, history, and persistence interleave, with several entry points all calling `applyState`. |
-| 7 | DRY and reuse | Duplicated palettes, download helpers, SVG scaling, and badge/label rendering between the on-screen and export SVG. |
-| 8 | Abstraction quality | Some primitive obsession (bare param refs, raw SVG coordinates); a few leaky abstractions (color cycling spread across files). |
-| 9 | Naming and file organization | The technical-layer folders work at this size; `lib/` is a mild grab-bag and `helpers/svg.ts` mixes unrelated constants. |
-| 10 | Bundle and code-splitting | Route-level lazy loading and deferred wasm already exist; the real wins are removing dead deps and isolating the three.js layer, not more splitting. |
+Pure modules may depend on other pure modules and types. They never import Vue,
+components, composables, stores, `window`, localStorage, or Three.js. Services
+never import pages. A page may assemble several narrow modules, but it should
+not reimplement their policy.
 
-## 3. Target architecture
+## 3. SOLID and DRY in this repository
 
-### 3.1 Layers
+These principles are review rules, not reasons to add abstraction by default.
 
-| Layer | Responsibility | Rules |
-|-------|----------------|-------|
-| Pure logic (`lib/`, `box/geometry.ts`, `helpers/`) | Framework-free TypeScript: serialization, validation, parsing, history, snapshots, piece-edit ops, cost, export serializers, geometry math, palettes, SVG view-model builders. Deterministic. | May import other `lib/` and types only. Never imports `vue`, components, composables, services, or stores. Ships with a co-located `*.test.ts`; geometry keeps golden snapshots. |
-| Services (`services/`) | Wrap the Rust/wasm optimizer (`rustService.ts` loads it, `optimizer.ts` adapts JS to/from wasm JSON). | May import `lib`/types and the wasm module. No Vue. Components and composables depend on it, never the reverse. |
-| Composables (`composables/`, `box/`, `box/three/`) | Vue-reactive glue: wrap pure `lib` functions as refs/computed and own effects (watchers, timers, listeners, localStorage, clipboard, WebGL lifecycle). | May import `lib/`, `services/`, `stores/l10n`, and `vue`. `t()` is injected as a parameter into composables that should stay testable. Leaf composables do not import the page-level aggregator. |
-| Pages and components (`pages/`, `components/`) | Presentation only: bind composable refs to the template, render SVG via a sub-component, dispatch events. | May import composables, components, stores, `lib` types. No persistence, history, export-serialization, or geometry logic inline. Pages do not import each other. |
+### Single Responsibility
 
-### 3.2 Dependency rules
+- `optimizerLimits.ts` owns quantity-budget policy.
+- `optimizerWorker.ts` owns one calculation lifecycle.
+- `useHomeStorage.ts` owns storage timing and errors.
+- `useToast.ts` owns transient feedback lifecycle.
+- `sheetPresentation.ts` owns SVG display calculations.
+- `SheetCard.vue` owns rendering and selection events for one sheet.
+- `constraints.ts` owns legal box parameter relationships.
+- Three.js scene modules own and dispose every GPU resource they create.
 
-1. Dependencies point inward only: `pages -> composables -> services/lib -> types`. Nothing in `lib/` or `services/` may import `vue`, a component, a composable, or a store.
-2. `lib/` modules take locale strings as parameters and never call `t()` or import `stores/l10n`. The l10n function is injected into composables as an argument.
-3. Box geometry (`box/geometry.ts`) stays free of three.js, colors, and i18n. three.js lives only under `box/three/`. Colors live only in `lib/palette.ts`. Box piece identity is a `PieceId` enum, not a translated label.
-4. Pages contain no persistence, history, export-serialization, drag-reorder, or SVG-generation logic inline. Those live in composables (effectful) or `lib` (pure).
-5. Two pages never import each other. Shared behavior goes through a composable (`useToast`, `useKeyboardShortcuts`, `downloadFile`) or a `lib` module.
-6. Every new `lib/` module ships with a co-located vitest in the same PR. Composables extracted from `Home.vue` must have their underlying pure logic covered by `lib` tests before the extraction PR, since the Vue wiring itself stays untested.
+`Home.vue` is still the main exception at about 1,900 lines. The next cuts are
+history, snapshots, piece-list actions, keyboard commands, and export
+orchestration (`CL-106` to `CL-114`). Each extraction must remove a whole reason
+to change, not merely move lines into a wrapper.
 
-### 3.3 Modules to introduce
+### Open/Closed
 
-| Path | Responsibility | Depends on |
-|------|----------------|------------|
-| `lib/downloadFile.ts` | Generic `downloadFile(name, content, mime)` blob/anchor/revoke helper. | none |
-| `lib/palette.ts` | Single home for `PIECE_COLORS`, `SHELF_COLORS`, `SHELF_EDGE_COLORS` plus indexed accessors. | none |
-| `lib/sheetSvg.ts` | Pure builder of the on-screen sheet view-model / SVG from a `Sheet` (scale, grain lines, rects, badges, labels) with shared `escapeXml`. | `services/types`, `lib/palette` |
-| `components/SheetCard.vue` | Render one sheet from a `CuttingResult` using `sheetSvg` + selection state. | `lib/sheetSvg`, `vue` |
-| `composables/useToast.ts` | Shared toast: message ref + `showToast(msg, ms?)` with timer cleanup. | `vue` |
-| `composables/useKeyboardShortcuts.ts` | Register a key-to-action map on keydown, skip inputs, clean up on unmount. | `vue` |
-| `composables/useHomeProject.ts` | Own persistent project state (sheet params, kerf, pieces, price, currency) as refs; `currentState()`/`applyState()`; debounced save/load + share-link load. | `lib/homeState`, `lib/shareLink`, `vue` |
-| `composables/useHomeHistory.ts` | Reactive undo/redo over `lib/history`: snapshot coalescing, restoring guard, `doUndo`/`doRedo` via callbacks. | `lib/history`, `lib/homeState`, `vue` |
-| `composables/useProjectSnapshots.ts` | Reactive wrapper over `lib/projectSnapshots` (named saved projects): list, save, load, delete, persisted to localStorage. | `lib/projectSnapshots`, `vue` |
-| `composables/usePieceList.ts` | Piece CRUD + color allocation + search/sort/bulk-edit via `lib/pieceEditor`: add, import, remove, duplicate, clear, reorder, sort, query. Owns `colorIdx`. | `lib/pieceOps`, `lib/pieceEditor`, `lib/parsePieceList`, `lib/palette`, `services/types`, `vue` |
-| `box/usePieceCatalog.ts` | Build box piece specs keyed by a `PieceId` enum, then map id to label via injected `t` and id to color via `lib/palette` at the edge. | `box/geometry`, `lib/palette`, `vue` |
-| `box/three/useThreeScene.ts` | Shared three.js lifecycle: scene/camera/renderer/controls, resize, render loop, and a `dispose()` that traverses the graph via `panelMesh.disposeObj`. | `three`, `box/three/panelMesh` |
+New optimizer strategies should implement an existing strategy contract rather
+than add UI-specific branches through every layer. New export formats should be
+pure serializers called by a shared download boundary. New box presentation
+should consume `geometry.ts` rather than duplicate geometry.
 
-## 4. Phased refactoring plan
+### Liskov Substitution
 
-Each phase is a safe, independently shippable PR that preserves behavior, fits
-the version-bump CI gate, and is verified before merge. Status and ordering are
-tracked in [recommendation.md](recommendation.md).
+The browser Worker, CLI, and WASM adapters must preserve the core contract:
+legal input has equivalent meaning; illegal input returns an explicit failure;
+no adapter silently widens limits or changes units. Tests at each boundary are
+the practical enforcement mechanism.
 
-### Phase 0 - Free wins, zero behavior change
-- Goal: remove dead weight and de-duplicate trivially.
-- Steps: remove `jspdf` and `svg2pdf.js` from `package.json` (no `src` imports);
-  add `lib/downloadFile.ts` (+ test) and replace the inline `downloadFile`
-  (Home.vue) and `downloadSvg` (BoxBuilder.vue) with it.
-- Risk: very low (pure deletions and a like-for-like swap).
-- Verified by: vitest incl. the new test, build, one SVG-export smoke per page.
+### Interface Segregation
 
-### Phase 1 - Consolidate palette and extract the sheet SVG
-- Goal: one color source and a tested sheet-SVG builder behind a component.
-- Steps: add `lib/palette.ts` (+ tests) and route existing usages through it; add
-  `lib/sheetSvg.ts` (+ tests, including a label with `<` and `&`); introduce
-  `components/SheetCard.vue` and replace the inline SVG block in `Home.vue`.
-- Risk: medium (the inline SVG is visually load-bearing; a view-model regression
-  is visible).
-- Verified by: `sheetSvg` tests; side-by-side visual parity for a sample layout;
-  selection highlight still toggles.
+Composables expose narrow capabilities: storage returns `load`, `scheduleSave`,
+`saveNow`, and `dispose`; toast returns message, tone, and explicit actions.
+Components receive only the data and callbacks they render. Avoid a giant
+“editor context” whose consumers depend on unrelated state.
 
-### Phase 2 - Extract shared UI composables
-- Goal: move toast and keyboard handling out of both pages.
-- Steps: add `composables/useToast.ts`; add `composables/useKeyboardShortcuts.ts`
-  taking a key-to-action map with an input-field guard and unmount cleanup; rewire
-  both pages to declare maps instead of if-else chains.
-- Risk: low-medium (the input-field guard and ctrl/meta combos must be preserved
-  exactly so typing is not hijacked).
-- Verified by: a dispatch + input-skip unit test; manual shortcut pass on both pages.
+### Dependency Inversion
 
-### Phase 3 - Extract Home persistence, history, and snapshots composables
-- Goal: make the most fragile, untested orchestration testable and isolated.
-- Steps: confirm `lib/homeState`, `lib/history`, and `lib/projectSnapshots` cover
-  the relied-on semantics; add `composables/useHomeProject.ts`,
-  `composables/useHomeHistory.ts`, and `composables/useProjectSnapshots.ts`
-  (wrapping the already-pure `projectSnapshots` from #65); rewire `Home.vue`,
-  keeping the single watcher that calls save + record.
-- Risk: high (undo/redo timing depends on the restoring guard and `nextTick`).
-- Verified by: a focused history test (record, undo, redo, restore does not
-  self-record); manual edit/undo/redo/reload/open-share-link/save-named-project
-  sequence.
+The page depends on the optimizer service contract, not on WASM internals. The
+Worker depends on a small adapter, and the adapters depend on the Rust core.
+Effects accept small injected boundaries where useful (`StorageLike`, error
+callbacks) so they can be tested without a browser singleton.
 
-### Phase 4 - Extract the piece-list composable
-- Goal: centralize piece CRUD, color allocation, import, duplicate, reorder, and
-  the #65 search/sort/bulk-edit operations.
-- Steps: move those into `composables/usePieceList.ts`, delegating to
-  `lib/pieceOps`, `lib/pieceEditor`, `lib/parsePieceList`, `lib/palette`; keep
-  drag-state refs in the page as UI transients, but the mutations call the
-  composable.
-- Risk: medium (color cycling, duplicate-after-source order, reorder index math).
-- Verified by: existing `pieceOps`/`pieceEditor` tests; manual
-  add/import/duplicate/sort/search/drag checks.
+### DRY
 
-### Phase 5 - Decouple box geometry from i18n and color
-- Goal: remove label matching and hardcoded palettes from `useBoxModel`.
-- Steps: add `box/usePieceCatalog.ts` with a `PieceId` enum and id-keyed specs;
-  refactor `allPieces`/`galPieces`/`pieceData` to consume the catalog by id;
-  leave `geometry.ts` untouched.
-- Risk: medium (the id mapping must reproduce the exact same pieces, order, and
-  rotation detection).
-- Verified by: geometry golden snapshots unchanged; a catalog test asserting
-  locale-independent ids; manual RU/EN render parity and SVG download.
+DRY means one source of policy, not eliminating every similar line:
 
-### Phase 6 - Optional: share a three.js base and fix disposal
-- Goal: stop the WebGL leak and reduce scene duplication, only if usage justifies it.
-- Steps: make both scenes' `dispose()` traverse the graph via
-  `panelMesh.disposeObj` (small, high-value, can ship alone); only then, if still
-  worth it, extract `box/three/useThreeScene.ts` for the shared boilerplate.
-- Risk: medium for the extraction, low for the disposal fix alone.
-- Verified by: `renderer.info.memory.geometries/textures` stay flat across repeated
-  param changes and navigation; visual parity of explode and gallery.
+- Quantity limits: `optimizerLimits.ts` in the frontend and one guarded Rust
+  constant, with parity covered by boundary tests.
+- Colors: `lib/palette.ts`.
+- Sheet display math: `lib/sheetPresentation.ts`.
+- Box dimensions and paths: `box/geometry.ts`; validity: `box/constraints.ts`.
+- Downloads: `lib/downloadFile.ts`.
+- Detailed backlog: only `recommendation.md`.
 
-## 5. Biggest wins
+Rendering code may differ between SVG and Three.js; their shared geometry and
+units may not. UI and machine exports may format differently; their source data
+and identity may not.
 
-1. Extracting `Home.vue` persistence + undo/redo + snapshots into composables (Phase 3): the highest risk-reduction per line moved, turning the most fragile untested code into isolated, testable units. Most urgent now that #65 doubled the page.
-2. A tested `lib/sheetSvg.ts` behind `SheetCard.vue` (Phase 1): removes the largest template block from the page.
-3. Decoupling box geometry from i18n matching (Phase 5): eliminates a latent bug where changing a translation silently breaks piece matching.
-4. `lib/palette.ts` + `lib/downloadFile.ts` (Phases 0-1): kill duplicated arrays and wrappers at near-zero risk.
-5. Fixing three.js disposal (Phase 6): a small change that stops a real WebGL leak.
+## 4. Read the project in small pieces
 
-## 6. Non-goals (deliberately avoided over-engineering)
+This order avoids starting with either large page:
 
-For a niche, static, single-developer app, the following were proposed by
-individual critics and explicitly rejected by the synthesis:
+1. **Data vocabulary:** `frontend/src/services/types.ts`.
+   Learn `Piece`, optimization input, sheets, and results.
+2. **Safety rules:** `lib/optimizerLimits.ts`, `lib/validatePiece.ts`, then
+   their adjacent tests. These are the trust boundary before expansion.
+3. **Project state:** `lib/homeState.ts`, `shareLink.ts`, `history.ts`, and
+   `projectSnapshots.ts`. Each module is framework-free.
+4. **Piece operations:** `parsePieceList.ts`, `pieceOps.ts`, `pieceEditor.ts`,
+   and `piecesCsv.ts`. Read one implementation beside its test.
+5. **Optimization boundary:** `services/optimizer.ts`,
+   `optimizerWorker.ts`, `optimizer.worker.ts`, then `rustService.ts`.
+6. **Rust path:** `crates/core/src/models.rs`, `optimizer.rs`, then the thin
+   `crates/wasm/src/lib.rs` and `crates/cli/src/main.rs` adapters.
+7. **Result presentation:** `lib/sheetPresentation.ts` and
+   `components/SheetCard.vue`. Only after that open `pages/Home.vue` to see how
+   the parts are composed.
+8. **Box path:** `box/constraints.ts` -> `geometry.ts` -> `useBoxModel.ts` ->
+   the two `box/three` scene modules -> `pages/BoxBuilder.vue`.
 
-- No `ProjectState`/`ProjectModel` class or a `domain/` layer. Plain refs plus
-  `currentState()`/`applyState()` backed by the existing `lib/homeState` are enough.
-- No command-based undo. Snapshots are simple and fast at this data size.
-- No Pinia or a heavier i18n library. The hand-rolled bilingual dictionary with a
-  parity test is adequate; renaming `stores/l10n.ts` to `i18n.ts` is optional churn.
-- No reorganization into `features/cutting-optimizer` / `features/box-builder`
-  folders, and no renaming of `Home.vue`/`BoxBuilder.vue`. Folder churn just
-  creates diff noise.
-- No speculative split of the three.js scenes into
-  `useThreeScene` + `useAnimation` + `useInteraction`. Fix the disposal leak first;
-  extract a shared base only when a concrete second consumer appears.
-- No lazy/dynamic imports for export/share/import modules. The bundle is small and
-  these are pure TS; deferring them adds async complexity for negligible gain.
-- No global toast plugin, keyboard-shortcut registry UI, or generic reactive
-  `BoxParams` wrapper. A plain `useToast` and a plain key-to-action map cover both pages.
-- No attempt to unit-test Vue component wiring. Push logic down into `lib` and
-  composables that can be tested directly; leave the thin template layer to manual
-  smoke checks.
+A useful study loop is: read a test, read its small implementation, change one
+case, run that test, then inspect the caller. Large pages become integration
+maps rather than the first source of truth.
 
----
+## 5. Current module map
 
-Generated from a ten-lens architecture review (SRP, coupling, cohesion, layering,
-testability, state/data-flow, DRY, abstraction, naming, bundle) and a synthesis
-pass. Treat this as a living document: update it, and the status in
-[recommendation.md](recommendation.md), as phases land.
+```text
+frontend/src/
+  lib/                         pure, deterministic, co-located unit tests
+    optimizerLimits.ts        frontend quantity budget
+    homeState.ts              normalized persisted/share state
+    palette.ts                shared categorical colors
+    sheetPresentation.ts      scale, grain, badge, accessible names
+    history.ts                pure snapshot history
+    projectSnapshots.ts       pure named-snapshot operations
+    pieceEditor.ts            filtering/sorting/bulk transforms
+    pieceOps.ts               piece CRUD helpers
+    exportLayout.ts           SVG/DXF/print serialization
+  services/
+    optimizer.ts              input/output adaptation
+    optimizerWorker.ts        cancellable UI-side Worker owner
+    optimizer.worker.ts       Worker endpoint
+    rustService.ts            lazy WASM adapter
+  composables/
+    useHomeStorage.ts         debounced persistence and failure callback
+    useToast.ts               transient status/error lifecycle
+  components/
+    NumberField.vue           bounded accessible numeric control
+    SheetCard.vue             one accessible result-sheet view
+  box/
+    constraints.ts            legal parameter relationships
+    geometry.ts               paths, panel geometry, layout source of truth
+    useBoxModel.ts            reactive composition and labels
+    three/                    assembly/gallery lifecycle and disposal
+  pages/
+    Home.vue                  remaining optimizer orchestration
+    BoxBuilder.vue            box composition and presentation
+
+crates/
+  core/                       fallible optimizer and data models
+  wasm/                       JavaScript error boundary
+  cli/                        stdin/stdout adapter with nonzero failures
+  ui/                         Rust SVG output
+```
+
+Tests sit beside frontend modules and under `crates/core/tests`. This makes the
+smallest owning behavior easy to find.
+
+## 6. Data flows and invariants
+
+### Optimization
+
+```mermaid
+sequenceDiagram
+  participant P as Home page
+  participant L as Limits/validation
+  participant W as Owned Worker
+  participant A as WASM adapter
+  participant R as Rust core
+  P->>L: normalize and assert quantity budget
+  L-->>P: valid input or explicit error
+  P->>W: plain JSON-compatible request
+  W->>A: initialize and optimize
+  A->>R: try_optimize
+  R-->>A: Result
+  A-->>W: result or JavaScript error
+  W-->>P: latest result only
+  Note over P,W: New run or unmount terminates stale work
+```
+
+Required invariants:
+
+- At most 1,000 copies of one piece and 2,000 expanded pieces per request.
+- Every boundary fails explicitly before excessive expansion.
+- Worker payloads are plain data, never Vue proxies.
+- A stale or cancelled run cannot replace a newer result.
+- Placed pieces must eventually be checked for bounds and overlap (`CL-031`,
+  `CL-032`).
+
+### Box
+
+```mermaid
+flowchart LR
+  INPUT["Requested parameters"] --> LIMITS["normalizeBoxParams"]
+  LIMITS --> MODEL["useBoxModel"]
+  MODEL --> GEO["geometry.ts"]
+  GEO --> SVG["Cut SVG"]
+  GEO --> A3D["Assembly scene"]
+  GEO --> G3D["Piece gallery"]
+  A3D --> DISPOSE["Owned disposal"]
+  G3D --> DISPOSE
+```
+
+The constraints module decides what values are legal. Geometry decides what
+those values mean. Renderers may not clamp parameters independently. Scene
+owners dispose geometries, materials, textures, controls, render lists, and
+animation loops they create.
+
+## 7. Three completed iterations
+
+| Iteration | Goal | Delivered | Evidence |
+|---|---|---|---|
+| 1 | Correctness and resource safety | Frontend/Rust quantity budgets, fallible core/CLI/WASM errors, cancellable Worker, coupled box constraints, complete Three.js disposal and hidden-tab pause | Rust and Vitest regressions; browser calculation and canvas checks |
+| 2 | SOLID/DRY decomposition | Shared palette and sheet presentation logic, `SheetCard`, `useToast`, `useHomeStorage` | Co-located unit tests and reduced duplicated policy |
+| 3 | Product design and accessibility | Associated labels, bounded NumberField, keyboard reorder, command list navigation, semantic gallery controls, accessible SVG/3D names, stronger focus/disabled/error states | Desktop/mobile browser smoke and keyboard checks |
+
+The iterations deliberately combine a vertical behavior with its tests. They
+do not claim the architecture is finished: the remaining page orchestration is
+listed honestly below.
+
+## 8. Next refactoring slices
+
+| Order | Small slice | Status | Catalog |
+|---:|---|---|---|
+| 0 | Shared download helper and unused export dependencies | Done previously | `CL-200`, `CL-433` |
+| 1 | Palette, sheet display model, and `SheetCard` | Done | `CL-101` to `CL-103` |
+| 2a | Shared toast | Done | `CL-104` |
+| 2b | Keyboard shortcut registration | Pending | `CL-109` |
+| 3a | Debounced Home storage | Done | `CL-105`, `CL-126`, `CL-127` |
+| 3b | Undo/redo orchestration | Next | `CL-106`, `CL-134`, `CL-136` |
+| 3c | Named snapshot orchestration | Pending | `CL-107`, `CL-133`, `CL-139` |
+| 4 | Piece-list actions and stable piece identity | Pending | `CL-108`, `CL-117`, `CL-151` |
+| 5 | Locale-independent box piece catalog | Pending | `CL-214`, `CL-215` |
+| 6a | Complete Three.js disposal | Done | `CL-226` to `CL-230` |
+| 6b | Shared scene base | Deferred until measured | `CL-243` |
+
+Each row can be one pull request. Split 3b and 3c because history timing is
+riskier than named snapshot CRUD. Do not combine piece IDs with a visual
+redesign; identity changes need focused migration and regression tests.
+
+## 9. Change rules
+
+For one small slice:
+
+1. Name the owning invariant and catalog ID.
+2. Add or tighten the lowest-layer test first.
+3. Move policy into one pure module or one effect owner.
+4. Keep the page as wiring and presentation.
+5. Run targeted tests, full frontend tests/type-check/build, Rust workspace
+   tests when applicable, and one browser path for user-facing behavior.
+6. Review the diff for duplicated policy, hidden side effects, stale docs, and
+   resources that outlive their owner.
+
+Avoid “utility” modules that collect unrelated helpers. Add an abstraction only
+when it centralizes a real invariant, removes meaningful duplication, or gives
+an effect a clear lifecycle.
+
+## 10. Non-goals
+
+- No backend, account system, cloud sync, or analytics in the core design.
+- No global state framework while explicit refs and narrow composables remain
+  understandable.
+- No domain class hierarchy around plain project data.
+- No generic plugin architecture before two real integrations demand it.
+- No premature shared Three.js engine; disposal correctness comes first.
+- No test that merely snapshots thousands of opaque lines when a small invariant
+  can be asserted directly.
+- No duplicate 500-item lists in README, architecture, and plan documents.
+
+The desired end state is modest: pure policy is easy to test, effects have one
+owner and cleanup path, pages read as composition, and a contributor can learn
+one behavior without loading the whole application into their head.

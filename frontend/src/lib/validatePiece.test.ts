@@ -27,6 +27,10 @@ describe('validateNewPiece', () => {
     expect(validateNewPiece({ width: 400, height: 300, quantity: 0 }, sheet)).toBe('qty_min')
   })
 
+  it('rejects excessive quantity', () => {
+    expect(validateNewPiece({ width: 400, height: 300, quantity: 1001 }, sheet)).toBe('qty_limit')
+  })
+
   it('rejects NaN / non-finite dimensions and quantity', () => {
     expect(validateNewPiece({ width: NaN, height: 300, quantity: 1 }, sheet)).toBe('invalid_dims')
     expect(validateNewPiece({ width: 400, height: Infinity, quantity: 1 }, sheet)).toBe('invalid_dims')

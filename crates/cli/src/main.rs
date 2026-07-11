@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use cutter_core::models::{CutPiece, UnplacedPiece};
 use cutter_core::optimizer::CuttingStrategy;
-use cutter_core::optimize;
+use cutter_core::try_optimize;
 use cutter_ui::render_result_svg;
 
 /// JSON input format for the CLI.
@@ -40,9 +40,15 @@ struct Input {
     svg_max_height: f64,
 }
 
-fn default_strategy() -> CuttingStrategy { CuttingStrategy::Auto }
-fn default_svg_max_w() -> f64 { 800.0 }
-fn default_svg_max_h() -> f64 { 600.0 }
+fn default_strategy() -> CuttingStrategy {
+    CuttingStrategy::Auto
+}
+fn default_svg_max_w() -> f64 {
+    800.0
+}
+fn default_svg_max_h() -> f64 {
+    600.0
+}
 
 /// JSON output format.
 #[derive(Serialize)]
@@ -98,13 +104,19 @@ fn main() {
         }
     };
 
-    let result = optimize(
+    let result = match try_optimize(
         input.sheet_width,
         input.sheet_height,
         &input.pieces,
         input.kerf,
         input.strategy,
-    );
+    ) {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!("error: {error}");
+            std::process::exit(1);
+        }
+    };
 
     if input.svg {
         let svg = render_result_svg(&result, input.svg_max_width, input.svg_max_height);
@@ -121,21 +133,29 @@ fn main() {
         strategy: result.strategy,
         auto_picked_strategy: result.auto_picked_strategy,
         unplaced_pieces: result.unplaced_pieces,
-        sheets: result.sheets.iter().map(|s| SheetOutput {
-            index: s.index,
-            width: s.width,
-            height: s.height,
-            efficiency: s.efficiency(),
-            used_area: s.used_area(),
-            placed_pieces: s.placed_pieces.iter().map(|p| PlacedPieceOutput {
-                label: p.label.clone(),
-                x: p.x,
-                y: p.y,
-                width: p.width,
-                height: p.height,
-                is_rotated: p.is_rotated,
-            }).collect(),
-        }).collect(),
+        sheets: result
+            .sheets
+            .iter()
+            .map(|s| SheetOutput {
+                index: s.index,
+                width: s.width,
+                height: s.height,
+                efficiency: s.efficiency(),
+                used_area: s.used_area(),
+                placed_pieces: s
+                    .placed_pieces
+                    .iter()
+                    .map(|p| PlacedPieceOutput {
+                        label: p.label.clone(),
+                        x: p.x,
+                        y: p.y,
+                        width: p.width,
+                        height: p.height,
+                        is_rotated: p.is_rotated,
+                    })
+                    .collect(),
+            })
+            .collect(),
     };
 
     println!("{}", serde_json::to_string_pretty(&output).unwrap());

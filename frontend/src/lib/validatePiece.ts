@@ -1,3 +1,5 @@
+import { MAX_PIECE_QUANTITY } from './optimizerLimits'
+
 /**
  * Validation for the "add piece" form on the cutting optimizer page. Returns an
  * i18n key for the first failing rule, or null when the piece is acceptable.
@@ -16,7 +18,7 @@ export interface SheetSize {
   kerf?: number
 }
 
-export type PieceValidationError = 'invalid_dims' | 'piece_larger' | 'qty_min'
+export type PieceValidationError = 'invalid_dims' | 'piece_larger' | 'qty_min' | 'qty_limit'
 
 export function validateNewPiece(form: NewPieceForm, sheet: SheetSize): PieceValidationError | null {
   // Number.isFinite rejects NaN/Infinity, which a bare `<= 0` lets through
@@ -30,5 +32,6 @@ export function validateNewPiece(form: NewPieceForm, sheet: SheetSize): PieceVal
   const fits = (a: number, b: number) => a + kerf <= sheet.sheetWidth && b + kerf <= sheet.sheetHeight
   if (!fits(form.width, form.height) && !fits(form.height, form.width)) return 'piece_larger'
   if (!Number.isFinite(form.quantity) || form.quantity <= 0) return 'qty_min'
+  if (form.quantity > MAX_PIECE_QUANTITY) return 'qty_limit'
   return null
 }

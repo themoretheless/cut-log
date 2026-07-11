@@ -12,7 +12,7 @@ const { t } = useL10n()
 
 const model = useBoxModel(t)
 const {
-  W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, SheetW, SheetH, CutGap, galIdx,
+  W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, SheetW, SheetH, CutGap, galIdx, paramLimits,
   Wi, Hi, SideOW, TopD, BotD,
   shelfSlotYs, shelfDepthAt,
   cuttingSheets, cutStats, cutScale, tooBigPieces,
@@ -86,18 +86,18 @@ function galDlSvg() {
       <aside class="panel panel-input">
         <section class="card">
           <h2>{{ t('sheet_params') }}</h2>
-          <div class="form-row"><label>{{ t('box.outer_width') }}</label><NumberField v-model="W" :min="50" :step="10" /></div>
-          <div class="form-row"><label>{{ t('box.height') }}</label><NumberField v-model="H" :min="50" :step="10" /></div>
-          <div class="form-row"><label>{{ t('box.depth') }}</label><NumberField v-model="D" :min="50" :step="10" /></div>
-          <div class="form-row"><label>{{ t('box.bevel') }}</label><NumberField v-model="Bevel" :step="5" /></div>
+          <div class="form-row"><label for="box-width">{{ t('box.outer_width') }}</label><NumberField id="box-width" :aria-label="t('box.outer_width')" v-model="W" :min="50" :step="10" /></div>
+          <div class="form-row"><label for="box-height">{{ t('box.height') }}</label><NumberField id="box-height" :aria-label="t('box.height')" v-model="H" :min="50" :step="10" /></div>
+          <div class="form-row"><label for="box-depth">{{ t('box.depth') }}</label><NumberField id="box-depth" :aria-label="t('box.depth')" v-model="D" :min="50" :step="10" /></div>
+          <div class="form-row"><label for="box-bevel">{{ t('box.bevel') }}</label><NumberField id="box-bevel" :aria-label="t('box.bevel')" v-model="Bevel" :min="-paramLimits.maxAbsBevel" :max="paramLimits.maxAbsBevel" :step="5" /></div>
         </section>
         <section class="card">
           <h2>{{ t('box.material') }}</h2>
-          <div class="form-row"><label>{{ t('box.thickness') }}</label><NumberField v-model="T" :min="1" :step="0.5" /></div>
-          <div class="form-row"><label>{{ t('box.kerf') }}</label><NumberField v-model="Kerf" :min="0" :step="0.05" /></div>
-          <div class="form-row"><label>{{ t('box.tab_size') }}</label><NumberField v-model="TabH" :min="10" :step="5" /></div>
-          <div class="form-row"><label>{{ t('box.tabs_per_edge') }}</label><NumberField v-model="NTab" :min="1" :step="1" /></div>
-          <div class="form-row"><label>{{ t('box.shelves') }}</label><NumberField v-model="NShelves" :min="0" :step="1" /></div>
+          <div class="form-row"><label for="box-thickness">{{ t('box.thickness') }}</label><NumberField id="box-thickness" :aria-label="t('box.thickness')" v-model="T" :min="1" :max="paramLimits.maxThickness" :step="0.5" /></div>
+          <div class="form-row"><label for="box-kerf">{{ t('box.kerf') }}</label><NumberField id="box-kerf" :aria-label="t('box.kerf')" v-model="Kerf" :min="0" :max="paramLimits.maxKerf" :step="0.05" /></div>
+          <div class="form-row"><label for="box-tab-size">{{ t('box.tab_size') }}</label><NumberField id="box-tab-size" :aria-label="t('box.tab_size')" v-model="TabH" :min="1" :max="paramLimits.maxTabSize" :step="5" /></div>
+          <div class="form-row"><label for="box-tab-count">{{ t('box.tabs_per_edge') }}</label><NumberField id="box-tab-count" :aria-label="t('box.tabs_per_edge')" v-model="NTab" :min="1" :max="paramLimits.maxTabs" :step="1" /></div>
+          <div class="form-row"><label for="box-shelves">{{ t('box.shelves') }}</label><NumberField id="box-shelves" :aria-label="t('box.shelves')" v-model="NShelves" :min="0" :max="paramLimits.maxShelves" :step="1" /></div>
         </section>
         <section class="card shelf-summary">
           <h2>{{ t('box.parts') }}</h2>
@@ -116,9 +116,9 @@ function galDlSvg() {
         </section>
         <section class="card">
           <h2>{{ t('box.sheet_title') }}</h2>
-          <div class="form-row"><label>{{ t('box.sheet_width') }}</label><NumberField v-model="SheetW" :min="300" :step="10" /></div>
-          <div class="form-row"><label>{{ t('box.sheet_height') }}</label><NumberField v-model="SheetH" :min="300" :step="10" /></div>
-          <div class="form-row"><label>{{ t('box.gap') }}</label><NumberField v-model="CutGap" :min="1" :step="1" /></div>
+          <div class="form-row"><label for="box-sheet-width">{{ t('box.sheet_width') }}</label><NumberField id="box-sheet-width" :aria-label="t('box.sheet_width')" v-model="SheetW" :min="300" :step="10" /></div>
+          <div class="form-row"><label for="box-sheet-height">{{ t('box.sheet_height') }}</label><NumberField id="box-sheet-height" :aria-label="t('box.sheet_height')" v-model="SheetH" :min="300" :step="10" /></div>
+          <div class="form-row"><label for="box-sheet-gap">{{ t('box.gap') }}</label><NumberField id="box-sheet-gap" :aria-label="t('box.gap')" v-model="CutGap" :min="1" :step="1" /></div>
         </section>
         <section class="card">
           <h2>{{ t('box.assembly') }}</h2>
@@ -134,7 +134,7 @@ function galDlSvg() {
         <section class="card gallery">
           <div class="piece3d-wrap">
             <button class="piece3d-nav piece3d-prev" @click="galPrev">&lsaquo;</button>
-            <div id="piece3d-container" style="width:100%;height:350px;border-radius:8px;overflow:hidden;"></div>
+            <div id="piece3d-container" role="img" :aria-label="t('box.gallery_3d_label')" style="width:100%;height:350px;border-radius:8px;overflow:hidden;"></div>
             <button class="piece3d-nav piece3d-next" @click="galNext">&rsaquo;</button>
             <button class="piece3d-nav piece3d-reset" @click="gallery.resetView()" title="Reset view">&#x21ba;</button>
           </div>
@@ -143,9 +143,12 @@ function galDlSvg() {
             <button class="btn-dl" @click="galDlSvg">&#x2193; SVG</button>
           </div>
           <div class="gallery-thumbs">
-            <div
+            <button
               v-for="(p, i) in galPieces" :key="p.id"
+              type="button"
               :class="['gallery-thumb', i === galIdx && 'active']"
+              :aria-pressed="i === galIdx"
+              :aria-label="`${p.title}, ${p.count} ${t('box.pcs')}`"
               @click="galIdx = i"
             >
               <svg
@@ -159,7 +162,7 @@ function galDlSvg() {
               </svg>
               <span class="gallery-thumb-label">{{ p.title }}</span>
               <span class="gallery-thumb-info">{{ p.count }} {{ t('box.pcs') }}</span>
-            </div>
+            </button>
           </div>
         </section>
 
@@ -167,10 +170,10 @@ function galDlSvg() {
         <section class="card">
           <h2>{{ t('box.assembly_3d') }}</h2>
           <div class="iso-controls">
-            <label>{{ t('box.explode') }}</label>
-            <input type="range" min="0" max="0.5" step="0.01" v-model.number="isoExplode" style="flex:1" />
+            <label for="box-explode">{{ t('box.explode') }}</label>
+            <input id="box-explode" type="range" min="0" max="0.5" step="0.01" v-model.number="isoExplode" style="flex:1" />
           </div>
-          <div id="box3d-container" style="width:100%;height:450px;border-radius:8px;overflow:hidden;"></div>
+          <div id="box3d-container" role="img" :aria-label="t('box.assembly_3d_label')" style="width:100%;height:450px;border-radius:8px;overflow:hidden;"></div>
         </section>
 
         <!-- Cutting layout -->
@@ -200,7 +203,10 @@ function galDlSvg() {
                 :height="(SheetH * cutScale).toFixed(0)"
                 :viewBox="`0 0 ${SheetW.toFixed(1)} ${SheetH.toFixed(1)}`"
                 style="display:block;"
+                role="img"
+                :aria-label="`${t('box.cut_sheet_label')} ${sheetIdx + 1}`"
               >
+                <title>{{ t('box.cut_sheet_label') }} {{ sheetIdx + 1 }}</title>
                 <rect x="0" y="0" :width="SheetW.toFixed(1)" :height="SheetH.toFixed(1)" fill="var(--laser-sheet-bg)" stroke="var(--laser-sheet-border)" :stroke-width="(1 / cutScale).toFixed(2)" />
                 <template v-for="(p, pi) in sheetPieces" :key="pi">
                   <g :transform="getCutSheetTransform(p)">

@@ -4,6 +4,7 @@
 import type { CutPiece, CuttingResult, PlacedPiece, Sheet } from './types'
 import { CuttingStrategy } from './types'
 import { ensureWasm } from './rustService'
+import { assertOptimizerCapacity, normalizeQuantity } from '@/lib/optimizerLimits'
 
 // Shape of the JSON the Rust/WASM optimizer returns (snake_case, mirrors the
 // serde structs). Validated at runtime before use, since it crosses a language
@@ -29,6 +30,7 @@ export async function optimize(
   pieces: CutPiece[], kerf: number,
   strategy: CuttingStrategy = CuttingStrategy.Auto,
 ): Promise<CuttingResult> {
+  assertOptimizerCapacity(pieces)
   const wasm = await ensureWasm()
 
   const input = JSON.stringify({
@@ -41,7 +43,7 @@ export async function optimize(
       label: p.label,
       width: p.width,
       height: p.height,
-      quantity: p.quantity,
+      quantity: normalizeQuantity(p.quantity),
       allow_rotation: p.allowRotation,
       color: p.color,
     })),

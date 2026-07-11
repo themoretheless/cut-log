@@ -4,6 +4,7 @@
  * can't crash the page or load nonsense (NaN, negative sizes, bad pieces).
  */
 import type { CutPiece } from '@/services/types'
+import { MAX_TOTAL_QUANTITY, normalizeQuantity } from './optimizerLimits'
 
 export const HOME_STATE_KEY = 'home_state'
 const VERSION = 1
@@ -41,10 +42,11 @@ const isNonNegNum = (v: unknown): v is number => typeof v === 'number' && Number
 const isHexColor = (v: unknown): v is string =>
   typeof v === 'string' && /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(v)
 
-function validPiece(p: any): CutPiece | null {
+function validPiece(p: any, remainingQuantity = MAX_TOTAL_QUANTITY): CutPiece | null {
   if (!p || typeof p !== 'object') return null
   if (!isPosNum(p.width) || !isPosNum(p.height)) return null
-  const quantity = Number.isFinite(p.quantity) ? Math.max(1, Math.round(p.quantity)) : 1
+  const quantity = Math.min(normalizeQuantity(p.quantity), remainingQuantity)
+  if (quantity <= 0) return null
   const piece: CutPiece = {
     id: typeof p.id === 'string' && p.id ? p.id : crypto.randomUUID(),
     label: typeof p.label === 'string' ? p.label.slice(0, MAX_LABEL) : '',
@@ -74,9 +76,17 @@ export function parseHomeState(raw: string | null): HomeState | null {
   if (!data || data.version !== VERSION) return null
   if (!isPosNum(data.sheetWidth) || !isPosNum(data.sheetHeight) || !isNonNegNum(data.kerf)) return null
 
-  const pieces = Array.isArray(data.pieces)
-    ? data.pieces.slice(0, MAX_PIECES).map(validPiece).filter((p: CutPiece | null): p is CutPiece => p !== null)
-    : []
+  const pieces: CutPiece[] = []
+  if (Array.isArray(data.pieces)) {
+    let remainingQuantity = MAX_TOTAL_QUANTITY
+    for (const rawPiece of data.pieces.slice(0, MAX_PIECES)) {
+      if (remainingQuantity <= 0) break
+      const piece = validPiece(rawPiece, remainingQuantity)
+      if (!piece) continue
+      pieces.push(piece)
+      remainingQuantity -= piece.quantity
+    }
+  }
 
   // Both costing fields are optional and back-compatible: a state saved before
   // costing existed simply gets the defaults, so no schema-version bump is needed.

@@ -81,6 +81,11 @@ describe('optimize() service glue', () => {
     await expect(optimize(2440, 1220, [piece], 3)).rejects.toThrow()
   })
 
+  it('rejects excessive quantity before loading or calling wasm', async () => {
+    await expect(optimize(2440, 1220, [{ ...piece, quantity: 1001 }], 3)).rejects.toThrow(/quantity/i)
+    expect(captured).toBe('')
+  })
+
   it('maps unplaced pieces and top-level totals', async () => {
     const res = await optimize(2440, 1220, [piece], 3)
     expect(res.unplacedPieces).toEqual([{ label: 'B', width: 9999, height: 9999 }])
