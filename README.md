@@ -51,13 +51,13 @@ components:
    `optimizer.worker.ts` -> `rustService.ts` for one calculation.
 4. Read `crates/core/src/models.rs` and `optimizer.rs`; the WASM and CLI crates
    are thin adapters.
-5. Read `lib/sheetPresentation.ts` and `components/SheetCard.vue`, then open
-   `pages/Home.vue` only to see composition and remaining orchestration.
+5. Read the focused Home composables for history, snapshots, piece-list actions,
+   shortcuts, and exports; then open `pages/Home.vue` only to see composition.
 6. For the box, follow `box/constraints.ts` -> `geometry.ts` ->
    `useBoxModel.ts` -> `box/three/*` -> `pages/BoxBuilder.vue`.
 
 [ARCHITECTURE.md](ARCHITECTURE.md) expands this into layer rules, SOLID/DRY
-ownership, diagrams, the three completed iterations, and the next small
+ownership, diagrams, the four completed iterations, and the next small
 refactoring slices.
 
 ## Architecture at a glance
@@ -72,10 +72,10 @@ pages/components -> composables -> services -> Worker/WASM -> Rust core
 frontend/src/
   lib/             pure validation, state, history, piece ops, exports, display math
   services/        optimizer adaptation, Worker ownership, lazy WASM loading
-  composables/     Vue-owned effects such as storage and toast lifetime
+  composables/     Vue-owned editor state and effects with narrow interfaces
   components/      reusable presentation controls and SheetCard
   box/             pure constraints/geometry, reactive model, owned Three.js scenes
-  pages/           product composition; Home still contains the main refactoring debt
+  pages/           product composition and remaining cross-feature orchestration
 crates/
   core/            pure Rust optimizer and models
   wasm/            wasm-bindgen error/data adapter
@@ -90,7 +90,7 @@ downloads are not reimplemented in pages.
 
 ## 500-item review
 
-The v0.1.50 review produced exactly **500 unique, ID-addressable items** across
+The v0.1.51 review produced exactly **500 unique, ID-addressable items** across
 20 groups of 25:
 
 | IDs | Area | IDs | Area |
@@ -106,8 +106,8 @@ The v0.1.50 review produced exactly **500 unique, ID-addressable items** across
 | CL-201..225 | Box geometry | CL-451..475 | Product workflows |
 | CL-226..250 | Three.js lifecycle | CL-476..500 | Documentation |
 
-The canonical checklist, priorities, effort sizes, and 88 items delivered in
-this change set are in [recommendation.md](recommendation.md). The catalog is
+The canonical checklist, priorities, effort sizes, and 93 items delivered so
+far are in [recommendation.md](recommendation.md). The catalog is
 not copied here or into architecture; that duplication would immediately make
 status unreliable. `plan.md` remains historical brainstorming.
 

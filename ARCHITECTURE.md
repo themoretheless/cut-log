@@ -1,6 +1,6 @@
 # CutLog architecture
 
-Status: v0.1.50 review, after three implementation iterations. This document is
+Status: v0.1.51 review, after four implementation iterations. This document is
 the map of responsibilities and dependency rules. The canonical list of exactly
 500 findings and ideas is [recommendation.md](recommendation.md); the quick
 setup and reading path are in [README.md](README.md). `plan.md` is historical
@@ -73,16 +73,22 @@ These principles are review rules, not reasons to add abstraction by default.
 - `optimizerLimits.ts` owns quantity-budget policy.
 - `optimizerWorker.ts` owns one calculation lifecycle.
 - `useHomeStorage.ts` owns storage timing and errors.
+- `useHomeHistory.ts` owns undo/redo timing and restore guards.
+- `useProjectSnapshots.ts` owns named-snapshot persistence.
+- `usePieceList.ts` owns piece CRUD, filters, transforms, and ordering.
+- `useKeyboardShortcuts.ts` owns shortcut matching and listener lifetime.
+- `useHomeExports.ts` owns optimizer download and print effects.
 - `useToast.ts` owns transient feedback lifecycle.
 - `sheetPresentation.ts` owns SVG display calculations.
 - `SheetCard.vue` owns rendering and selection events for one sheet.
 - `constraints.ts` owns legal box parameter relationships.
 - Three.js scene modules own and dispose every GPU resource they create.
 
-`Home.vue` is still the main exception at about 1,900 lines. The next cuts are
-history, snapshots, piece-list actions, keyboard commands, and export
-orchestration (`CL-106` to `CL-114`). Each extraction must remove a whole reason
-to change, not merely move lines into a wrapper.
+`Home.vue` is still the largest composition surface at about 1,700 lines, with
+roughly 1,000 lines of script. History, snapshots, piece-list actions, keyboard
+commands, and export effects now have dedicated owners. The next cuts are the
+command palette, costing, result selection, import transactions, and a unified
+project-state boundary (`CL-111` to `CL-115`).
 
 ### Open/Closed
 
@@ -100,8 +106,8 @@ the practical enforcement mechanism.
 
 ### Interface Segregation
 
-Composables expose narrow capabilities: storage returns `load`, `scheduleSave`,
-`saveNow`, and `dispose`; toast returns message, tone, and explicit actions.
+Composables expose narrow capabilities: history returns undo/redo actions,
+snapshots return persistence actions, and exports return explicit commands.
 Components receive only the data and callbacks they render. Avoid a giant
 “editor context” whose consumers depend on unrelated state.
 
@@ -175,6 +181,11 @@ frontend/src/
     rustService.ts            lazy WASM adapter
   composables/
     useHomeStorage.ts         debounced persistence and failure callback
+    useHomeHistory.ts         coalesced undo/redo and guarded restore
+    useProjectSnapshots.ts    named-snapshot storage and CRUD
+    usePieceList.ts           piece state, filtering, bulk edits, ordering
+    useKeyboardShortcuts.ts   exact shortcut matching and listener lifetime
+    useHomeExports.ts         CSV/SVG/DXF downloads and print orchestration
     useToast.ts               transient status/error lifecycle
   components/
     NumberField.vue           bounded accessible numeric control
@@ -185,7 +196,7 @@ frontend/src/
     useBoxModel.ts            reactive composition and labels
     three/                    assembly/gallery lifecycle and disposal
   pages/
-    Home.vue                  remaining optimizer orchestration
+    Home.vue                  optimizer and cross-feature composition
     BoxBuilder.vue            box composition and presentation
 
 crates/
@@ -248,13 +259,14 @@ those values mean. Renderers may not clamp parameters independently. Scene
 owners dispose geometries, materials, textures, controls, render lists, and
 animation loops they create.
 
-## 7. Three completed iterations
+## 7. Four completed iterations
 
 | Iteration | Goal | Delivered | Evidence |
 |---|---|---|---|
 | 1 | Correctness and resource safety | Frontend/Rust quantity budgets, fallible core/CLI/WASM errors, cancellable Worker, coupled box constraints, complete Three.js disposal and hidden-tab pause | Rust and Vitest regressions; browser calculation and canvas checks |
 | 2 | SOLID/DRY decomposition | Shared palette and sheet presentation logic, `SheetCard`, `useToast`, `useHomeStorage` | Co-located unit tests and reduced duplicated policy |
 | 3 | Product design and accessibility | Associated labels, bounded NumberField, keyboard reorder, command list navigation, semantic gallery controls, accessible SVG/3D names, stronger focus/disabled/error states | Desktop/mobile browser smoke and keyboard checks |
+| 4 | Home responsibility extraction | Dedicated history, snapshot, piece-list, shortcut, and export composables with injected effect boundaries | 16 focused composable tests plus page type-check |
 
 The iterations deliberately combine a vertical behavior with its tests. They
 do not claim the architecture is finished: the remaining page orchestration is
@@ -267,17 +279,18 @@ listed honestly below.
 | 0 | Shared download helper and unused export dependencies | Done previously | `CL-200`, `CL-433` |
 | 1 | Palette, sheet display model, and `SheetCard` | Done | `CL-101` to `CL-103` |
 | 2a | Shared toast | Done | `CL-104` |
-| 2b | Keyboard shortcut registration | Pending | `CL-109` |
+| 2b | Keyboard shortcut registration | Done | `CL-109` |
 | 3a | Debounced Home storage | Done | `CL-105`, `CL-126`, `CL-127` |
-| 3b | Undo/redo orchestration | Next | `CL-106`, `CL-134`, `CL-136` |
-| 3c | Named snapshot orchestration | Pending | `CL-107`, `CL-133`, `CL-139` |
-| 4 | Piece-list actions and stable piece identity | Pending | `CL-108`, `CL-117`, `CL-151` |
+| 3b | Undo/redo orchestration | Done; further history semantics pending | `CL-106`, `CL-134`, `CL-136` |
+| 3c | Named snapshot orchestration | Done; retention/diffs pending | `CL-107`, `CL-133`, `CL-139` |
+| 4a | Piece-list actions | Done | `CL-108` |
+| 4b | Stable piece identity | Pending | `CL-117`, `CL-151` |
+| 4c | Home export orchestration | Done | `CL-110` |
 | 5 | Locale-independent box piece catalog | Pending | `CL-214`, `CL-215` |
 | 6a | Complete Three.js disposal | Done | `CL-226` to `CL-230` |
 | 6b | Shared scene base | Deferred until measured | `CL-243` |
 
-Each row can be one pull request. Split 3b and 3c because history timing is
-riskier than named snapshot CRUD. Do not combine piece IDs with a visual
+Keep future rows independently testable. Do not combine piece IDs with a visual
 redesign; identity changes need focused migration and regression tests.
 
 ## 9. Change rules
