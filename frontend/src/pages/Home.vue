@@ -1,45 +1,31 @@
 <script setup lang="ts">
-import { ref, reactive, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import NumberField from '@/components/NumberField.vue'
 import SheetCard from '@/components/SheetCard.vue'
 import { startOptimization, type OptimizationTask } from '@/services/optimizerWorker'
-import { type CutPiece, type CuttingResult, CuttingStrategy, newPiece } from '@/services/types'
-import { PIECE_COLORS } from '@/lib/palette'
-import { type HomeState, serializeHomeState, parseHomeState } from '@/lib/homeState'
+import { type CutPiece, type CuttingResult, CuttingStrategy } from '@/services/types'
+import type { HomeState } from '@/lib/homeState'
 import { validateNewPiece } from '@/lib/validatePiece'
-import { buildLayoutSvg, buildLayoutDxf, buildPrintHtml } from '@/lib/exportLayout'
 import { buildShareUrl, readShareFromHash } from '@/lib/shareLink'
 import { parsePieceList } from '@/lib/parsePieceList'
-import { createHistory } from '@/lib/history'
-import {
-  type ProjectSnapshot,
-  PROJECT_SNAPSHOTS_KEY,
-  createProjectSnapshot,
-  parseProjectSnapshots,
-  removeProjectSnapshot,
-  serializeProjectSnapshots,
-  upsertProjectSnapshot,
-} from '@/lib/projectSnapshots'
+import type { ProjectSnapshot } from '@/lib/projectSnapshots'
 import {
   type PieceSortMode,
   addDimensionDelta,
-  findOversizedPieces,
   pieceArea,
-  pieceMatchesQuery,
   pieceTotalArea,
   roundDimensionsUp,
-  sortPiecesForEditor,
-  summarizePieces,
   swapDimensions,
 } from '@/lib/pieceEditor'
 import { computeCostSummary } from '@/lib/costSummary'
-import { buildPiecesCsv } from '@/lib/piecesCsv'
-import { duplicatePiece as duplicatePieceList, reorderByDrag } from '@/lib/pieceOps'
-import { isEditableTarget } from '@/lib/keyboard'
-import { downloadFile } from '@/lib/downloadFile'
 import { MAX_PIECE_QUANTITY, assertOptimizerCapacity, normalizeQuantity } from '@/lib/optimizerLimits'
 import { useToast } from '@/composables/useToast'
 import { useHomeStorage } from '@/composables/useHomeStorage'
+import { useHomeHistory } from '@/composables/useHomeHistory'
+import { useProjectSnapshots } from '@/composables/useProjectSnapshots'
+import { usePieceList, type QuickFilterMode } from '@/composables/usePieceList'
+import { useHomeExports } from '@/composables/useHomeExports'
+import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 import { useL10n } from '@/stores/l10n'
 
 const { t } = useL10n()
@@ -88,37 +74,55 @@ const newQty = ref(1)
 const newAllowRotation = ref(true)
 const addError = ref('')
 
-// ── Piece list ───────────────────────────────────────────────────────────────
-const pieces = reactive<CutPiece[]>([])
 const result = ref<CuttingResult | null>(null)
 const calculated = ref(false)
-let colorIdx = 0
 let calcGen = 0
 let activeOptimization: OptimizationTask | null = null
 
 // ── Editor controls ──────────────────────────────────────────────────────────
-const pieceQuery = ref('')
-const pieceSortMode = ref<PieceSortMode>('manual')
 const commandPaletteOpen = ref(false)
 const commandQuery = ref('')
 const activePaletteIndex = ref(0)
 const commandInputRef = ref<HTMLInputElement | null>(null)
-const projectSnapshots = ref<ProjectSnapshot[]>([])
-const snapshotName = ref('')
 const transformStep = ref(2)
 const roundStep = ref(5)
-const quickFilterMode = ref<QuickFilterMode>('all')
 const operationLog = ref<OperationEntry[]>([])
 const operationQuery = ref('')
 const lastBulkDiff = ref<BulkDiff | null>(null)
 const snapshotCompare = ref<SnapshotComparison | null>(null)
 const minMachineCut = ref(30)
 
+const pieceList = usePieceList({ sheetWidth, sheetHeight, minMachineCut })
+const {
+  pieces,
+  selectedPieceId,
+  selectedPiece,
+  pieceQuery,
+  pieceSortMode,
+  quickFilterMode,
+  pieceSummary,
+  oversizedPieces,
+  lockedPiecesCount,
+  smallMachinePieces,
+  unnamedPiecesCount,
+  rotationLockedCount,
+  visiblePieces,
+  visibleEditablePieces,
+  visibleLockedCount,
+  hasPieceFilter,
+  pieceIndexes,
+  pieceIndex,
+} = pieceList
+
+const { exportPiecesCsv, exportSvg, exportDxf, printLayout } = useHomeExports({
+  pieces: () => pieces,
+  result,
+  translate: t,
+})
+
 const ALLOWANCE_PRESETS = [1, 2, 5]
 const OPERATION_LOG_KEY = 'operation_log'
 const OPERATION_LOG_LIMIT = 14
-
-type QuickFilterMode = 'all' | 'unnamed' | 'rotation_off' | 'oversized' | 'locked' | 'machine'
 
 interface PaletteCommand {
   id: string
@@ -184,8 +188,7 @@ function applyState(saved: HomeState) {
   kerf.value = saved.kerf
   pricePerSheet.value = saved.pricePerSheet
   currency.value = saved.currency
-  pieces.splice(0, pieces.length, ...saved.pieces)
-  colorIdx = pieces.length
+  pieceList.replace(saved.pieces)
 }
 
 const homeStorage = useHomeStorage({
@@ -197,15 +200,11 @@ const saveState = homeStorage.scheduleSave
 const saveStateNow = homeStorage.saveNow
 const loadState = homeStorage.load
 
-function loadProjectSnapshots() {
-  projectSnapshots.value = parseProjectSnapshots(localStorage.getItem(PROJECT_SNAPSHOTS_KEY))
-}
+const homeHistory = useHomeHistory({ capture: currentState, apply: applyState, saveNow: saveStateNow })
+const { canUndo, canRedo, record: recordHistory, undo: doUndo, redo: doRedo } = homeHistory
 
-function saveProjectSnapshotsNow() {
-  try {
-    localStorage.setItem(PROJECT_SNAPSHOTS_KEY, serializeProjectSnapshots(projectSnapshots.value))
-  } catch { /* ignore */ }
-}
+const projectSnapshotStore = useProjectSnapshots({ capture: currentState })
+const { snapshots: projectSnapshots, name: snapshotName } = projectSnapshotStore
 
 function validOperationEntry(value: any): OperationEntry | null {
   if (!value || typeof value !== 'object') return null
@@ -257,36 +256,6 @@ function clearOperationLog() {
   saveOperationLogNow()
 }
 
-// ── Undo / redo (snapshot-based, matches how editors model history) ────────────
-const undoHistory = createHistory<string>(serializeHomeState(currentState()))
-const historyTick = ref(0)
-let restoring = false
-let recordTimer: ReturnType<typeof setTimeout> | undefined
-
-function refreshHistoryState() {
-  historyTick.value++
-}
-
-const canUndo = computed(() => {
-  historyTick.value
-  return undoHistory.canUndo()
-})
-
-const canRedo = computed(() => {
-  historyTick.value
-  return undoHistory.canRedo()
-})
-
-// Coalesce bursts of edits (e.g. typing in a number field) into one entry.
-function recordHistory() {
-  if (restoring) return
-  clearTimeout(recordTimer)
-  recordTimer = setTimeout(() => {
-    undoHistory.snapshot(serializeHomeState(currentState()))
-    refreshHistoryState()
-  }, 350)
-}
-
 function persistProjectEdit() {
   saveState()
   recordHistory()
@@ -303,34 +272,6 @@ function invalidateOptimization() {
 function commitProjectEdit() {
   invalidateOptimization()
   persistProjectEdit()
-}
-
-function restoreSnapshot(snap: string) {
-  const st = parseHomeState(snap)
-  if (!st) return
-  restoring = true
-  clearTimeout(recordTimer)
-  applyState(st)
-  saveStateNow()
-  // Release the guard after the watchers triggered by applyState have flushed,
-  // so the restore itself isn't recorded as a new history entry.
-  nextTick(() => { restoring = false })
-}
-
-function doUndo() {
-  const snap = undoHistory.undo()
-  if (snap !== undefined) {
-    restoreSnapshot(snap)
-    refreshHistoryState()
-  }
-}
-
-function doRedo() {
-  const snap = undoHistory.redo()
-  if (snap !== undefined) {
-    restoreSnapshot(snap)
-    refreshHistoryState()
-  }
 }
 
 // A shared link wins over saved state: open the linked project, then strip the
@@ -355,11 +296,16 @@ function addPiece() {
   if (err) { addError.value = t(err); return }
   addError.value = ''
 
-  const color = PIECE_COLORS[colorIdx++ % PIECE_COLORS.length]
   const addedLabel = newLabel.value
   const addedWidth = newWidth.value
   const addedHeight = newHeight.value
-  pieces.push(newPiece(addedLabel, addedWidth, addedHeight, newQty.value, newAllowRotation.value, color))
+  pieceList.add({
+    label: addedLabel,
+    width: addedWidth,
+    height: addedHeight,
+    quantity: newQty.value,
+    allowRotation: newAllowRotation.value,
+  })
 
   newLabel.value = ''
   newWidth.value = 400
@@ -387,10 +333,13 @@ function importPieces() {
   }
   addError.value = ''
   saveAutoProjectSnapshot(t('snapshot.auto_before_import'))
-  for (const r of valid) {
-    const color = PIECE_COLORS[colorIdx++ % PIECE_COLORS.length]
-    pieces.push(newPiece(r.label, r.width, r.height, r.quantity, r.allowRotation ?? true, color))
-  }
+  pieceList.addMany(valid.map(row => ({
+    label: row.label,
+    width: row.width,
+    height: row.height,
+    quantity: row.quantity,
+    allowRotation: row.allowRotation ?? true,
+  })))
   const totalSkipped = skipped + (rows.length - valid.length)
   importText.value = ''
   showImport.value = false
@@ -406,9 +355,7 @@ function importPieces() {
 
 function removePiece(p: CutPiece) {
   saveAutoProjectSnapshot(t('snapshot.auto_before_delete'))
-  const idx = pieces.indexOf(p)
-  if (idx >= 0) pieces.splice(idx, 1)
-  if (selectedPieceId.value === p.id) selectedPieceId.value = null
+  if (!pieceList.remove(p)) return
   commitProjectEdit()
   recordOperation(t('operation.delete_piece'), p.label.trim() || t('unnamed_piece'))
 }
@@ -416,25 +363,16 @@ function removePiece(p: CutPiece) {
 // Duplicate the given piece (or the selected/last one for the Ctrl+D shortcut),
 // inserting the copy right after it with a fresh id and the next palette color.
 function duplicate(id: string | null) {
-  if (!pieces.length) return
-  const color = PIECE_COLORS[colorIdx++ % PIECE_COLORS.length]
-  const next = duplicatePieceList([...pieces], id, crypto.randomUUID(), color)
-  pieces.splice(0, pieces.length, ...next)
+  if (!pieceList.duplicate(id)) return
   commitProjectEdit()
 }
 
 function clearAll() {
   saveAutoProjectSnapshot(t('snapshot.auto_before_clear'))
-  const count = pieces.length
-  pieces.splice(0, pieces.length)
+  const count = pieceList.clear()
   result.value = null
   calculated.value = false
-  selectedPieceId.value = null
-  pieceQuery.value = ''
-  pieceSortMode.value = 'manual'
-  quickFilterMode.value = 'all'
   lastBulkDiff.value = null
-  colorIdx = 0
   commitProjectEdit()
   recordOperation(t('operation.clear'), t('operation.clear_detail').replace('{0}', String(count)))
 }
@@ -488,31 +426,6 @@ async function calculate() {
   }
 }
 
-// ── Export (cut-ready SVG / DXF / print) ───────────────────────────────────────
-
-function exportPiecesCsv() {
-  if (pieces.length) downloadFile('cutlog-parts.csv', buildPiecesCsv([...pieces]), 'text/csv;charset=utf-8')
-}
-
-function exportSvg() {
-  if (result.value) downloadFile('cutlog-layout.svg', buildLayoutSvg(result.value), 'image/svg+xml')
-}
-
-function exportDxf() {
-  if (result.value) downloadFile('cutlog-layout.dxf', buildLayoutDxf(result.value), 'application/dxf')
-}
-
-function printLayout() {
-  if (!result.value) return
-  const html = buildPrintHtml(result.value, {
-    title: t('app.title'),
-    layoutTitle: t('export.layout'),
-    cols: [t('name'), t('export.size'), t('quantity')],
-  })
-  const w = window.open('', '_blank')
-  if (w) { w.document.write(html); w.document.close() }
-}
-
 // ── Share link (encode the project into a copyable URL hash) ───────────────────
 async function copyShareLink() {
   const url = buildShareUrl(location.origin, location.pathname, currentState())
@@ -527,35 +440,10 @@ async function copyShareLink() {
   recordOperation(t('operation.share'), t('operation.share_detail'))
 }
 
-// ── Selection (sync between the piece list and the placed rects) ───────────────
-const selectedPieceId = ref<string | null>(null)
-const selectedPiece = computed(() => pieces.find(p => p.id === selectedPieceId.value) ?? null)
 function toggleSelect(id: string) {
-  selectedPieceId.value = selectedPieceId.value === id ? null : id
+  pieceList.toggleSelect(id)
 }
 
-const pieceSummary = computed(() => summarizePieces(pieces))
-const oversizedPieces = computed(() => findOversizedPieces(pieces, sheetWidth.value, sheetHeight.value))
-const lockedPiecesCount = computed(() => pieces.filter(piece => piece.locked).length)
-const smallMachinePieces = computed(() => pieces.filter(piece => piece.width < minMachineCut.value || piece.height < minMachineCut.value))
-const unnamedPiecesCount = computed(() => pieces.filter(piece => !piece.label.trim()).length)
-const rotationLockedCount = computed(() => pieces.filter(piece => !piece.allowRotation).length)
-
-function pieceMatchesQuickFilter(piece: CutPiece): boolean {
-  if (quickFilterMode.value === 'unnamed') return !piece.label.trim()
-  if (quickFilterMode.value === 'rotation_off') return !piece.allowRotation
-  if (quickFilterMode.value === 'oversized') return oversizedPieces.value.some(item => item.id === piece.id)
-  if (quickFilterMode.value === 'locked') return piece.locked === true
-  if (quickFilterMode.value === 'machine') return piece.width < minMachineCut.value || piece.height < minMachineCut.value
-  return true
-}
-
-const visiblePieces = computed(() => pieces
-  .map((piece, index) => ({ piece, index }))
-  .filter(({ piece }) => pieceMatchesQuery(piece, pieceQuery.value) && pieceMatchesQuickFilter(piece)))
-const visibleEditablePieces = computed(() => visiblePieces.value.filter(({ piece }) => !piece.locked))
-const visibleLockedCount = computed(() => visiblePieces.value.length - visibleEditablePieces.value.length)
-const hasPieceFilter = computed(() => pieceQuery.value.trim().length > 0 || quickFilterMode.value !== 'all')
 const quickFilters = computed<{ id: QuickFilterMode; label: string; count: number }[]>(() => [
   { id: 'all', label: t('filter.all'), count: pieces.length },
   { id: 'unnamed', label: t('filter.unnamed'), count: unnamedPiecesCount.value },
@@ -721,31 +609,17 @@ const filteredOperationLog = computed(() => {
 
 function saveProjectSnapshot() {
   if (!pieces.length) return
-  const snapshot = createProjectSnapshot({
-    id: crypto.randomUUID(),
-    name: snapshotName.value.trim() || `${t('snapshot.default_name')} ${projectSnapshots.value.length + 1}`,
-    createdAt: new Date().toISOString(),
-    summary: snapshotSummaryText(),
-    state: currentState(),
-  })
-  projectSnapshots.value = upsertProjectSnapshot(projectSnapshots.value, snapshot)
-  snapshotName.value = ''
-  saveProjectSnapshotsNow()
+  const snapshot = projectSnapshotStore.save(
+    snapshotSummaryText(),
+    `${t('snapshot.default_name')} ${projectSnapshots.value.length + 1}`,
+  )
   showToast(t('snapshot_saved'))
   recordOperation(t('operation.save_snapshot'), snapshot.name)
 }
 
 function saveAutoProjectSnapshot(name: string) {
   if (!pieces.length) return
-  const snapshot = createProjectSnapshot({
-    id: crypto.randomUUID(),
-    name,
-    createdAt: new Date().toISOString(),
-    summary: snapshotSummaryText(),
-    state: currentState(),
-  })
-  projectSnapshots.value = upsertProjectSnapshot(projectSnapshots.value, snapshot)
-  saveProjectSnapshotsNow()
+  projectSnapshotStore.saveAuto(name, snapshotSummaryText())
 }
 
 function restoreProjectSnapshot(snapshot: ProjectSnapshot) {
@@ -759,16 +633,14 @@ function restoreProjectSnapshot(snapshot: ProjectSnapshot) {
   result.value = null
   calculated.value = false
   lastBulkDiff.value = null
-  undoHistory.reset(serializeHomeState(currentState()))
-  refreshHistoryState()
+  homeHistory.reset()
   saveStateNow()
   showToast(t('snapshot_restored'))
   recordOperation(t('operation.restore_snapshot'), snapshot.name)
 }
 
 function deleteProjectSnapshot(snapshot: ProjectSnapshot) {
-  projectSnapshots.value = removeProjectSnapshot(projectSnapshots.value, snapshot.id)
-  saveProjectSnapshotsNow()
+  projectSnapshotStore.remove(snapshot.id)
   showToast(t('snapshot_deleted'))
   recordOperation(t('operation.delete_snapshot'), snapshot.name)
 }
@@ -779,19 +651,12 @@ function setPieceSortMode(mode: PieceSortMode) {
 }
 
 function clearPieceFilters() {
-  pieceQuery.value = ''
-  quickFilterMode.value = 'all'
+  pieceList.clearFilters()
 }
 
 function duplicatePiece(source = selectedPiece.value) {
   if (!source) return
-  const idx = pieces.indexOf(source)
-  if (idx < 0) return
-  const color = PIECE_COLORS[colorIdx++ % PIECE_COLORS.length]
-  const copy = newPiece(source.label, source.width, source.height, source.quantity, source.allowRotation, color)
-  if (source.locked) copy.locked = true
-  pieces.splice(idx + 1, 0, copy)
-  selectedPieceId.value = copy.id
+  if (!pieceList.duplicate(source.id, true)) return
   commitProjectEdit()
   showToast(t('piece_duplicated'))
   recordOperation(t('operation.duplicate_piece'), source.label.trim() || t('unnamed_piece'))
@@ -802,65 +667,54 @@ function deleteSelectedPiece() {
 }
 
 function clearSelection() {
-  selectedPieceId.value = null
+  pieceList.clearSelection()
 }
 
 function togglePieceLock(piece: CutPiece) {
-  if (piece.locked) delete piece.locked
-  else piece.locked = true
+  pieceList.toggleLock(piece)
   commitProjectEdit()
   showToast(piece.locked ? t('piece_locked') : t('piece_unlocked'))
   recordOperation(piece.locked ? t('operation.lock_piece') : t('operation.unlock_piece'), piece.label.trim() || t('unnamed_piece'))
 }
 
 function updatePieceLabel(piece: CutPiece, label: string) {
-  if (piece.label === label) return
-  piece.label = label
-  commitProjectEdit()
+  if (pieceList.updateLabel(piece, label)) commitProjectEdit()
 }
 
 function updatePieceWidth(piece: CutPiece, width: number) {
-  if (piece.width === width) return
-  piece.width = width
-  commitProjectEdit()
+  if (pieceList.updateWidth(piece, width)) commitProjectEdit()
 }
 
 function updatePieceHeight(piece: CutPiece, height: number) {
-  if (piece.height === height) return
-  piece.height = height
-  commitProjectEdit()
+  if (pieceList.updateHeight(piece, height)) commitProjectEdit()
 }
 
 function updatePieceQuantity(piece: CutPiece, quantity: number) {
-  const clean = normalizeQuantity(quantity)
-  if (piece.quantity === clean) return
-  piece.quantity = clean
-  commitProjectEdit()
+  if (pieceList.updateQuantity(piece, quantity)) commitProjectEdit()
 }
 
 function togglePieceRotation(piece: CutPiece) {
-  piece.allowRotation = !piece.allowRotation
+  pieceList.toggleRotation(piece)
   commitProjectEdit()
 }
 
 function setVisibleRotation(allowRotation: boolean) {
   if (!visibleEditablePieces.value.length) return
   saveAutoProjectSnapshot(t('snapshot.auto_before_rotation'))
-  for (const { piece } of visibleEditablePieces.value) piece.allowRotation = allowRotation
-  result.value = null
-  calculated.value = false
+  const change = pieceList.setVisibleRotation(allowRotation)
+  if (!change) return
   commitProjectEdit()
   showToast(allowRotation ? t('rotation_enabled') : t('rotation_disabled'))
   lastBulkDiff.value = {
     title: allowRotation ? t('bulk.rotation_on') : t('bulk.rotation_off'),
-    changed: visibleEditablePieces.value.length,
-    skipped: visibleLockedCount.value,
-    beforeArea: areaM2(pieceSummary.value.totalArea),
-    afterArea: areaM2(pieceSummary.value.totalArea),
+    changed: change.changed,
+    skipped: change.skipped,
+    beforeArea: areaM2(change.beforeArea),
+    afterArea: areaM2(change.afterArea),
     sampleBefore: t('bulk.rotation'),
     sampleAfter: allowRotation ? t('bulk.enabled') : t('bulk.disabled'),
   }
-  recordOperation(allowRotation ? t('operation.rotation_on') : t('operation.rotation_off'), t('operation.visible_count').replace('{0}', String(visibleEditablePieces.value.length)))
+  recordOperation(allowRotation ? t('operation.rotation_on') : t('operation.rotation_off'), t('operation.visible_count').replace('{0}', String(change.changed)))
 }
 
 function mutateVisibleDimensions(
@@ -868,33 +722,22 @@ function mutateVisibleDimensions(
   toastKey: string,
   title = t('bulk.transform'),
 ) {
-  const editable = visibleEditablePieces.value
-  if (!editable.length) return
-  const beforeArea = editable.reduce((sum, { piece }) => sum + pieceTotalArea(piece), 0)
-  const sample = editable[0]?.piece
-  const sampleBefore = sample ? `${sample.width}×${sample.height}` : ''
+  if (!visibleEditablePieces.value.length) return
   saveAutoProjectSnapshot(t('snapshot.auto_before_transform'))
-  for (const { piece } of editable) {
-    const next = transform(piece)
-    piece.width = next.width
-    piece.height = next.height
-  }
-  const afterArea = editable.reduce((sum, { piece }) => sum + pieceTotalArea(piece), 0)
-  const sampleAfter = sample ? `${sample.width}×${sample.height}` : ''
+  const change = pieceList.mutateVisibleDimensions(transform)
+  if (!change) return
   lastBulkDiff.value = {
     title,
-    changed: editable.length,
-    skipped: visibleLockedCount.value,
-    beforeArea: areaM2(beforeArea),
-    afterArea: areaM2(afterArea),
-    sampleBefore,
-    sampleAfter,
+    changed: change.changed,
+    skipped: change.skipped,
+    beforeArea: areaM2(change.beforeArea),
+    afterArea: areaM2(change.afterArea),
+    sampleBefore: change.sampleBefore,
+    sampleAfter: change.sampleAfter,
   }
-  result.value = null
-  calculated.value = false
   commitProjectEdit()
   showToast(t(toastKey))
-  recordOperation(title, t('operation.visible_count').replace('{0}', String(editable.length)))
+  recordOperation(title, t('operation.visible_count').replace('{0}', String(change.changed)))
 }
 
 function addVisibleAllowance(sign = 1) {
@@ -917,12 +760,7 @@ function roundVisibleDimensions() {
 }
 
 function applyPieceSort() {
-  if (pieceSortMode.value === 'manual') return
-  const unlockedIndexes = pieces.map((piece, index) => piece.locked ? -1 : index).filter(index => index >= 0)
-  const sorted = sortPiecesForEditor(unlockedIndexes.map(index => pieces[index]), pieceSortMode.value)
-  unlockedIndexes.forEach((index, sortedIndex) => {
-    pieces[index] = sorted[sortedIndex]
-  })
+  if (!pieceList.sort()) return
   commitProjectEdit()
   showToast(t('pieces_sorted'))
   recordOperation(t('operation.sort'), t(`sort.${pieceSortMode.value}`))
@@ -938,8 +776,8 @@ const paletteCommands = computed<PaletteCommand[]>(() => [
   { id: 'share', label: t('command.copy_share'), disabled: !pieces.length, run: copyShareLink },
   { id: 'snapshot-save', label: t('command.snapshot_save'), disabled: !pieces.length, run: saveProjectSnapshot },
   { id: 'snapshot-restore', label: t('command.snapshot_restore_latest'), disabled: !projectSnapshots.value.length, run: () => restoreProjectSnapshot(projectSnapshots.value[0]) },
-  { id: 'undo', label: t('hotkey.undo'), shortcut: 'Ctrl+Z', disabled: !canUndo.value, run: doUndo },
-  { id: 'redo', label: t('hotkey.redo'), shortcut: 'Ctrl+Shift+Z', disabled: !canRedo.value, run: doRedo },
+  { id: 'undo', label: t('hotkey.undo'), shortcut: 'Ctrl+Z', disabled: !canUndo.value, run: () => { doUndo() } },
+  { id: 'redo', label: t('hotkey.redo'), shortcut: 'Ctrl+Shift+Z', disabled: !canRedo.value, run: () => { doRedo() } },
   { id: 'clear-filter', label: t('command.clear_filter'), disabled: !hasPieceFilter.value, run: clearPieceFilters },
   { id: 'filter-unnamed', label: t('command.filter_unnamed'), disabled: !unnamedPiecesCount.value, run: () => { quickFilterMode.value = 'unnamed' } },
   { id: 'filter-oversized', label: t('command.filter_oversized'), disabled: !oversizedPieces.value.length, run: () => { quickFilterMode.value = 'oversized' } },
@@ -1043,10 +881,13 @@ function loadExample() {
     { label: t('example.shelf'), w: 760, h: 300, q: 4 },
     { label: t('example.back'), w: 1800, h: 800, q: 1 },
   ]
-  for (const e of ex) {
-    const color = PIECE_COLORS[colorIdx++ % PIECE_COLORS.length]
-    pieces.push(newPiece(e.label, e.w, e.h, e.q, true, color))
-  }
+  pieceList.addMany(ex.map(piece => ({
+    label: piece.label,
+    width: piece.w,
+    height: piece.h,
+    quantity: piece.q,
+    allowRotation: true,
+  })))
   commitProjectEdit()
   recordOperation(t('operation.load_example'), t('operation.import_detail').replace('{0}', String(ex.length)))
   calculate()
@@ -1067,37 +908,20 @@ function onDragLeave() {
   dragOverIdx.value = -1
 }
 
-function reorderTarget(sourceIndex: number, direction: -1 | 1): number | null {
-  const visibleIndex = visiblePieces.value.findIndex(entry => entry.index === sourceIndex)
-  if (visibleIndex < 0) return null
-  for (let next = visibleIndex + direction; next >= 0 && next < visiblePieces.value.length; next += direction) {
-    const target = visiblePieces.value[next]
-    if (!target.piece.locked) return target.index
-  }
-  return null
-}
-
 function canMovePiece(sourceIndex: number, direction: -1 | 1): boolean {
-  return !pieces[sourceIndex]?.locked && reorderTarget(sourceIndex, direction) !== null
+  return pieceList.canMove(sourceIndex, direction)
 }
 
 function movePiece(sourceIndex: number, direction: -1 | 1) {
-  const targetIndex = reorderTarget(sourceIndex, direction)
-  if (targetIndex === null || pieces[sourceIndex]?.locked) return
-  const next = reorderByDrag([...pieces], sourceIndex, targetIndex)
-  pieces.splice(0, pieces.length, ...next)
-  pieceSortMode.value = 'manual'
+  if (!pieceList.move(sourceIndex, direction)) return
   commitProjectEdit()
   recordOperation(t('operation.reorder'), t('operation.visible_count').replace('{0}', '1'))
 }
 
 function dropPiece(targetIdx: number) {
-  if (dragStartIdx.value < 0 || dragStartIdx.value === targetIdx || dragStartIdx.value >= pieces.length) return
-  if (pieces[dragStartIdx.value]?.locked || pieces[targetIdx]?.locked) return
+  const sourceIndex = dragStartIdx.value
   const unlockedCount = pieces.filter(piece => !piece.locked).length
-  const next = reorderByDrag([...pieces], dragStartIdx.value, targetIdx)
-  pieces.splice(0, pieces.length, ...next)
-  pieceSortMode.value = 'manual'
+  if (!pieceList.drop(sourceIndex, targetIdx)) return
   dragStartIdx.value = -1
   dragOverIdx.value = -1
   commitProjectEdit()
@@ -1113,16 +937,6 @@ function onDragEnd() {
 // Material cost for the current result; null until a layout is calculated.
 const costSummary = computed(() =>
   result.value ? computeCostSummary(result.value, pricePerSheet.value) : null)
-
-const pieceIndexes = computed<Record<string, number>>(() => {
-  const indexes: Record<string, number> = {}
-  pieces.forEach((piece, index) => { indexes[piece.id] = index + 1 })
-  return indexes
-})
-
-function pieceIndex(source: CutPiece): number {
-  return pieceIndexes.value[source.id] ?? 0
-}
 
 // ── Strategy display ─────────────────────────────────────────────────────────
 // Single source for both the <select> groups and strategyDisplayName.
@@ -1151,49 +965,37 @@ function strategyDisplayName(s: CuttingStrategy): string {
   return t('strategy.auto')
 }
 
-// ── Keyboard shortcuts ───────────────────────────────────────────────────────
-function onKeydown(e: KeyboardEvent) {
-  // Global shortcuts that are safe to fire even while typing in a field.
-  if (e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey)) {
-    e.preventDefault()
-    openCommandPalette()
-    return
-  }
-  if (commandPaletteOpen.value && e.key === 'Escape') {
-    e.preventDefault()
-    closeCommandPalette()
-    return
-  }
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-    e.preventDefault()
-    if (pieces.length) calculate()
-    return
-  }
-
-  // Everything below would clobber native text editing (Enter, the field's own
-  // Ctrl+Z/Y undo, Ctrl+D), so leave inputs / textareas / selects /
-  // contentEditable to the browser.
-  if (isEditableTarget(e.target as HTMLElement | null)) return
-
-  if (e.key === 'Enter') {
-    e.preventDefault()
-    addPiece()
-  } else if (e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
-    e.preventDefault()
-    doUndo()
-  } else if ((e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey) && e.shiftKey)
-    || (e.key.toLowerCase() === 'y' && (e.ctrlKey || e.metaKey))) {
-    e.preventDefault()
-    doRedo()
-  } else if (e.key.toLowerCase() === 'd' && (e.ctrlKey || e.metaKey)) {
-    e.preventDefault()
-    duplicate(selectedPieceId.value)
-  } else if (e.key === 'Escape') {
-    if (selectedPieceId.value !== null) { selectedPieceId.value = null; return }
-    result.value = null
-    calculated.value = false
-  }
-}
+useKeyboardShortcuts([
+  { key: 'k', ctrlOrMeta: true, allowInEditable: true, run: openCommandPalette },
+  {
+    key: 'Escape',
+    allowInEditable: true,
+    when: () => commandPaletteOpen.value,
+    run: closeCommandPalette,
+  },
+  {
+    key: 'Enter',
+    ctrlOrMeta: true,
+    allowInEditable: true,
+    run: () => { if (pieces.length) calculate() },
+  },
+  { key: 'Enter', run: addPiece },
+  { key: 'z', ctrlOrMeta: true, run: () => { doUndo() } },
+  { key: 'z', ctrlOrMeta: true, shift: true, run: () => { doRedo() } },
+  { key: 'y', ctrlOrMeta: true, run: () => { doRedo() } },
+  { key: 'd', ctrlOrMeta: true, run: () => { duplicate(selectedPieceId.value) } },
+  {
+    key: 'Escape',
+    run: () => {
+      if (selectedPieceId.value !== null) {
+        pieceList.clearSelection()
+        return
+      }
+      result.value = null
+      calculated.value = false
+    },
+  },
+])
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
 // Persist top-level scalar edits here. Piece mutations call commitProjectEdit()
@@ -1203,21 +1005,18 @@ watch([pricePerSheet, currency], persistProjectEdit)
 
 onMounted(() => {
   loadInitialState()
-  loadProjectSnapshots()
+  projectSnapshotStore.load()
   loadOperationLog()
   // Baseline the history on whatever was actually loaded (link/localStorage),
   // so the first undo can't step back into the pre-load default.
-  undoHistory.reset(serializeHomeState(currentState()))
-  refreshHistoryState()
-  window.addEventListener('keydown', onKeydown)
+  homeHistory.reset()
 })
 
 onUnmounted(() => {
   activeOptimization?.cancel()
-  window.removeEventListener('keydown', onKeydown)
   homeStorage.dispose()
+  homeHistory.dispose()
   clearToast()
-  clearTimeout(recordTimer)
   saveStateNow()
   saveOperationLogNow()
 })
