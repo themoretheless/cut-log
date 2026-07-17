@@ -1531,7 +1531,14 @@ input[type="number"] { -moz-appearance: textfield; }
     padding: 16px 24px;
 }
 
-.stat { display: flex; flex-direction: column; align-items: center; flex: 1; }
+.stat {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
 
 .export-bar {
     display: flex;
@@ -1551,6 +1558,9 @@ input[type="number"] { -moz-appearance: textfield; }
 .stat-value-sm {
     font-size: 0.85rem;
     font-weight: 600;
+    max-width: 100%;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
 }
 
 .stat-label {
@@ -1559,6 +1569,16 @@ input[type="number"] { -moz-appearance: textfield; }
     margin-top: 4px;
     text-transform: uppercase;
     letter-spacing: .5px;
+}
+
+@media (max-width: 620px) {
+    .stats-bar {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px 10px;
+        padding: 14px 12px;
+    }
+    .stat-value { overflow-wrap: anywhere; }
 }
 
 /* ── Alert ────────────────────────────────────────────────────────────── */
@@ -1795,6 +1815,15 @@ kbd {
 }
 
 .version-badge:hover { opacity: 1; }
+
+@media (max-width: 620px) {
+    .app-footer {
+        position: static;
+        display: flex;
+        justify-content: flex-end;
+        padding: 0 16px 12px;
+    }
+}
 
 /* ── Shelf Builder ────────────────────────────────────────────────────── */
 .shelf-summary {}

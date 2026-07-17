@@ -51,8 +51,9 @@ components:
    `optimizer.worker.ts` -> `rustService.ts` for one calculation.
 4. Read `crates/core/src/models.rs` and `optimizer.rs`; the WASM and CLI crates
    are thin adapters.
-5. Read the focused Home composables for history, snapshots, piece-list actions,
-   shortcuts, and exports; then open `pages/Home.vue` only to see composition.
+5. Read `useProjectState.ts`, then the focused Home composables for commands,
+   costing, selection, import, history, snapshots, piece-list actions,
+   shortcuts, and exports; open `pages/Home.vue` only to see composition.
 6. For the box, follow `box/constraints.ts` -> `geometry.ts` ->
    `useBoxModel.ts` -> `box/three/*` -> `pages/BoxBuilder.vue`.
 
@@ -90,7 +91,7 @@ downloads are not reimplemented in pages.
 
 ## 500-item review
 
-The v0.1.51 review produced exactly **500 unique, ID-addressable items** across
+The v0.1.52 review produced exactly **500 unique, ID-addressable items** across
 20 groups of 25:
 
 | IDs | Area | IDs | Area |
@@ -106,10 +107,14 @@ The v0.1.51 review produced exactly **500 unique, ID-addressable items** across
 | CL-201..225 | Box geometry | CL-451..475 | Product workflows |
 | CL-226..250 | Three.js lifecycle | CL-476..500 | Documentation |
 
-The canonical checklist, priorities, effort sizes, and 93 items delivered so
+The canonical checklist, priorities, effort sizes, and 98 items delivered so
 far are in [recommendation.md](recommendation.md). The catalog is
 not copied here or into architecture; that duplication would immediately make
 status unreliable. `plan.md` remains historical brainstorming.
+
+The [top-100 repository benchmark](docs/top-100-repository-benchmark.md)
+records five relevance cohorts, the source-verified editor patterns adopted in
+v0.1.52, and ten benchmark-derived candidates for later batches.
 
 ## Build and run
 
