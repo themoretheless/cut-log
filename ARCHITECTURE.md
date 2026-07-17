@@ -1,10 +1,12 @@
 # CutLog architecture
 
-Status: v0.1.51 review, after four implementation iterations. This document is
+Status: v0.1.52 review, after five implementation iterations. This document is
 the map of responsibilities and dependency rules. The canonical list of exactly
 500 findings and ideas is [recommendation.md](recommendation.md); the quick
-setup and reading path are in [README.md](README.md). `plan.md` is historical
-brainstorming, not a second source of backlog truth.
+setup and reading path are in [README.md](README.md). The
+[100-repository benchmark](docs/top-100-repository-benchmark.md) records the
+external comparison behind iteration 5. `plan.md` is historical brainstorming,
+not a second source of backlog truth.
 
 CutLog is intentionally a small, local-first application. Its architecture
 should make correctness visible and changes easy to review, not imitate a large
@@ -76,6 +78,11 @@ These principles are review rules, not reasons to add abstraction by default.
 - `useHomeHistory.ts` owns undo/redo timing and restore guards.
 - `useProjectSnapshots.ts` owns named-snapshot persistence.
 - `usePieceList.ts` owns piece CRUD, filters, transforms, and ordering.
+- `useProjectState.ts` owns project refs and detached read/apply/reset snapshots.
+- `useCommandPalette.ts` owns command search, enabled navigation, and execution.
+- `useCosting.ts` owns cost inputs and result-derived material totals.
+- `useResultSelection.ts` owns stable-ID selection and placement reconciliation.
+- `usePieceImport.ts` owns import preview, validation, capacity, and one commit.
 - `useKeyboardShortcuts.ts` owns shortcut matching and listener lifetime.
 - `useHomeExports.ts` owns optimizer download and print effects.
 - `useToast.ts` owns transient feedback lifecycle.
@@ -84,11 +91,12 @@ These principles are review rules, not reasons to add abstraction by default.
 - `constraints.ts` owns legal box parameter relationships.
 - Three.js scene modules own and dispose every GPU resource they create.
 
-`Home.vue` is still the largest composition surface at about 1,700 lines, with
-roughly 1,000 lines of script. History, snapshots, piece-list actions, keyboard
-commands, and export effects now have dedicated owners. The next cuts are the
-command palette, costing, result selection, import transactions, and a unified
-project-state boundary (`CL-111` to `CL-115`).
+`Home.vue` is still the largest composition surface at about 1,650 lines, with
+roughly 900 lines of script. Project state, commands, costing, selection,
+transactional import, history, snapshots, piece-list actions, shortcuts, and
+export effects now have dedicated owners. The next architectural work is to
+replace watcher feedback with named actions and enforce dependency boundaries
+(`CL-116` to `CL-120`).
 
 ### Open/Closed
 
@@ -143,9 +151,11 @@ This order avoids starting with either large page:
 2. **Safety rules:** `lib/optimizerLimits.ts`, `lib/validatePiece.ts`, then
    their adjacent tests. These are the trust boundary before expansion.
 3. **Project state:** `lib/homeState.ts`, `shareLink.ts`, `history.ts`, and
-   `projectSnapshots.ts`. Each module is framework-free.
-4. **Piece operations:** `parsePieceList.ts`, `pieceOps.ts`, `pieceEditor.ts`,
-   and `piecesCsv.ts`. Read one implementation beside its test.
+   `projectSnapshots.ts`, then `composables/useProjectState.ts` for reactive
+   ownership. The format modules remain framework-free.
+4. **Editor behavior:** read the small command, costing, result-selection, and
+   import composables beside their tests, then `pieceOps.ts`, `pieceEditor.ts`,
+   and `piecesCsv.ts`.
 5. **Optimization boundary:** `services/optimizer.ts`,
    `optimizerWorker.ts`, `optimizer.worker.ts`, then `rustService.ts`.
 6. **Rust path:** `crates/core/src/models.rs`, `optimizer.rs`, then the thin
@@ -184,6 +194,11 @@ frontend/src/
     useHomeHistory.ts         coalesced undo/redo and guarded restore
     useProjectSnapshots.ts    named-snapshot storage and CRUD
     usePieceList.ts           piece state, filtering, bulk edits, ordering
+    useProjectState.ts        project refs and detached read/apply/reset
+    useCommandPalette.ts      command filtering, navigation, execution
+    useCosting.ts             cost state and derived result summary
+    useResultSelection.ts     ID selection and placement reconciliation
+    usePieceImport.ts         preview, validation, capacity, atomic commit
     useKeyboardShortcuts.ts   exact shortcut matching and listener lifetime
     useHomeExports.ts         CSV/SVG/DXF downloads and print orchestration
     useToast.ts               transient status/error lifecycle
@@ -259,7 +274,7 @@ those values mean. Renderers may not clamp parameters independently. Scene
 owners dispose geometries, materials, textures, controls, render lists, and
 animation loops they create.
 
-## 7. Four completed iterations
+## 7. Five completed iterations
 
 | Iteration | Goal | Delivered | Evidence |
 |---|---|---|---|
@@ -267,6 +282,7 @@ animation loops they create.
 | 2 | SOLID/DRY decomposition | Shared palette and sheet presentation logic, `SheetCard`, `useToast`, `useHomeStorage` | Co-located unit tests and reduced duplicated policy |
 | 3 | Product design and accessibility | Associated labels, bounded NumberField, keyboard reorder, command list navigation, semantic gallery controls, accessible SVG/3D names, stronger focus/disabled/error states | Desktop/mobile browser smoke and keyboard checks |
 | 4 | Home responsibility extraction | Dedicated history, snapshot, piece-list, shortcut, and export composables with injected effect boundaries | 16 focused composable tests plus page type-check |
+| 5 | Top-100 editor benchmark | Command registry, costing, stable-ID result selection, transactional import, and one project-state owner | 100-source benchmark, 13 focused tests, import preflight, and detached restore snapshots |
 
 The iterations deliberately combine a vertical behavior with its tests. They
 do not claim the architecture is finished: the remaining page orchestration is
@@ -284,8 +300,9 @@ listed honestly below.
 | 3b | Undo/redo orchestration | Done; further history semantics pending | `CL-106`, `CL-134`, `CL-136` |
 | 3c | Named snapshot orchestration | Done; retention/diffs pending | `CL-107`, `CL-133`, `CL-139` |
 | 4a | Piece-list actions | Done | `CL-108` |
-| 4b | Stable piece identity | Pending | `CL-117`, `CL-151` |
-| 4c | Home export orchestration | Done | `CL-110` |
+| 4b | Commands, costing, result selection, import, project-state owner | Done | `CL-111` to `CL-115` |
+| 4c | Stable piece identity | Pending | `CL-117`, `CL-151` |
+| 4d | Home export orchestration | Done | `CL-110` |
 | 5 | Locale-independent box piece catalog | Pending | `CL-214`, `CL-215` |
 | 6a | Complete Three.js disposal | Done | `CL-226` to `CL-230` |
 | 6b | Shared scene base | Deferred until measured | `CL-243` |

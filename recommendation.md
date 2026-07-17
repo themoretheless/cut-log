@@ -2,26 +2,25 @@
 
 This is the canonical backlog for CutLog. It contains exactly **500 distinct,
 actionable observations**: defects, design debt, improvements, product ideas,
-and work completed through v0.1.51. `ARCHITECTURE.md` explains the module
+and work completed through v0.1.52. `ARCHITECTURE.md` explains the module
 boundaries; `README.md` gives the short reading path. Keeping the detailed list
 here avoids copying 500 lines across three documents and follows DRY.
 
 Legend: `Bug`, `Debt`, `Improve`, `Idea`, or `Done`; priority `P0` (protect data
 or correctness) through `P3` (optional); effort `S`, `M`, or `L`. Checked items
-landed through the current v0.1.51 change set. Unchecked items are candidates, not
+landed through the current v0.1.52 change set. Unchecked items are candidates, not
 promises; take them in small, independently testable slices.
 
 ## Current focus
 
-1. Extract the command palette, costing, result selection, import transaction,
-   and project-state ownership from `Home.vue` (`CL-111` to `CL-115`).
-2. Give pieces stable IDs and make box piece identity locale-independent
-   (`CL-117`, `CL-214`).
-3. Add optimizer progress, cooperative cancellation, and protocol tests
+1. Replace broad watcher feedback with named project actions, stable identity,
+   and dependency-boundary checks (`CL-116` to `CL-120`).
+2. Add optimizer progress, cooperative cancellation, and protocol tests
    (`CL-059`, `CL-060`, `CL-070`).
-4. Version persisted/share state and add migrations before the schema grows
+3. Version persisted/share state and add migrations before the schema grows
    (`CL-129` to `CL-131`).
-5. Make SVG/DXF units and production metadata explicit (`CL-181` to `CL-187`).
+4. Make SVG/DXF units and production metadata explicit (`CL-181` to `CL-187`).
+5. Add placement invariants and benchmark fixtures (`CL-026` to `CL-039`).
 
 ## 1. Runtime safety and trust boundaries (CL-001..CL-025)
 
@@ -147,11 +146,11 @@ promises; take them in small, independently testable slices.
 - [x] **CL-108 · Done · P1 · L** — Extract piece CRUD, color allocation, filtering, sorting, and bulk edits into `usePieceList`.
 - [x] **CL-109 · Done · P2 · M** — Replace the page-level keydown chain with a tested shortcut composable.
 - [x] **CL-110 · Done · P2 · M** — Move export orchestration out of `Home.vue` while keeping serializers pure.
-- [ ] **CL-111 · Debt · P2 · M** — Extract command-palette state and command execution from the page.
-- [ ] **CL-112 · Debt · P2 · M** — Move cost inputs and summary derivation behind a small `useCosting` interface.
-- [ ] **CL-113 · Debt · P2 · S** — Isolate result selection and selected-piece reconciliation from rendering.
-- [ ] **CL-114 · Debt · P2 · M** — Put import preview, validation, and commit into one transactional boundary.
-- [ ] **CL-115 · Debt · P1 · L** — Establish one owner for project state with explicit `read`, `apply`, and `reset` operations.
+- [x] **CL-111 · Done · P2 · M** — Extract command-palette state and command execution from the page.
+- [x] **CL-112 · Done · P2 · M** — Move cost inputs and summary derivation behind a small `useCosting` interface.
+- [x] **CL-113 · Done · P2 · S** — Isolate result selection and selected-piece reconciliation from rendering.
+- [x] **CL-114 · Done · P2 · M** — Put import preview, validation, and commit into one transactional boundary.
+- [x] **CL-115 · Done · P1 · L** — Establish one owner for project state with explicit `read`, `apply`, and `reset` operations.
 - [ ] **CL-116 · Bug · P1 · M** — Replace the broad deep watcher with intentional event-based history and persistence triggers.
 - [ ] **CL-117 · Bug · P1 · M** — Give every source piece a stable ID that survives duplicate labels, sorting, and optimization.
 - [ ] **CL-118 · Improve · P2 · L** — Express complex multi-field edits as named actions so state transitions are traceable.

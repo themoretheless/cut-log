@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import NumberField from '@/components/NumberField.vue'
 import SheetCard from '@/components/SheetCard.vue'
 import { startOptimization, type OptimizationTask } from '@/services/optimizerWorker'
@@ -7,25 +7,27 @@ import { type CutPiece, type CuttingResult, CuttingStrategy } from '@/services/t
 import type { HomeState } from '@/lib/homeState'
 import { validateNewPiece } from '@/lib/validatePiece'
 import { buildShareUrl, readShareFromHash } from '@/lib/shareLink'
-import { parsePieceList } from '@/lib/parsePieceList'
 import type { ProjectSnapshot } from '@/lib/projectSnapshots'
 import {
   type PieceSortMode,
   addDimensionDelta,
   pieceArea,
-  pieceTotalArea,
   roundDimensionsUp,
   swapDimensions,
 } from '@/lib/pieceEditor'
-import { computeCostSummary } from '@/lib/costSummary'
 import { MAX_PIECE_QUANTITY, assertOptimizerCapacity, normalizeQuantity } from '@/lib/optimizerLimits'
 import { useToast } from '@/composables/useToast'
 import { useHomeStorage } from '@/composables/useHomeStorage'
 import { useHomeHistory } from '@/composables/useHomeHistory'
 import { useProjectSnapshots } from '@/composables/useProjectSnapshots'
-import { usePieceList, type QuickFilterMode } from '@/composables/usePieceList'
+import type { QuickFilterMode } from '@/composables/usePieceList'
 import { useHomeExports } from '@/composables/useHomeExports'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
+import { useCommandPalette, type PaletteCommand } from '@/composables/useCommandPalette'
+import { useCosting } from '@/composables/useCosting'
+import { usePieceImport } from '@/composables/usePieceImport'
+import { useProjectState } from '@/composables/useProjectState'
+import { useResultSelection } from '@/composables/useResultSelection'
 import { useL10n } from '@/stores/l10n'
 
 const { t } = useL10n()
@@ -43,19 +45,23 @@ const sheetPresets: { key: string; w: number; h: number }[] = [
   { key: '1200x600', w: 1200, h: 600 },
 ]
 
-const selectedPreset = ref('2440x1220')
-
 // ── Sheet params ─────────────────────────────────────────────────────────────
-const sheetWidth = ref(2440)
-const sheetHeight = ref(1220)
-const kerf = ref(3)
-const pricePerSheet = ref(0)
-const currency = ref('₽')
+const minMachineCut = ref(30)
+const projectState = useProjectState({ minMachineCut })
+const {
+  sheetWidth,
+  sheetHeight,
+  kerf,
+  pieceList,
+  read: currentState,
+  apply: applyState,
+} = projectState
+const selectedPreset = computed(() =>
+  sheetPresets.find(preset => preset.w === sheetWidth.value && preset.h === sheetHeight.value)?.key ?? '')
 const selectedStrategy = ref<CuttingStrategy>(CuttingStrategy.Auto)
 
 function onPresetChanged(e: Event) {
   const val = (e.target as HTMLSelectElement).value
-  selectedPreset.value = val
   const preset = sheetPresets.find(p => p.key === val)
   if (preset) {
     sheetWidth.value = preset.w
@@ -63,8 +69,8 @@ function onPresetChanged(e: Event) {
   }
 }
 
-function onSheetWidthChanged(v: number) { sheetWidth.value = v; selectedPreset.value = '' }
-function onSheetHeightChanged(v: number) { sheetHeight.value = v; selectedPreset.value = '' }
+function onSheetWidthChanged(v: number) { sheetWidth.value = v }
+function onSheetHeightChanged(v: number) { sheetHeight.value = v }
 
 // ── New piece form ───────────────────────────────────────────────────────────
 const newLabel = ref('')
@@ -80,9 +86,6 @@ let calcGen = 0
 let activeOptimization: OptimizationTask | null = null
 
 // ── Editor controls ──────────────────────────────────────────────────────────
-const commandPaletteOpen = ref(false)
-const commandQuery = ref('')
-const activePaletteIndex = ref(0)
 const commandInputRef = ref<HTMLInputElement | null>(null)
 const transformStep = ref(2)
 const roundStep = ref(5)
@@ -90,13 +93,10 @@ const operationLog = ref<OperationEntry[]>([])
 const operationQuery = ref('')
 const lastBulkDiff = ref<BulkDiff | null>(null)
 const snapshotCompare = ref<SnapshotComparison | null>(null)
-const minMachineCut = ref(30)
 
-const pieceList = usePieceList({ sheetWidth, sheetHeight, minMachineCut })
 const {
   pieces,
   selectedPieceId,
-  selectedPiece,
   pieceQuery,
   pieceSortMode,
   quickFilterMode,
@@ -114,6 +114,26 @@ const {
   pieceIndex,
 } = pieceList
 
+const resultSelection = useResultSelection({ pieces: () => pieces, result, selectedPieceId })
+const {
+  selectedPiece,
+  placements: selectedPiecePlacements,
+  stats: selectedPieceStats,
+  toggle: toggleSelect,
+  clear: clearSelection,
+} = resultSelection
+
+const {
+  pricePerSheet,
+  currency,
+  summary: costSummary,
+  isVisible: costingVisible,
+} = useCosting({
+  result,
+  pricePerSheet: projectState.pricePerSheet,
+  currency: projectState.currency,
+})
+
 const { exportPiecesCsv, exportSvg, exportDxf, printLayout } = useHomeExports({
   pieces: () => pieces,
   result,
@@ -123,14 +143,6 @@ const { exportPiecesCsv, exportSvg, exportDxf, printLayout } = useHomeExports({
 const ALLOWANCE_PRESETS = [1, 2, 5]
 const OPERATION_LOG_KEY = 'operation_log'
 const OPERATION_LOG_LIMIT = 14
-
-interface PaletteCommand {
-  id: string
-  label: string
-  shortcut?: string
-  disabled?: boolean
-  run: () => void | Promise<void>
-}
 
 interface PreflightCheck {
   id: string
@@ -170,26 +182,6 @@ interface SnapshotComparison {
 const dragStartIdx = ref(-1)
 const dragOverIdx = ref(-1)
 const isDragging = ref(false)
-
-function currentState(): HomeState {
-  return {
-    sheetWidth: sheetWidth.value,
-    sheetHeight: sheetHeight.value,
-    kerf: kerf.value,
-    pieces: pieces.map(piece => ({ ...piece })),
-    pricePerSheet: pricePerSheet.value,
-    currency: currency.value,
-  }
-}
-
-function applyState(saved: HomeState) {
-  sheetWidth.value = saved.sheetWidth
-  sheetHeight.value = saved.sheetHeight
-  kerf.value = saved.kerf
-  pricePerSheet.value = saved.pricePerSheet
-  currency.value = saved.currency
-  pieceList.replace(saved.pieces)
-}
 
 const homeStorage = useHomeStorage({
   capture: currentState,
@@ -317,40 +309,37 @@ function addPiece() {
 
 // ── Bulk import (paste a cut list from a spreadsheet) ──────────────────────────
 const showImport = ref(false)
-const importText = ref('')
+const pieceImport = usePieceImport({
+  pieces: () => pieces,
+  sheetWidth,
+  sheetHeight,
+  kerf,
+})
+const { text: importText, preview: importPreview, canCommit: canCommitImport } = pieceImport
 
 function importPieces() {
-  const { rows, skipped } = parsePieceList(importText.value)
-  // Apply the same validation as manual add, so oversized / invalid rows are
-  // skipped up front (with a count) instead of silently landing as unplaced.
-  const valid = rows.filter(r => !validateNewPiece(
-    { width: r.width, height: r.height, quantity: r.quantity },
-    { sheetWidth: sheetWidth.value, sheetHeight: sheetHeight.value, kerf: kerf.value },
-  ))
-  if (!valid.length) {
+  if (importPreview.value.capacityExceeded) {
+    addError.value = t('qty_limit')
+    return
+  }
+  if (!canCommitImport.value) {
     addError.value = t('import_none')
     return
   }
+
   addError.value = ''
   saveAutoProjectSnapshot(t('snapshot.auto_before_import'))
-  pieceList.addMany(valid.map(row => ({
-    label: row.label,
-    width: row.width,
-    height: row.height,
-    quantity: row.quantity,
-    allowRotation: row.allowRotation ?? true,
-  })))
-  const totalSkipped = skipped + (rows.length - valid.length)
-  importText.value = ''
+  const imported = pieceImport.commit(rows => { pieceList.addMany(rows) })
+  if (!imported) return
   showImport.value = false
   commitProjectEdit()
-  const msg = totalSkipped
-    ? t('import_added_skipped').replace('{0}', String(valid.length)).replace('{1}', String(totalSkipped))
-    : t('import_added').replace('{0}', String(valid.length))
+  const msg = imported.skipped
+    ? t('import_added_skipped').replace('{0}', String(imported.added)).replace('{1}', String(imported.skipped))
+    : t('import_added').replace('{0}', String(imported.added))
   showToast(msg)
-  recordOperation(t('operation.import'), totalSkipped
-    ? t('operation.import_detail_skipped').replace('{0}', String(valid.length)).replace('{1}', String(totalSkipped))
-    : t('operation.import_detail').replace('{0}', String(valid.length)))
+  recordOperation(t('operation.import'), imported.skipped
+    ? t('operation.import_detail_skipped').replace('{0}', String(imported.added)).replace('{1}', String(imported.skipped))
+    : t('operation.import_detail').replace('{0}', String(imported.added)))
 }
 
 function removePiece(p: CutPiece) {
@@ -440,10 +429,6 @@ async function copyShareLink() {
   recordOperation(t('operation.share'), t('operation.share_detail'))
 }
 
-function toggleSelect(id: string) {
-  pieceList.toggleSelect(id)
-}
-
 const quickFilters = computed<{ id: QuickFilterMode; label: string; count: number }[]>(() => [
   { id: 'all', label: t('filter.all'), count: pieces.length },
   { id: 'unnamed', label: t('filter.unnamed'), count: unnamedPiecesCount.value },
@@ -513,33 +498,6 @@ const preflightChecks = computed<PreflightCheck[]>(() => [
     status: result.value ? 'ok' : 'idle',
   },
 ])
-const selectedPiecePlacements = computed(() => {
-  if (!result.value || !selectedPieceId.value) return []
-  return result.value.sheets.flatMap(sheet =>
-    sheet.placedPieces
-      .filter(pp => pp.source.id === selectedPieceId.value)
-      .map(pp => ({
-        sheetIndex: sheet.index,
-        x: pp.x,
-        y: pp.y,
-        width: pp.width,
-        height: pp.height,
-        isRotated: pp.isRotated,
-      })),
-  )
-})
-const selectedPieceStats = computed(() => {
-  const piece = selectedPiece.value
-  if (!piece) return null
-  const placements = selectedPiecePlacements.value
-  return {
-    area: pieceArea(piece),
-    totalArea: pieceTotalArea(piece),
-    placements,
-    firstPlacement: placements[0],
-  }
-})
-
 function areaM2(areaMm2: number): string {
   return (areaMm2 / 1_000_000).toFixed(2)
 }
@@ -664,10 +622,6 @@ function duplicatePiece(source = selectedPiece.value) {
 
 function deleteSelectedPiece() {
   if (selectedPiece.value) removePiece(selectedPiece.value)
-}
-
-function clearSelection() {
-  pieceList.clearSelection()
 }
 
 function togglePieceLock(piece: CutPiece) {
@@ -795,83 +749,23 @@ const paletteCommands = computed<PaletteCommand[]>(() => [
   { id: 'clear-all', label: t('command.clear_all'), disabled: !pieces.length, run: clearAll },
 ])
 
-const visiblePaletteCommands = computed(() => {
-  const q = commandQuery.value.trim().toLocaleLowerCase()
-  if (!q) return paletteCommands.value
-  return paletteCommands.value.filter(command => command.label.toLocaleLowerCase().includes(q))
+const {
+  isOpen: commandPaletteOpen,
+  query: commandQuery,
+  activeIndex: activePaletteIndex,
+  visibleCommands: visiblePaletteCommands,
+  open: openCommandPalette,
+  close: closeCommandPalette,
+  run: runPaletteCommand,
+  onKeydown: onPaletteKeydown,
+} = useCommandPalette({
+  commands: paletteCommands,
+  focusSearch: () => commandInputRef.value?.focus(),
+  scrollToIndex: index => {
+    document.getElementById(`command-option-${index}`)?.scrollIntoView({ block: 'nearest' })
+  },
+  onError: () => showError(t('command_error')),
 })
-
-function firstEnabledCommandIndex(): number {
-  const index = visiblePaletteCommands.value.findIndex(command => !command.disabled)
-  return index >= 0 ? index : 0
-}
-
-watch(commandQuery, () => { activePaletteIndex.value = firstEnabledCommandIndex() })
-
-function openCommandPalette() {
-  commandPaletteOpen.value = true
-  commandQuery.value = ''
-  activePaletteIndex.value = firstEnabledCommandIndex()
-  nextTick(() => commandInputRef.value?.focus())
-}
-
-function closeCommandPalette() {
-  commandPaletteOpen.value = false
-}
-
-async function runPaletteCommand(command: PaletteCommand) {
-  if (command.disabled) return
-  closeCommandPalette()
-  try {
-    await command.run()
-  } catch {
-    showError(t('command_error'))
-  }
-}
-
-function runActivePaletteCommand() {
-  const command = visiblePaletteCommands.value[activePaletteIndex.value]
-  if (command) runPaletteCommand(command)
-}
-
-function movePaletteSelection(direction: -1 | 1) {
-  const commands = visiblePaletteCommands.value
-  if (!commands.length) return
-  let index = activePaletteIndex.value
-  for (let attempts = 0; attempts < commands.length; attempts++) {
-    index = (index + direction + commands.length) % commands.length
-    if (!commands[index].disabled) {
-      activePaletteIndex.value = index
-      nextTick(() => document.getElementById(`command-option-${index}`)?.scrollIntoView({ block: 'nearest' }))
-      return
-    }
-  }
-}
-
-function onPaletteKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter') {
-    e.preventDefault()
-    runActivePaletteCommand()
-  } else if (e.key === 'ArrowDown') {
-    e.preventDefault()
-    movePaletteSelection(1)
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault()
-    movePaletteSelection(-1)
-  } else if (e.key === 'Home') {
-    e.preventDefault()
-    activePaletteIndex.value = firstEnabledCommandIndex()
-  } else if (e.key === 'End') {
-    e.preventDefault()
-    const commands = visiblePaletteCommands.value
-    let index = commands.length - 1
-    while (index > 0 && commands[index].disabled) index--
-    activePaletteIndex.value = Math.max(0, index)
-  } else if (e.key === 'Escape') {
-    e.preventDefault()
-    closeCommandPalette()
-  }
-}
 
 // ── Example project (one-click starter for the empty state) ────────────────────
 function loadExample() {
@@ -933,10 +827,6 @@ function onDragEnd() {
   dragOverIdx.value = -1
   isDragging.value = false
 }
-
-// Material cost for the current result; null until a layout is calculated.
-const costSummary = computed(() =>
-  result.value ? computeCostSummary(result.value, pricePerSheet.value) : null)
 
 // ── Strategy display ─────────────────────────────────────────────────────────
 // Single source for both the <select> groups and strategyDisplayName.
@@ -1121,7 +1011,18 @@ onUnmounted(() => {
               :placeholder="t('import_placeholder')"
             ></textarea>
             <p class="import-hint">{{ t('import_hint') }}</p>
-            <button class="btn btn-primary btn-compact" @click="importPieces" :disabled="!importText.trim()">
+            <div
+              v-if="importText.trim()"
+              class="import-preflight"
+              :class="{ warn: importPreview.capacityExceeded || !importPreview.acceptedCount }"
+              aria-live="polite"
+            >
+              <span><strong>{{ importPreview.acceptedCount }}</strong> {{ t('import_ready') }}</span>
+              <span><strong>{{ importPreview.totalQuantity }}</strong> {{ t('import_units') }}</span>
+              <span v-if="importPreview.totalSkipped"><strong>{{ importPreview.totalSkipped }}</strong> {{ t('import_rejected') }}</span>
+            </div>
+            <p v-if="importPreview.capacityExceeded" class="error import-error">{{ t('import_capacity') }}</p>
+            <button class="btn btn-primary btn-compact" @click="importPieces" :disabled="!canCommitImport">
               {{ t('import_add_all') }}
             </button>
           </div>
@@ -1532,7 +1433,7 @@ onUnmounted(() => {
           </div>
 
           <!-- Material cost (shown once a sheet price is set) -->
-          <div v-if="costSummary && pricePerSheet > 0" class="cost-bar">
+          <div v-if="costingVisible && costSummary" class="cost-bar">
             <span class="cost-title">{{ t('cost.summary') }}</span>
             <div class="cost-item">
               <span class="cost-value">{{ costSummary.totalCost.toFixed(0) }} {{ currency }}</span>
@@ -1654,6 +1555,27 @@ onUnmounted(() => {
   font-size: 11px;
   opacity: 0.7;
 }
+.import-preflight {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 7px 9px;
+  border-left: 3px solid var(--eff-good-tx);
+  background: var(--eff-good-bg);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.import-preflight strong {
+  color: var(--eff-good-tx);
+  font-variant-numeric: tabular-nums;
+}
+.import-preflight.warn {
+  border-left-color: var(--alert-warn-bd);
+  background: var(--alert-warn-bg);
+}
+.import-preflight.warn strong { color: var(--alert-warn-tx); }
+.import-error { margin: 0; }
 .price-row {
   display: flex;
   gap: 6px;
