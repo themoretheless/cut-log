@@ -4,17 +4,17 @@
  * animation or the scene contents change). The selected gallery piece is kept
  * opaque, the rest dimmed.
  */
-import { ref } from 'vue'
+import { ref, toValue, type MaybeRefOrGetter } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { buildPanel, clearGroup, disposeMaterial, type PanelData } from './panelMesh'
-import type { BoxModel, Translate } from '@/box/useBoxModel'
+import type { BoxLabels, BoxModel } from '@/box/useBoxModel'
 
 // Explode only translates objects, so geometry is built once at base
 // coordinates and these records say how each object moves with the slider.
 interface ExplodeRec { obj: THREE.Object3D; axis: number; sign: number }
 
-export function useAssemblyScene(model: BoxModel, t: Translate) {
+export function useAssemblyScene(model: BoxModel, labelSource: MaybeRefOrGetter<BoxLabels>) {
   const isoExplode = ref(0.22)
   let isoExplodeCurrent = 0.22
 
@@ -261,6 +261,7 @@ export function useAssemblyScene(model: BoxModel, t: Translate) {
       addGuide(gx, d, gz, 1, 1)
 
     // Labels
+    const text = toValue(labelSource)
     const sz = (lw: number, lh2: number) => `${lw.toFixed(0)}×${lh2.toFixed(0)}`
     const addLabel = (text: string, color: string, sub: string, x: number, y: number, z: number, axis = -1, sign = 0) => {
       const sprite = makeLabel(text, color, sub)
@@ -269,15 +270,15 @@ export function useAssemblyScene(model: BoxModel, t: Translate) {
       explodeLabels.push({ sprite, base: new THREE.Vector3(x, y, z), axis, sign })
     }
 
-    addLabel(t('box.top_short'), '#a0e0a0', sz(w, d), w / 2, d / 2, h, 2, 1)
-    addLabel(t('box.bottom_short'), '#a0e0a0', sz(w, d), w / 2, d / 2, 0, 2, -1)
-    addLabel(t('box.side_short'), '#80c0e0', sz(d + Bevel, h), 0, d / 2, h / 2, 0, -1)
-    addLabel(t('box.side_short'), '#80c0e0', sz(d + Bevel, h), w, d / 2, h / 2, 0, 1)
-    addLabel(t('box.back_short'), '#c0a0d0', sz(w, h), w / 2, d, h / 2, 1, 1)
+    addLabel(text.topShort, '#a0e0a0', sz(w, d), w / 2, d / 2, h, 2, 1)
+    addLabel(text.bottomShort, '#a0e0a0', sz(w, d), w / 2, d / 2, 0, 2, -1)
+    addLabel(text.sideShort, '#80c0e0', sz(d + Bevel, h), 0, d / 2, h / 2, 0, -1)
+    addLabel(text.sideShort, '#80c0e0', sz(d + Bevel, h), w, d / 2, h / 2, 0, 1)
+    addLabel(text.backShort, '#c0a0d0', sz(w, h), w / 2, d, h / 2, 1, 1)
 
     const shYs = model.shelfSlotYs()
     for (let i = 0; i < shYs.length; i++)
-      addLabel(`${t('box.shelf_short')}${i + 1}`, '#e0c080', sz(w, d), w / 2, d / 2, shYs[i])
+      addLabel(`${text.shelfShort}${i + 1}`, '#e0c080', sz(w, d), w / 2, d / 2, shYs[i])
 
     applyExplode()
     mainDirty = true

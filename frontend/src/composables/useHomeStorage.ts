@@ -39,6 +39,13 @@ export function useHomeStorage(options: HomeStorageOptions) {
       const saved = parseHomeState(storage.getItem(HOME_STATE_KEY))
       if (!saved) return false
       options.apply(saved)
+      // Persist the validated canonical form so repaired legacy/duplicate ids
+      // stay stable on the next reload instead of being allocated again.
+      try {
+        storage.setItem(HOME_STATE_KEY, serializeHomeState(saved))
+      } catch (error) {
+        options.onError?.(error)
+      }
       return true
     } catch (error) {
       options.onError?.(error)

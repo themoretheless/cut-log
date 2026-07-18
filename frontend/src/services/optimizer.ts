@@ -5,6 +5,7 @@ import type { CutPiece, CuttingResult, PlacedPiece, Sheet } from './types'
 import { CuttingStrategy } from './types'
 import { ensureWasm } from './rustService'
 import { assertOptimizerCapacity, normalizeQuantity } from '@/lib/optimizerLimits'
+import { assertStablePieceIds } from '@/lib/pieceIdentity'
 
 // Shape of the JSON the Rust/WASM optimizer returns (snake_case, mirrors the
 // serde structs). Validated at runtime before use, since it crosses a language
@@ -18,7 +19,7 @@ interface RawSheet {
   used_area: number; total_area: number; efficiency: number
   placed_pieces: RawPlaced[]
 }
-interface RawUnplaced { label: string; width: number; height: number }
+interface RawUnplaced { source_id: string; label: string; width: number; height: number }
 interface RawOutput {
   sheets: RawSheet[]; unplaced_pieces: RawUnplaced[]
   strategy: CuttingStrategy; auto_picked_strategy?: CuttingStrategy
@@ -31,6 +32,7 @@ export async function optimize(
   strategy: CuttingStrategy = CuttingStrategy.Auto,
 ): Promise<CuttingResult> {
   assertOptimizerCapacity(pieces)
+  assertStablePieceIds(pieces)
   const wasm = await ensureWasm()
 
   const input = JSON.stringify({
@@ -80,7 +82,12 @@ export async function optimize(
 
   return {
     sheets,
-    unplacedPieces: raw.unplaced_pieces.map((u: RawUnplaced) => ({ label: u.label, width: u.width, height: u.height })),
+    unplacedPieces: raw.unplaced_pieces.map((u: RawUnplaced) => ({
+      sourceId: u.source_id,
+      label: u.label,
+      width: u.width,
+      height: u.height,
+    })),
     strategy: raw.strategy,
     autoPickedStrategy: raw.auto_picked_strategy ?? undefined,
     totalSheets: raw.total_sheets,

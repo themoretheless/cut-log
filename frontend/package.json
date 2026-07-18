@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc && vite build",
+    "build": "npm run lint:boundaries && vue-tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "npm run lint:boundaries && vitest run",
+    "lint:boundaries": "node scripts/check-boundaries.mjs"
   },
   "dependencies": {
     "three": "^0.184.0",

@@ -1,14 +1,12 @@
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 use crate::optimizer::CuttingStrategy;
 
 // ── CutPiece ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CutPiece {
-    #[serde(default = "Uuid::new_v4")]
-    pub id: Uuid,
+    #[serde(default = "new_id")]
+    pub id: String,
     #[serde(default)]
     pub label: String,
     pub width: f64,
@@ -24,12 +22,13 @@ pub struct CutPiece {
 fn one() -> u32 { 1 }
 fn yes() -> bool { true }
 fn default_color() -> String { "#4A90D9".into() }
+fn new_id() -> String { uuid::Uuid::new_v4().to_string() }
 
 // ── PlacedPiece ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlacedPiece {
-    pub source_id: Uuid,
+    pub source_id: String,
     pub label: String,
     pub color: String,
     pub x: f64,
@@ -70,6 +69,7 @@ impl Sheet {
 /// (label fallback, formatting, localization) is the caller's concern.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnplacedPiece {
+    pub source_id: String,
     pub label: String,
     pub width: f64,
     pub height: f64,

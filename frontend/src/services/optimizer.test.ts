@@ -13,7 +13,7 @@ const rawResult = {
       { source_id: 'gone', source_label: 'X', source_color: '#222', x: 400, y: 0, width: 300, height: 400, is_rotated: true },
     ],
   }],
-  unplaced_pieces: [{ label: 'B', width: 9999, height: 9999 }],
+  unplaced_pieces: [{ source_id: 'p2', label: 'B', width: 9999, height: 9999 }],
   strategy: CuttingStrategy.Auto,
   auto_picked_strategy: CuttingStrategy.BestArea_AreaDesc,
   total_sheets: 1,
@@ -86,9 +86,15 @@ describe('optimize() service glue', () => {
     expect(captured).toBe('')
   })
 
+  it('rejects duplicate source ids before optimization can mis-reconcile equal labels', async () => {
+    const duplicate = { ...piece, label: 'Same label', width: 200 }
+    await expect(optimize(2440, 1220, [piece, duplicate], 3)).rejects.toThrow(/unique stable id/i)
+    expect(captured).toBe('')
+  })
+
   it('maps unplaced pieces and top-level totals', async () => {
     const res = await optimize(2440, 1220, [piece], 3)
-    expect(res.unplacedPieces).toEqual([{ label: 'B', width: 9999, height: 9999 }])
+    expect(res.unplacedPieces).toEqual([{ sourceId: 'p2', label: 'B', width: 9999, height: 9999 }])
     expect(res).toMatchObject({
       totalSheets: 1, totalUsedArea: 240000, totalArea: 2976800, overallEfficiency: 8.06,
       strategy: CuttingStrategy.Auto, autoPickedStrategy: CuttingStrategy.BestArea_AreaDesc,

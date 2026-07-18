@@ -11,6 +11,7 @@ import {
 } from '@/lib/pieceEditor'
 import { duplicatePiece, reorderByDrag } from '@/lib/pieceOps'
 import { normalizeQuantity } from '@/lib/optimizerLimits'
+import { withStablePieceIds } from '@/lib/pieceIdentity'
 import { newPiece, type CutPiece } from '@/services/types'
 
 export type QuickFilterMode = 'all' | 'unnamed' | 'rotation_off' | 'oversized' | 'locked' | 'machine'
@@ -113,7 +114,7 @@ export function usePieceList(options: PieceListOptions) {
   }
 
   function replace(next: readonly CutPiece[]) {
-    pieces.splice(0, pieces.length, ...next)
+    pieces.splice(0, pieces.length, ...withStablePieceIds(next, options.createId))
     colorIndex = pieces.length
   }
 

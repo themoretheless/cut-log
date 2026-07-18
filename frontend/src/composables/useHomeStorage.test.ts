@@ -42,4 +42,25 @@ describe('useHomeStorage', () => {
     expect(onError).toHaveBeenCalledWith(error)
     scope.stop()
   })
+
+  it('keeps a loaded project even when canonical rewrite fails', () => {
+    const error = new DOMException('quota', 'QuotaExceededError')
+    const onError = vi.fn()
+    const apply = vi.fn()
+    const scope = effectScope()
+    const channel = scope.run(() => useHomeStorage({
+      capture: state,
+      apply,
+      storage: {
+        getItem: () => JSON.stringify({ version: 1, ...state() }),
+        setItem: () => { throw error },
+      },
+      onError,
+    }))!
+
+    expect(channel.load()).toBe(true)
+    expect(apply).toHaveBeenCalledWith(state())
+    expect(onError).toHaveBeenCalledWith(error)
+    scope.stop()
+  })
 })

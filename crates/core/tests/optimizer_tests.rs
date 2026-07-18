@@ -5,7 +5,7 @@ use cutter_core::optimizer::{
 
 fn base_piece(w: f64, h: f64, qty: u32) -> CutPiece {
     CutPiece {
-        id: uuid::Uuid::new_v4(),
+        id: uuid::Uuid::new_v4().to_string(),
         label: String::new(),
         width: w,
         height: h,
@@ -353,10 +353,13 @@ fn mixed_fit_and_unfit() {
 
 #[test]
 fn labeled_unplaced_piece_shows_label() {
-    let pieces = vec![piece_labeled("Полка XL", 5000.0, 5000.0, 1)];
+    let mut oversized = piece_labeled("Полка XL", 5000.0, 5000.0, 1);
+    oversized.id = "source:oversized/shelf".into();
+    let pieces = vec![oversized];
     let result = optimize(2440.0, 1220.0, &pieces, 0.0, CuttingStrategy::Auto);
     assert_eq!(result.unplaced_pieces.len(), 1);
     assert_eq!(result.unplaced_pieces[0].label, "Полка XL");
+    assert_eq!(result.unplaced_pieces[0].source_id, "source:oversized/shelf");
 }
 
 #[test]

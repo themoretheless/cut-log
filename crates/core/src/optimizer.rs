@@ -440,6 +440,7 @@ fn run_packed(
 
 fn unplaced(piece: &CutPiece) -> UnplacedPiece {
     UnplacedPiece {
+        source_id: piece.id.clone(),
         label: piece.label.clone(),
         width: piece.width,
         height: piece.height,
@@ -532,7 +533,7 @@ fn place_piece(
     };
 
     sheet.placed_pieces.push(PlacedPiece {
-        source_id: piece.id,
+        source_id: piece.id.clone(),
         label: piece.label.clone(),
         color: piece.color.clone(),
         x: fit.x,

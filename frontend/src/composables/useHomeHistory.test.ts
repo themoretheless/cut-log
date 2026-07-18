@@ -20,11 +20,13 @@ describe('useHomeHistory', () => {
     let current = state()
     const apply = vi.fn((next: HomeState) => { current = next })
     const saveNow = vi.fn()
+    const onRestore = vi.fn()
     const scope = effectScope()
     const history = scope.run(() => useHomeHistory({
       capture: () => current,
       apply,
       saveNow,
+      onRestore,
       delay: 50,
     }))!
 
@@ -38,6 +40,7 @@ describe('useHomeHistory', () => {
     expect(history.undo()).toBe(true)
     expect(current.sheetWidth).toBe(2440)
     expect(saveNow).toHaveBeenCalledOnce()
+    expect(onRestore).toHaveBeenCalledOnce()
     expect(history.canRedo.value).toBe(true)
 
     await nextTick()
@@ -90,6 +93,32 @@ describe('useHomeHistory', () => {
     scope.stop()
     vi.advanceTimersByTime(10)
     expect(history.canUndo.value).toBe(false)
+    vi.useRealTimers()
+  })
+
+  it('keeps separate named actions as separate undo steps', () => {
+    vi.useFakeTimers()
+    let current = state()
+    const scope = effectScope()
+    const history = scope.run(() => useHomeHistory({
+      capture: () => current,
+      apply: next => { current = next },
+      saveNow: () => undefined,
+      delay: 50,
+    }))!
+
+    current = state(2500)
+    history.record('sheet.width')
+    current = state(2800)
+    history.record('sheet.preset')
+    vi.advanceTimersByTime(50)
+
+    expect(history.lastRecordedAction.value).toBe('sheet.preset')
+    expect(history.undo()).toBe(true)
+    expect(current.sheetWidth).toBe(2500)
+    expect(history.undo()).toBe(true)
+    expect(current.sheetWidth).toBe(2440)
+    scope.stop()
     vi.useRealTimers()
   })
 })

@@ -5,6 +5,7 @@
  */
 import type { CutPiece } from '@/services/types'
 import { MAX_TOTAL_QUANTITY, normalizeQuantity } from './optimizerLimits'
+import { claimPieceId } from './pieceIdentity'
 
 export const HOME_STATE_KEY = 'home_state'
 const VERSION = 1
@@ -42,13 +43,13 @@ const isNonNegNum = (v: unknown): v is number => typeof v === 'number' && Number
 const isHexColor = (v: unknown): v is string =>
   typeof v === 'string' && /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(v)
 
-function validPiece(p: any, remainingQuantity = MAX_TOTAL_QUANTITY): CutPiece | null {
+function validPiece(p: any, usedIds: Set<string>, remainingQuantity = MAX_TOTAL_QUANTITY): CutPiece | null {
   if (!p || typeof p !== 'object') return null
   if (!isPosNum(p.width) || !isPosNum(p.height)) return null
   const quantity = Math.min(normalizeQuantity(p.quantity), remainingQuantity)
   if (quantity <= 0) return null
   const piece: CutPiece = {
-    id: typeof p.id === 'string' && p.id ? p.id : crypto.randomUUID(),
+    id: claimPieceId(p.id, usedIds),
     label: typeof p.label === 'string' ? p.label.slice(0, MAX_LABEL) : '',
     width: p.width,
     height: p.height,
@@ -78,10 +79,11 @@ export function parseHomeState(raw: string | null): HomeState | null {
 
   const pieces: CutPiece[] = []
   if (Array.isArray(data.pieces)) {
+    const usedIds = new Set<string>()
     let remainingQuantity = MAX_TOTAL_QUANTITY
     for (const rawPiece of data.pieces.slice(0, MAX_PIECES)) {
       if (remainingQuantity <= 0) break
-      const piece = validPiece(rawPiece, remainingQuantity)
+      const piece = validPiece(rawPiece, usedIds, remainingQuantity)
       if (!piece) continue
       pieces.push(piece)
       remainingQuantity -= piece.quantity

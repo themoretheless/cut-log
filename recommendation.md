@@ -1,20 +1,20 @@
 # CutLog improvement catalog
 
-This is the canonical backlog for CutLog. It contains exactly **500 distinct,
+This is the canonical backlog for CutLog. It contains **510 distinct,
 actionable observations**: defects, design debt, improvements, product ideas,
-and work completed through v0.1.52. `ARCHITECTURE.md` explains the module
+and work completed through v0.1.53. `ARCHITECTURE.md` explains the module
 boundaries; `README.md` gives the short reading path. Keeping the detailed list
-here avoids copying 500 lines across three documents and follows DRY.
+here avoids copying hundreds of lines across three documents and follows DRY.
 
 Legend: `Bug`, `Debt`, `Improve`, `Idea`, or `Done`; priority `P0` (protect data
 or correctness) through `P3` (optional); effort `S`, `M`, or `L`. Checked items
-landed through the current v0.1.52 change set. Unchecked items are candidates, not
+landed through the current v0.1.53 change set. Unchecked items are candidates, not
 promises; take them in small, independently testable slices.
 
 ## Current focus
 
-1. Replace broad watcher feedback with named project actions, stable identity,
-   and dependency-boundary checks (`CL-116` to `CL-120`).
+1. Add a route error boundary, continue cohesive `Home.vue` extraction, and
+   test the main sheet interaction surface (`CL-121` to `CL-125`).
 2. Add optimizer progress, cooperative cancellation, and protocol tests
    (`CL-059`, `CL-060`, `CL-070`).
 3. Version persisted/share state and add migrations before the schema grows
@@ -61,7 +61,7 @@ promises; take them in small, independently testable slices.
 - [ ] **CL-032 · Bug · P0 · M** — Add a post-layout invariant that every rectangle remains inside its sheet.
 - [ ] **CL-033 · Improve · P1 · S** — Cross-check used area, waste area, and efficiency so their totals cannot diverge.
 - [ ] **CL-034 · Improve · P2 · M** — Build a benchmark matrix comparing all strategies on representative workshop jobs.
-- [ ] **CL-035 · Bug · P1 · S** — Stop using duplicate labels as identity when reconciling optimized pieces with source rows.
+- [x] **CL-035 · Done · P1 · S** — Stop using duplicate labels as identity when reconciling optimized pieces with source rows.
 - [ ] **CL-036 · Bug · P1 · M** — Cover floating-point dimensions near comparison thresholds and normalize epsilon handling.
 - [ ] **CL-037 · Improve · P1 · S** — Define and test the supported semantics of zero kerf instead of relying on incidental math.
 - [ ] **CL-038 · Improve · P1 · S** — Return a specific “part exceeds stock” reason for every rejected orientation.
@@ -151,11 +151,11 @@ promises; take them in small, independently testable slices.
 - [x] **CL-113 · Done · P2 · S** — Isolate result selection and selected-piece reconciliation from rendering.
 - [x] **CL-114 · Done · P2 · M** — Put import preview, validation, and commit into one transactional boundary.
 - [x] **CL-115 · Done · P1 · L** — Establish one owner for project state with explicit `read`, `apply`, and `reset` operations.
-- [ ] **CL-116 · Bug · P1 · M** — Replace the broad deep watcher with intentional event-based history and persistence triggers.
-- [ ] **CL-117 · Bug · P1 · M** — Give every source piece a stable ID that survives duplicate labels, sorting, and optimization.
-- [ ] **CL-118 · Improve · P2 · L** — Express complex multi-field edits as named actions so state transitions are traceable.
-- [ ] **CL-119 · Debt · P1 · S** — Keep translation access out of pure modules by passing display strings at the component edge.
-- [ ] **CL-120 · Improve · P2 · M** — Add dependency-boundary lint rules for `lib`, `services`, composables, and pages.
+- [x] **CL-116 · Done · P1 · M** — Replace the broad deep watcher with intentional event-based history and persistence triggers.
+- [x] **CL-117 · Done · P1 · M** — Give every source piece a stable ID that survives duplicate labels, sorting, and optimization.
+- [x] **CL-118 · Done · P2 · L** — Express complex multi-field edits as named actions so state transitions are traceable.
+- [x] **CL-119 · Done · P1 · S** — Keep translation access out of pure modules by passing display strings at the component edge.
+- [x] **CL-120 · Done · P2 · M** — Add dependency-boundary lint rules for `lib`, `services`, composables, and pages.
 - [ ] **CL-121 · Improve · P2 · M** — Add a route-level error boundary that preserves the current project after a render failure.
 - [ ] **CL-122 · Debt · P2 · L** — Reduce `Home.vue` below 800 lines through cohesive extractions, not line-shuffling wrappers.
 - [ ] **CL-123 · Improve · P2 · M** — Add focused component tests for SheetCard selection, labels, and keyboard behavior.
@@ -172,7 +172,7 @@ promises; take them in small, independently testable slices.
 - [ ] **CL-131 · Improve · P1 · M** — Move large projects and snapshot collections from localStorage to IndexedDB.
 - [ ] **CL-132 · Improve · P2 · S** — Show storage usage and the estimated size of the current project.
 - [ ] **CL-133 · Improve · P1 · S** — Cap snapshot count and prune by an explicit oldest-first policy.
-- [ ] **CL-134 · Bug · P1 · M** — Coalesce rapid field edits into one undo step without merging separate user actions.
+- [x] **CL-134 · Done · P1 · M** — Coalesce rapid field edits into one undo step without merging separate user actions.
 - [ ] **CL-135 · Improve · P2 · M** — Store a compact operation description alongside each history snapshot.
 - [ ] **CL-136 · Bug · P0 · M** — Test that restoring history never records another history entry recursively.
 - [ ] **CL-137 · Improve · P1 · M** — Write critical persisted records atomically with a temporary key and verified swap.
@@ -192,7 +192,7 @@ promises; take them in small, independently testable slices.
 
 ## 7. Piece editor and import (CL-151..CL-175)
 
-- [ ] **CL-151 · Bug · P1 · M** — Introduce stable piece IDs independent of labels and array positions.
+- [x] **CL-151 · Done · P1 · M** — Introduce stable piece IDs independent of labels and array positions.
 - [ ] **CL-152 · Bug · P0 · M** — Validate every imported row before mutating the current project.
 - [ ] **CL-153 · Improve · P1 · M** — Report import failures by line, field, rejected value, and recovery hint.
 - [ ] **CL-154 · Bug · P1 · M** — Parse quoted CSV fields containing delimiters, newlines, and escaped quotes correctly.
@@ -393,7 +393,7 @@ promises; take them in small, independently testable slices.
 - [x] **CL-328 · Done · P0 · S** — Localize 3D assembly, gallery, and cutting-layout accessible names.
 - [x] **CL-329 · Done · P1 · S** — Keep RU and EN dictionaries in key parity after new controls are added.
 - [x] **CL-330 · Done · P1 · S** — Trim surrounding whitespace from the free-form currency value.
-- [ ] **CL-331 · Bug · P1 · M** — Replace label-based domain decisions with stable IDs before translations evolve.
+- [x] **CL-331 · Done · P1 · M** — Replace label-based domain decisions with stable IDs before translations evolve.
 - [ ] **CL-332 · Improve · P1 · M** — Format display numbers through cached locale-aware formatters.
 - [ ] **CL-333 · Bug · P1 · M** — Keep machine exports locale-independent while UI values remain localized.
 - [ ] **CL-334 · Improve · P2 · M** — Add plural forms for sheets, pieces, warnings, and selected items.
@@ -556,7 +556,7 @@ promises; take them in small, independently testable slices.
 
 ## 20. Documentation, onboarding, and maintenance (CL-476..CL-500)
 
-- [x] **CL-476 · Done · P1 · M** — Maintain one canonical, exactly 500-item improvement catalog with stable IDs.
+- [x] **CL-476 · Done · P1 · M** — Maintain one canonical improvement catalog with stable IDs and synchronized summary counts.
 - [x] **CL-477 · Done · P1 · M** — Document a small-step architecture reading order and dependency direction.
 - [x] **CL-478 · Done · P1 · S** — Add a concise README route from setup to core modules, tests, and deeper documents.
 - [x] **CL-479 · Done · P1 · S** — Record which SOLID/DRY extractions landed and which remain.
@@ -582,9 +582,22 @@ promises; take them in small, independently testable slices.
 - [ ] **CL-499 · Improve · P1 · S** — Review architecture docs whenever a dependency direction or state owner changes.
 - [ ] **CL-500 · Improve · P1 · S** — Re-rank this catalog after each release using evidence, user impact, and measured risk.
 
+## 21. Editor-inspired next ideas (CL-501..CL-510)
+
+- [ ] **CL-501 · Idea · P2 · M** — Rank command-palette results by category, recency, and local frequency while keeping deterministic keyboard navigation.
+- [ ] **CL-502 · Idea · P1 · L** — Add stable-ID multi-selection with a shared inspector for safe bulk edits across non-adjacent pieces.
+- [ ] **CL-503 · Idea · P2 · L** — Offer resizable editor panes and compact/focus workspace layouts, persisted locally per device.
+- [ ] **CL-504 · Improve · P1 · M** — Build a diagnostics panel with severity, source-piece navigation, and one-click filters for every readiness issue.
+- [ ] **CL-505 · Idea · P2 · M** — Let numeric fields evaluate bounded arithmetic and unit expressions with a resolved-value preview before commit.
+- [ ] **CL-506 · Idea · P2 · M** — Add a customizable shortcut map with conflict detection, platform-aware modifiers, and one-click reset.
+- [ ] **CL-507 · Idea · P3 · L** — Record repeatable action recipes that preview their affected pieces and commit as one undoable transaction.
+- [ ] **CL-508 · Idea · P2 · M** — Save named editor views containing query, diagnostics filter, sort mode, and visible inspector state.
+- [ ] **CL-509 · Idea · P2 · L** — Compare two layouts with a scrubber or ghost overlay while preserving selected-piece highlighting.
+- [ ] **CL-510 · Improve · P1 · L** — Add a compact append-only local recovery journal that can replay named actions after an abrupt tab or browser crash.
+
 ## Working rule
 
 Select one ID or a tightly related handful, write the failing test or invariant,
 change the smallest owning module, run the relevant unit and browser checks, and
-only then mark the item complete. New discoveries should replace obsolete or
-duplicate entries rather than growing several competing lists.
+only then mark the item complete. Add a new stable ID only for a distinct finding;
+rewrite or remove obsolete duplicates instead of growing competing lists.

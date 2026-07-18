@@ -112,6 +112,17 @@ describe('homeState persistence', () => {
     expect(parsed.pieces[1].id).toBeTruthy() // generated
   })
 
+  it('repairs duplicate persisted ids while preserving the first source identity', () => {
+    const parsed = parseHomeState(serializeHomeState({
+      ...valid,
+      pieces: [valid.pieces[0], { ...valid.pieces[0], label: 'Same label' }],
+    }))!
+
+    expect(parsed.pieces[0].id).toBe('a')
+    expect(parsed.pieces[1].id).not.toBe('a')
+    expect(new Set(parsed.pieces.map(piece => piece.id)).size).toBe(2)
+  })
+
   it('preserves locked pieces', () => {
     const parsed = parseHomeState(serializeHomeState({
       ...valid,

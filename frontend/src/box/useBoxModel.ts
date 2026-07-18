@@ -2,24 +2,35 @@
  * Reactive model for the box builder page: parameters, derived dimensions,
  * piece list, cutting layout, stats and gallery entries. Pure reactive state
  * over src/box/geometry.ts — no Three.js, no DOM — so it is unit-testable.
- * The translate function is injected to keep the model decoupled from the
- * l10n store.
+ * Display strings are prepared by the page and injected as reactive data, so
+ * this model never reaches into translation state or uses labels as identity.
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, toValue, watch, type MaybeRefOrGetter } from 'vue'
 import * as G from '@/box/geometry'
 import { boxParamLimits, clampBoxParams } from '@/box/constraints'
 import { SHELF_COLORS, SHELF_EDGE_COLORS, colorAt } from '@/lib/palette'
 
-export type Translate = (key: string) => string
+export interface BoxLabels {
+  sideShort: string
+  topShort: string
+  bottomShort: string
+  backShort: string
+  shelfShort: string
+  sideWall: string
+  topBottomWall: string
+  backWall: string
+  shelf: string
+}
 
-export interface PieceInfo { w: number; h: number; label: string; color: string }
-export interface LayoutPiece { x: number; y: number; w: number; h: number; label: string; color: string }
+export interface PieceInfo { id: string; w: number; h: number; label: string; color: string }
+export interface LayoutPiece { sourceId: string; x: number; y: number; w: number; h: number; label: string; color: string }
 export interface GalPiece {
   id: string; title: string; count: number; pw: number; ph: number
   d: string; s: number; color: string; xOff: number
 }
 
-export function useBoxModel(t: Translate) {
+export function useBoxModel(labelSource: MaybeRefOrGetter<BoxLabels>) {
+  const labels = () => toValue(labelSource)
   // ── Parameters ────────────────────────────────────────────────────────────
   const W = ref(300)
   const H = ref(400)
@@ -91,15 +102,13 @@ export function useBoxModel(t: Translate) {
   function shelfColor(i: number) { return colorAt(SHELF_COLORS, i) }
   function shelfEdgeColor(i: number) { return colorAt(SHELF_EDGE_COLORS, i) }
 
-  // ── Piece data lookup by label ────────────────────────────────────────────
-  function pieceData(label: string): { ow: number; oh: number; path: string; xOff: number } {
-    const side = t('box.side_short')
-    const back = t('box.back_short')
-    if (label.startsWith(side)) return { ow: SideOW.value, oh: H.value, path: pathSide(), xOff: SideOff.value }
-    if (label === t('box.top_short')) return { ow: W.value, oh: TopD.value, path: pathTopBottom(TopD.value, Math.max(Bevel.value, 0)), xOff: 0 }
-    if (label === t('box.bottom_short')) return { ow: W.value, oh: BotD.value, path: pathTopBottom(BotD.value, Math.max(-Bevel.value, 0)), xOff: 0 }
-    if (label.startsWith(back)) return { ow: W.value, oh: H.value, path: pathBack(), xOff: 0 }
-    const shIdx = parseInt(label.replace(t('box.shelf_short'), '')) - 1
+  // ── Piece data lookup by stable structural id ─────────────────────────────
+  function pieceData(sourceId: string): { ow: number; oh: number; path: string; xOff: number } {
+    if (sourceId.startsWith('side-')) return { ow: SideOW.value, oh: H.value, path: pathSide(), xOff: SideOff.value }
+    if (sourceId === 'top') return { ow: W.value, oh: TopD.value, path: pathTopBottom(TopD.value, Math.max(Bevel.value, 0)), xOff: 0 }
+    if (sourceId === 'bottom') return { ow: W.value, oh: BotD.value, path: pathTopBottom(BotD.value, Math.max(-Bevel.value, 0)), xOff: 0 }
+    if (sourceId === 'back') return { ow: W.value, oh: H.value, path: pathBack(), xOff: 0 }
+    const shIdx = Number.parseInt(sourceId.replace('shelf-', ''), 10)
     const sys = shelfSlotYs()
     const sy = shIdx >= 0 && shIdx < sys.length ? sys[shIdx] : 0
     const sd = shelfDepthAt(sy)
@@ -109,18 +118,18 @@ export function useBoxModel(t: Translate) {
 
   // ── Cutting layout (shelf-based FFD with rotation) ────────────────────────
   function allPieces(): PieceInfo[] {
-    const side = t('box.side_short')
+    const text = labels()
     const list: PieceInfo[] = [
-      { w: SideOW.value, h: H.value, label: `${side}1`, color: 'var(--accent)' },
-      { w: SideOW.value, h: H.value, label: `${side}2`, color: 'var(--accent)' },
-      { w: W.value, h: TopD.value, label: t('box.top_short'), color: '#27ae60' },
-      { w: W.value, h: BotD.value, label: t('box.bottom_short'), color: Bevel.value !== 0 ? '#1abc9c' : '#27ae60' },
-      { w: W.value, h: H.value, label: t('box.back_short'), color: '#a855f7' },
+      { id: 'side-1', w: SideOW.value, h: H.value, label: `${text.sideShort}1`, color: 'var(--accent)' },
+      { id: 'side-2', w: SideOW.value, h: H.value, label: `${text.sideShort}2`, color: 'var(--accent)' },
+      { id: 'top', w: W.value, h: TopD.value, label: text.topShort, color: '#27ae60' },
+      { id: 'bottom', w: W.value, h: BotD.value, label: text.bottomShort, color: Bevel.value !== 0 ? '#1abc9c' : '#27ae60' },
+      { id: 'back', w: W.value, h: H.value, label: text.backShort, color: '#a855f7' },
     ]
     const sys = shelfSlotYs()
     for (let i = 0; i < sys.length; i++) {
       const sd = shelfDepthAt(sys[i])
-      list.push({ w: W.value, h: sd, label: `${t('box.shelf_short')}${i + 1}`, color: Bevel.value !== 0 ? shelfColor(i) : '#e67e22' })
+      list.push({ id: `shelf-${i}`, w: W.value, h: sd, label: `${text.shelfShort}${i + 1}`, color: Bevel.value !== 0 ? shelfColor(i) : '#e67e22' })
     }
     list.sort((a, b) => b.w * b.h - a.w * a.h)
     return list
@@ -128,7 +137,7 @@ export function useBoxModel(t: Translate) {
 
   function computeLayout(): LayoutPiece[][] {
     return G.computeLayout(allPieces(), SheetW.value, SheetH.value, CutGap.value)
-      .map(sheet => sheet.map(s => ({ x: s.x, y: s.y, w: s.w, h: s.h, label: s.piece.label, color: s.piece.color })))
+      .map(sheet => sheet.map(s => ({ sourceId: s.piece.id, x: s.x, y: s.y, w: s.w, h: s.h, label: s.piece.label, color: s.piece.color })))
   }
 
   const cuttingSheets = computed(() => computeLayout())
@@ -164,27 +173,28 @@ export function useBoxModel(t: Translate) {
   // ── Gallery entries ───────────────────────────────────────────────────────
   const galPieces = computed<GalPiece[]>(() => {
     const bv = Bevel.value
+    const text = labels()
     // Paths and thumb scales are computed eagerly so re-renders reuse them.
     const thumb = (pw: number, ph: number) => G.svgScale(pw, ph) * 0.22
     const list: GalPiece[] = [
-      { id: 'side', title: `${t('box.side_wall')}`, count: 2, pw: SideOW.value, ph: H.value, d: pathSide(), s: thumb(SideOW.value, H.value), color: 'var(--accent)', xOff: SideOff.value },
+      { id: 'side', title: text.sideWall, count: 2, pw: SideOW.value, ph: H.value, d: pathSide(), s: thumb(SideOW.value, H.value), color: 'var(--accent)', xOff: SideOff.value },
     ]
     if (bv === 0) {
-      list.push({ id: 'tb', title: `${t('box.top_bottom_wall')}`, count: 2, pw: W.value, ph: D.value, d: pathTopBottom(), s: thumb(W.value, D.value), color: '#27ae60', xOff: 0 })
+      list.push({ id: 'tb', title: text.topBottomWall, count: 2, pw: W.value, ph: D.value, d: pathTopBottom(), s: thumb(W.value, D.value), color: '#27ae60', xOff: 0 })
     } else {
       const topOff = Math.max(bv, 0), botOff = Math.max(-bv, 0)
-      list.push({ id: 'top', title: `${t('box.top_short')}`, count: 1, pw: W.value, ph: TopD.value, d: pathTopBottom(TopD.value, topOff), s: thumb(W.value, TopD.value), color: '#27ae60', xOff: 0 })
-      list.push({ id: 'bot', title: `${t('box.bottom_short')}`, count: 1, pw: W.value, ph: BotD.value, d: pathTopBottom(BotD.value, botOff), s: thumb(W.value, BotD.value), color: '#1abc9c', xOff: 0 })
+      list.push({ id: 'top', title: text.topShort, count: 1, pw: W.value, ph: TopD.value, d: pathTopBottom(TopD.value, topOff), s: thumb(W.value, TopD.value), color: '#27ae60', xOff: 0 })
+      list.push({ id: 'bot', title: text.bottomShort, count: 1, pw: W.value, ph: BotD.value, d: pathTopBottom(BotD.value, botOff), s: thumb(W.value, BotD.value), color: '#1abc9c', xOff: 0 })
     }
-    list.push({ id: 'back', title: `${t('box.back_wall')}`, count: 1, pw: W.value, ph: H.value, d: pathBack(), s: thumb(W.value, H.value), color: '#a855f7', xOff: 0 })
+    list.push({ id: 'back', title: text.backWall, count: 1, pw: W.value, ph: H.value, d: pathBack(), s: thumb(W.value, H.value), color: '#a855f7', xOff: 0 })
     const sys = shelfSlotYs()
     if (bv === 0 && sys.length > 0) {
-      list.push({ id: 'shelf', title: `${t('box.shelf')}`, count: sys.length, pw: W.value, ph: D.value, d: pathShelf(), s: thumb(W.value, D.value), color: '#e67e22', xOff: 0 })
+      list.push({ id: 'shelf', title: text.shelf, count: sys.length, pw: W.value, ph: D.value, d: pathShelf(), s: thumb(W.value, D.value), color: '#e67e22', xOff: 0 })
     } else {
       for (let i = 0; i < sys.length; i++) {
         const sd = shelfDepthAt(sys[i])
         const sOff = shelfOffsetAt(sys[i])
-        list.push({ id: `shelf${i}`, title: `${t('box.shelf_short')}${i + 1}`, count: 1, pw: W.value, ph: sd, d: pathShelf(sd, sOff), s: thumb(W.value, sd), color: shelfColor(i), xOff: 0 })
+        list.push({ id: `shelf${i}`, title: `${text.shelfShort}${i + 1}`, count: 1, pw: W.value, ph: sd, d: pathShelf(sd, sOff), s: thumb(W.value, sd), color: shelfColor(i), xOff: 0 })
       }
     }
     return list
@@ -198,17 +208,17 @@ export function useBoxModel(t: Translate) {
   })
 
   // pieceData rebuilds the full SVG path, so the cut-sheet template reads it
-  // through this cache (one entry per label) instead of per piece per render.
-  const pieceDataByLabel = computed(() => {
+  // through this cache (one entry per stable source) instead of per render.
+  const pieceDataById = computed(() => {
     const m = new Map<string, ReturnType<typeof pieceData>>()
     for (const p of cuttingPieces.value) {
-      if (!m.has(p.label)) m.set(p.label, pieceData(p.label))
+      m.set(p.id, pieceData(p.id))
     }
     return m
   })
 
   function getCutSheetTransform(p: LayoutPiece): string {
-    const pd = pieceDataByLabel.value.get(p.label) ?? pieceData(p.label)
+    const pd = pieceDataById.value.get(p.sourceId) ?? pieceData(p.sourceId)
     const rotated = Math.abs(p.w - pd.oh) < 1 && Math.abs(p.h - pd.ow) < 1
     const bvOff = pd.xOff
     return rotated
@@ -217,7 +227,7 @@ export function useBoxModel(t: Translate) {
   }
 
   function getCutSheetPath(p: LayoutPiece): string {
-    return (pieceDataByLabel.value.get(p.label) ?? pieceData(p.label)).path
+    return (pieceDataById.value.get(p.sourceId) ?? pieceData(p.sourceId)).path
   }
 
   return {
