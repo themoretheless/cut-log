@@ -29,6 +29,7 @@ export interface Sheet {
 }
 
 export interface UnplacedPiece {
+  sourceId: string
   label: string
   width: number
   height: number

@@ -76,4 +76,22 @@ describe('usePieceList', () => {
     expect(list.move(0, 1)).toBe(true)
     expect(list.add(input('D')).color).toBe(PIECE_COLORS[3])
   })
+
+  it('repairs duplicate ids when applying external project state', () => {
+    const ids = ['repaired-id']
+    const list = usePieceList({
+      sheetWidth: 2440,
+      sheetHeight: 1220,
+      minMachineCut: 30,
+      createId: () => ids.shift()!,
+    })
+    const base = {
+      id: 'same-id', label: 'Same', width: 400, height: 300,
+      quantity: 1, allowRotation: true, color: '#fff',
+    }
+
+    list.replace([base, { ...base }])
+
+    expect(list.pieces.map(piece => piece.id)).toEqual(['same-id', 'repaired-id'])
+  })
 })

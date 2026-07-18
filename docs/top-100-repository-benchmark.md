@@ -172,27 +172,28 @@ remaining plain Vue.
 | Stable-ID selection reconciled against live document data | Excalidraw selection helpers; tldraw record IDs | `useResultSelection` owns selected piece, placements, inspector stats, and stale-ID cleanup | `CL-113` |
 | Preview first, commit once | Actual Budget import preview/import split | `usePieceImport` parses, validates geometry and total capacity, then commits one batch | `CL-114` |
 | One document owner with snapshot operations | tldraw editor store; local-first document stores | `useProjectState` owns refs and detached `read`, `apply`, and `reset` operations | `CL-115` |
+| Named mutation effects instead of watcher feedback | tldraw transactions; BlockSuite command execution | `useProjectActions` declares layout invalidation, persistence, and history per semantic action | `CL-116`, `CL-118` |
+| Opaque identity across every adapter | Excalidraw element IDs; tldraw record IDs | Source IDs remain strings through storage, Worker, WASM, Rust placement, and unplaced results | `CL-117` |
+| Display text supplied at the presentation edge | Vue I18n composition patterns | `BoxBuilder.vue` prepares reactive labels; geometry uses structural piece IDs | `CL-119` |
+| Executable dependency direction | unplugin and large editor monorepo boundary checks | A TypeScript-aware boundary script runs before frontend tests and builds | `CL-120` |
 
 No implementation code was copied from the benchmarked repositories. The
 patterns were reduced to CutLog-sized interfaces and covered by local tests.
 
 ## Next ten benchmark-derived candidates
 
-1. Add versioned project migrations and preserve malformed records for recovery
-   (`CL-128` to `CL-131`).
-2. Make history edits explicit transactions with operation names (`CL-116`,
-   `CL-134`, `CL-135`).
-3. Define a discriminated, versioned Worker protocol (`CL-061`, `CL-062`,
-   `CL-068`).
-4. Add progress phases and cooperative optimizer cancellation (`CL-043`,
-   `CL-044`, `CL-059`, `CL-060`).
-5. Report import errors by line and parse fully quoted CSV (`CL-153`, `CL-154`).
-6. Add placement invariant and property tests (`CL-031`, `CL-032`, `CL-039`).
-7. Add stable export metadata, units, and independent DXF validation (`CL-178`
-   to `CL-187`).
-8. Move multiple named projects to IndexedDB with atomic recovery (`CL-131`,
-   `CL-137`, `CL-138`).
-9. Add command aliases/categories only when the registry grows beyond one flat
-   working set (`CL-111` follow-up; no new framework).
-10. Add dependency-boundary linting and keep `Home.vue` shrinking by cohesive
-    behavior (`CL-120`, `CL-122`).
+The canonical acceptance-oriented descriptions are `CL-501` to `CL-510` in
+[`recommendation.md`](../recommendation.md). Their external editor signals are:
+
+| Catalog | Recurring editor pattern | CutLog direction |
+|---|---|---|
+| `CL-501` | Categorized, adaptive command launchers | Command groups and local frecency |
+| `CL-502` | Stable multi-selection plus property inspectors | Non-adjacent piece bulk editing |
+| `CL-503` | Saved dock/panel arrangements | Resizable compact and focus layouts |
+| `CL-504` | Navigable diagnostics panels | Severity, piece links, and issue filters |
+| `CL-505` | Expression-aware numeric fields | Bounded arithmetic and unit preview |
+| `CL-506` | User keymaps with conflict handling | Platform-aware shortcut customization |
+| `CL-507` | Repeatable commands and macros | Previewed recipes as one undo step |
+| `CL-508` | Named workspace views | Saved query, sort, filters, and inspector state |
+| `CL-509` | Visual document comparison | Layout scrubber or ghost overlay |
+| `CL-510` | Journaling recovery models | Local named-action replay after a crash |

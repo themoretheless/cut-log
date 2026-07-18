@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import NumberField from '@/components/NumberField.vue'
 import SheetCard from '@/components/SheetCard.vue'
 import { startOptimization, type OptimizationTask } from '@/services/optimizerWorker'
@@ -26,6 +26,7 @@ import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 import { useCommandPalette, type PaletteCommand } from '@/composables/useCommandPalette'
 import { useCosting } from '@/composables/useCosting'
 import { usePieceImport } from '@/composables/usePieceImport'
+import { useProjectActions, type ProjectActionName } from '@/composables/useProjectActions'
 import { useProjectState } from '@/composables/useProjectState'
 import { useResultSelection } from '@/composables/useResultSelection'
 import { useL10n } from '@/stores/l10n'
@@ -63,14 +64,29 @@ const selectedStrategy = ref<CuttingStrategy>(CuttingStrategy.Auto)
 function onPresetChanged(e: Event) {
   const val = (e.target as HTMLSelectElement).value
   const preset = sheetPresets.find(p => p.key === val)
-  if (preset) {
-    sheetWidth.value = preset.w
-    sheetHeight.value = preset.h
+  if (preset && (sheetWidth.value !== preset.w || sheetHeight.value !== preset.h)) {
+    runProjectEdit('sheet.preset', () => {
+      sheetWidth.value = preset.w
+      sheetHeight.value = preset.h
+      return true
+    })
   }
 }
 
-function onSheetWidthChanged(v: number) { sheetWidth.value = v }
-function onSheetHeightChanged(v: number) { sheetHeight.value = v }
+function onSheetWidthChanged(value: number) {
+  if (sheetWidth.value === value) return
+  runProjectEdit('sheet.width', () => { sheetWidth.value = value })
+}
+
+function onSheetHeightChanged(value: number) {
+  if (sheetHeight.value === value) return
+  runProjectEdit('sheet.height', () => { sheetHeight.value = value })
+}
+
+function onKerfChanged(value: number) {
+  if (kerf.value === value) return
+  runProjectEdit('sheet.kerf', () => { kerf.value = value })
+}
 
 // ── New piece form ───────────────────────────────────────────────────────────
 const newLabel = ref('')
@@ -134,6 +150,17 @@ const {
   currency: projectState.currency,
 })
 
+function onPricePerSheetChanged(value: number) {
+  if (pricePerSheet.value === value) return
+  runMetadataEdit('cost.price', () => { pricePerSheet.value = value })
+}
+
+function onCurrencyChanged(event: Event) {
+  const value = (event.target as HTMLInputElement).value.trim()
+  if (currency.value === value) return
+  runMetadataEdit('cost.currency', () => { currency.value = value })
+}
+
 const { exportPiecesCsv, exportSvg, exportDxf, printLayout } = useHomeExports({
   pieces: () => pieces,
   result,
@@ -192,7 +219,12 @@ const saveState = homeStorage.scheduleSave
 const saveStateNow = homeStorage.saveNow
 const loadState = homeStorage.load
 
-const homeHistory = useHomeHistory({ capture: currentState, apply: applyState, saveNow: saveStateNow })
+const homeHistory = useHomeHistory({
+  capture: currentState,
+  apply: applyState,
+  saveNow: saveStateNow,
+  onRestore: invalidateOptimization,
+})
 const { canUndo, canRedo, record: recordHistory, undo: doUndo, redo: doRedo } = homeHistory
 
 const projectSnapshotStore = useProjectSnapshots({ capture: currentState })
@@ -248,11 +280,6 @@ function clearOperationLog() {
   saveOperationLogNow()
 }
 
-function persistProjectEdit() {
-  saveState()
-  recordHistory()
-}
-
 function invalidateOptimization() {
   ++calcGen
   activeOptimization?.cancel()
@@ -261,9 +288,18 @@ function invalidateOptimization() {
   calculated.value = false
 }
 
-function commitProjectEdit() {
-  invalidateOptimization()
-  persistProjectEdit()
+const projectActions = useProjectActions({
+  invalidateLayout: invalidateOptimization,
+  scheduleSave: saveState,
+  recordHistory,
+})
+
+function runProjectEdit<T>(name: ProjectActionName, mutate: () => T): T {
+  return projectActions.run(name, mutate)
+}
+
+function runMetadataEdit<T>(name: ProjectActionName, mutate: () => T): T {
+  return projectActions.run(name, mutate, { impact: 'metadata', history: false })
 }
 
 // A shared link wins over saved state: open the linked project, then strip the
@@ -272,6 +308,7 @@ function loadInitialState() {
   const shared = readShareFromHash(location.hash)
   if (shared) {
     applyState(shared)
+    saveStateNow()
     history.replaceState(null, '', location.pathname + location.search)
     showToast(t('link_loaded'))
     return
@@ -291,19 +328,18 @@ function addPiece() {
   const addedLabel = newLabel.value
   const addedWidth = newWidth.value
   const addedHeight = newHeight.value
-  pieceList.add({
+  runProjectEdit('piece.add', () => pieceList.add({
     label: addedLabel,
     width: addedWidth,
     height: addedHeight,
     quantity: newQty.value,
     allowRotation: newAllowRotation.value,
-  })
+  }))
 
   newLabel.value = ''
   newWidth.value = 400
   newHeight.value = 300
   newQty.value = 1
-  commitProjectEdit()
   recordOperation(t('operation.add_piece'), `${addedLabel || t('unnamed_piece')} · ${addedWidth}×${addedHeight}`)
 }
 
@@ -329,10 +365,12 @@ function importPieces() {
 
   addError.value = ''
   saveAutoProjectSnapshot(t('snapshot.auto_before_import'))
-  const imported = pieceImport.commit(rows => { pieceList.addMany(rows) })
+  const imported = runProjectEdit(
+    'piece.import',
+    () => pieceImport.commit(rows => { pieceList.addMany(rows) }),
+  )
   if (!imported) return
   showImport.value = false
-  commitProjectEdit()
   const msg = imported.skipped
     ? t('import_added_skipped').replace('{0}', String(imported.added)).replace('{1}', String(imported.skipped))
     : t('import_added').replace('{0}', String(imported.added))
@@ -344,25 +382,23 @@ function importPieces() {
 
 function removePiece(p: CutPiece) {
   saveAutoProjectSnapshot(t('snapshot.auto_before_delete'))
-  if (!pieceList.remove(p)) return
-  commitProjectEdit()
+  if (!runProjectEdit('piece.remove', () => pieceList.remove(p))) return
   recordOperation(t('operation.delete_piece'), p.label.trim() || t('unnamed_piece'))
 }
 
 // Duplicate the given piece (or the selected/last one for the Ctrl+D shortcut),
 // inserting the copy right after it with a fresh id and the next palette color.
 function duplicate(id: string | null) {
-  if (!pieceList.duplicate(id)) return
-  commitProjectEdit()
+  runProjectEdit('piece.duplicate', () => pieceList.duplicate(id))
 }
 
 function clearAll() {
+  if (!pieces.length) return
   saveAutoProjectSnapshot(t('snapshot.auto_before_clear'))
-  const count = pieceList.clear()
+  const count = runProjectEdit('piece.clear', () => pieceList.clear())
   result.value = null
   calculated.value = false
   lastBulkDiff.value = null
-  commitProjectEdit()
   recordOperation(t('operation.clear'), t('operation.clear_detail').replace('{0}', String(count)))
 }
 
@@ -614,8 +650,7 @@ function clearPieceFilters() {
 
 function duplicatePiece(source = selectedPiece.value) {
   if (!source) return
-  if (!pieceList.duplicate(source.id, true)) return
-  commitProjectEdit()
+  if (!runProjectEdit('piece.duplicate', () => pieceList.duplicate(source.id, true))) return
   showToast(t('piece_duplicated'))
   recordOperation(t('operation.duplicate_piece'), source.label.trim() || t('unnamed_piece'))
 }
@@ -625,39 +660,41 @@ function deleteSelectedPiece() {
 }
 
 function togglePieceLock(piece: CutPiece) {
-  pieceList.toggleLock(piece)
-  commitProjectEdit()
+  runProjectEdit('piece.lock', () => {
+    pieceList.toggleLock(piece)
+  })
   showToast(piece.locked ? t('piece_locked') : t('piece_unlocked'))
   recordOperation(piece.locked ? t('operation.lock_piece') : t('operation.unlock_piece'), piece.label.trim() || t('unnamed_piece'))
 }
 
 function updatePieceLabel(piece: CutPiece, label: string) {
-  if (pieceList.updateLabel(piece, label)) commitProjectEdit()
+  runProjectEdit('piece.label', () => pieceList.updateLabel(piece, label))
 }
 
 function updatePieceWidth(piece: CutPiece, width: number) {
-  if (pieceList.updateWidth(piece, width)) commitProjectEdit()
+  runProjectEdit('piece.width', () => pieceList.updateWidth(piece, width))
 }
 
 function updatePieceHeight(piece: CutPiece, height: number) {
-  if (pieceList.updateHeight(piece, height)) commitProjectEdit()
+  runProjectEdit('piece.height', () => pieceList.updateHeight(piece, height))
 }
 
 function updatePieceQuantity(piece: CutPiece, quantity: number) {
-  if (pieceList.updateQuantity(piece, quantity)) commitProjectEdit()
+  runProjectEdit('piece.quantity', () => pieceList.updateQuantity(piece, quantity))
 }
 
 function togglePieceRotation(piece: CutPiece) {
-  pieceList.toggleRotation(piece)
-  commitProjectEdit()
+  runProjectEdit('piece.rotation', () => pieceList.toggleRotation(piece))
 }
 
 function setVisibleRotation(allowRotation: boolean) {
   if (!visibleEditablePieces.value.length) return
   saveAutoProjectSnapshot(t('snapshot.auto_before_rotation'))
-  const change = pieceList.setVisibleRotation(allowRotation)
+  const change = runProjectEdit(
+    'pieces.rotation',
+    () => pieceList.setVisibleRotation(allowRotation),
+  )
   if (!change) return
-  commitProjectEdit()
   showToast(allowRotation ? t('rotation_enabled') : t('rotation_disabled'))
   lastBulkDiff.value = {
     title: allowRotation ? t('bulk.rotation_on') : t('bulk.rotation_off'),
@@ -678,7 +715,10 @@ function mutateVisibleDimensions(
 ) {
   if (!visibleEditablePieces.value.length) return
   saveAutoProjectSnapshot(t('snapshot.auto_before_transform'))
-  const change = pieceList.mutateVisibleDimensions(transform)
+  const change = runProjectEdit(
+    'pieces.transform',
+    () => pieceList.mutateVisibleDimensions(transform),
+  )
   if (!change) return
   lastBulkDiff.value = {
     title,
@@ -689,7 +729,6 @@ function mutateVisibleDimensions(
     sampleBefore: change.sampleBefore,
     sampleAfter: change.sampleAfter,
   }
-  commitProjectEdit()
   showToast(t(toastKey))
   recordOperation(title, t('operation.visible_count').replace('{0}', String(change.changed)))
 }
@@ -714,8 +753,7 @@ function roundVisibleDimensions() {
 }
 
 function applyPieceSort() {
-  if (!pieceList.sort()) return
-  commitProjectEdit()
+  if (!runProjectEdit('pieces.sort', () => pieceList.sort())) return
   showToast(t('pieces_sorted'))
   recordOperation(t('operation.sort'), t(`sort.${pieceSortMode.value}`))
 }
@@ -775,14 +813,13 @@ function loadExample() {
     { label: t('example.shelf'), w: 760, h: 300, q: 4 },
     { label: t('example.back'), w: 1800, h: 800, q: 1 },
   ]
-  pieceList.addMany(ex.map(piece => ({
+  runProjectEdit('example.load', () => pieceList.addMany(ex.map(piece => ({
     label: piece.label,
     width: piece.w,
     height: piece.h,
     quantity: piece.q,
     allowRotation: true,
-  })))
-  commitProjectEdit()
+  }))))
   recordOperation(t('operation.load_example'), t('operation.import_detail').replace('{0}', String(ex.length)))
   calculate()
 }
@@ -807,18 +844,16 @@ function canMovePiece(sourceIndex: number, direction: -1 | 1): boolean {
 }
 
 function movePiece(sourceIndex: number, direction: -1 | 1) {
-  if (!pieceList.move(sourceIndex, direction)) return
-  commitProjectEdit()
+  if (!runProjectEdit('pieces.reorder', () => pieceList.move(sourceIndex, direction))) return
   recordOperation(t('operation.reorder'), t('operation.visible_count').replace('{0}', '1'))
 }
 
 function dropPiece(targetIdx: number) {
   const sourceIndex = dragStartIdx.value
   const unlockedCount = pieces.filter(piece => !piece.locked).length
-  if (!pieceList.drop(sourceIndex, targetIdx)) return
+  if (!runProjectEdit('pieces.reorder', () => pieceList.drop(sourceIndex, targetIdx))) return
   dragStartIdx.value = -1
   dragOverIdx.value = -1
-  commitProjectEdit()
   recordOperation(t('operation.reorder'), t('operation.visible_count').replace('{0}', String(unlockedCount)))
 }
 
@@ -888,11 +923,6 @@ useKeyboardShortcuts([
 ])
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
-// Persist top-level scalar edits here. Piece mutations call commitProjectEdit()
-// from their concrete handlers so typing in a row does not trigger a deep watch.
-watch([sheetWidth, sheetHeight, kerf], commitProjectEdit)
-watch([pricePerSheet, currency], persistProjectEdit)
-
 onMounted(() => {
   loadInitialState()
   projectSnapshotStore.load()
@@ -951,13 +981,13 @@ onUnmounted(() => {
           </div>
           <div class="form-row">
             <label for="sheet-kerf">{{ t('kerf_mm') }}</label>
-            <NumberField id="sheet-kerf" :aria-label="t('kerf_mm')" v-model="kerf" :min="0" :step="1" />
+            <NumberField id="sheet-kerf" :aria-label="t('kerf_mm')" :model-value="kerf" @update:model-value="onKerfChanged" :min="0" :step="1" />
           </div>
           <div class="form-row">
             <label for="sheet-price">{{ t('cost.price_per_sheet') }}</label>
             <div class="price-row">
-              <NumberField id="sheet-price" :aria-label="t('cost.price_per_sheet')" v-model="pricePerSheet" :min="0" :step="1" />
-              <input class="currency-input" type="text" v-model.trim="currency" maxlength="3" :title="t('cost.currency')" :aria-label="t('cost.currency')" />
+              <NumberField id="sheet-price" :aria-label="t('cost.price_per_sheet')" :model-value="pricePerSheet" @update:model-value="onPricePerSheetChanged" :min="0" :step="1" />
+              <input class="currency-input" type="text" :value="currency" @input="onCurrencyChanged" maxlength="3" :title="t('cost.currency')" :aria-label="t('cost.currency')" />
             </div>
           </div>
           <div class="form-row">
@@ -1461,7 +1491,7 @@ onUnmounted(() => {
           <div v-if="result.unplacedPieces.length" class="alert alert-warn">
             <strong>{{ t('unplaced_warn') }}</strong>
             <ul>
-              <li v-for="(u, ui) in result.unplacedPieces" :key="ui">
+              <li v-for="(u, ui) in result.unplacedPieces" :key="`${u.sourceId}-${ui}`">
                 <template v-if="u.label.trim()">{{ u.label.trim() }} </template>({{ u.width.toFixed(0) }}&times;{{ u.height.toFixed(0) }})
               </li>
             </ul>

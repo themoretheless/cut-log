@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
 import NumberField from '@/components/NumberField.vue'
 import { useL10n } from '@/stores/l10n'
 import { wrapCutSvg } from '@/box/geometry'
@@ -10,7 +10,19 @@ import { usePieceGallery } from '@/box/three/usePieceGallery'
 
 const { t } = useL10n()
 
-const model = useBoxModel(t)
+const boxLabels = computed(() => ({
+  sideShort: t('box.side_short'),
+  topShort: t('box.top_short'),
+  bottomShort: t('box.bottom_short'),
+  backShort: t('box.back_short'),
+  shelfShort: t('box.shelf_short'),
+  sideWall: t('box.side_wall'),
+  topBottomWall: t('box.top_bottom_wall'),
+  backWall: t('box.back_wall'),
+  shelf: t('box.shelf'),
+}))
+
+const model = useBoxModel(boxLabels)
 const {
   W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, SheetW, SheetH, CutGap, galIdx, paramLimits,
   Wi, Hi, SideOW, TopD, BotD,
@@ -19,7 +31,7 @@ const {
   galPieces, getCutSheetTransform, getCutSheetPath,
 } = model
 
-const assembly = useAssemblyScene(model, t)
+const assembly = useAssemblyScene(model, boxLabels)
 const { isoExplode } = assembly
 const gallery = usePieceGallery(model)
 
@@ -60,6 +72,7 @@ watch(
 )
 
 watch(galIdx, () => { assembly.update(); gallery.update(true) }, { flush: 'post' })
+watch(boxLabels, () => { assembly.update() }, { flush: 'post' })
 
 // ── Download helpers ────────────────────────────────────────────────────────
 function galDlSvg() {

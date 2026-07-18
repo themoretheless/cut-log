@@ -23,7 +23,7 @@ fn make_pieces(types: usize, max_qty: u64, seed: u64) -> Vec<CutPiece> {
     let mut rng = Lcg(seed);
     (0..types)
         .map(|i| CutPiece {
-            id: uuid::Uuid::from_u128(i as u128),
+            id: uuid::Uuid::from_u128(i as u128).to_string(),
             label: format!("piece-{i}"),
             width: rng.range(100, 1200),
             height: rng.range(100, 800),

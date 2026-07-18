@@ -6,6 +6,7 @@ interface HomeHistoryOptions {
   capture: () => HomeState
   apply: (state: HomeState) => void
   saveNow: () => void
+  onRestore?: () => void
   delay?: number
   limit?: number
 }
@@ -13,8 +14,11 @@ interface HomeHistoryOptions {
 export function useHomeHistory(options: HomeHistoryOptions) {
   const history = createHistory(serializeHomeState(options.capture()), options.limit)
   const revision = ref(0)
+  const lastRecordedAction = ref<string | null>(null)
   let restoring = false
   let timer: ReturnType<typeof setTimeout> | undefined
+  let pendingAction: string | null = null
+  let pendingSnapshot: string | null = null
 
   const canUndo = computed(() => {
     revision.value
@@ -29,14 +33,29 @@ export function useHomeHistory(options: HomeHistoryOptions) {
     revision.value++
   }
 
-  function record() {
+  function flushPendingRecord() {
+    const action = pendingAction
+    const snapshot = pendingSnapshot
+    pendingAction = null
+    pendingSnapshot = null
+    timer = undefined
+    if (snapshot === null || snapshot === history.current()) return
+    history.snapshot(snapshot)
+    lastRecordedAction.value = action
+    refresh()
+  }
+
+  function record(action = 'project.edit') {
     if (restoring) return
+    const snapshot = serializeHomeState(options.capture())
+    if (timer && pendingAction !== action) {
+      clearTimeout(timer)
+      flushPendingRecord()
+    }
     clearTimeout(timer)
-    timer = setTimeout(() => {
-      timer = undefined
-      history.snapshot(serializeHomeState(options.capture()))
-      refresh()
-    }, options.delay ?? 350)
+    pendingAction = action
+    pendingSnapshot = snapshot
+    timer = setTimeout(flushPendingRecord, options.delay ?? 350)
   }
 
   function restore(snapshot: string): boolean {
@@ -45,7 +64,10 @@ export function useHomeHistory(options: HomeHistoryOptions) {
     restoring = true
     clearTimeout(timer)
     timer = undefined
+    pendingAction = null
+    pendingSnapshot = null
     options.apply(state)
+    options.onRestore?.()
     options.saveNow()
     nextTick(() => { restoring = false })
     return true
@@ -70,15 +92,20 @@ export function useHomeHistory(options: HomeHistoryOptions) {
   function reset() {
     clearTimeout(timer)
     timer = undefined
+    pendingAction = null
+    pendingSnapshot = null
     history.reset(serializeHomeState(options.capture()))
+    lastRecordedAction.value = null
     refresh()
   }
 
   function dispose() {
     clearTimeout(timer)
     timer = undefined
+    pendingAction = null
+    pendingSnapshot = null
   }
 
   onScopeDispose(dispose)
-  return { canUndo, canRedo, record, undo, redo, reset, dispose }
+  return { canUndo, canRedo, lastRecordedAction, record, undo, redo, reset, dispose }
 }

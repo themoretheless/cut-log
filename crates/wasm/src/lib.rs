@@ -98,7 +98,7 @@ fn convert_sheet(s: &Sheet) -> SheetOutput {
             .placed_pieces
             .iter()
             .map(|p| PlacedOutput {
-                source_id: p.source_id.to_string(),
+                source_id: p.source_id.clone(),
                 source_label: p.label.clone(),
                 source_color: p.color.clone(),
                 x: p.x,
@@ -122,7 +122,7 @@ fn run_optimize(input_json: &str) -> Result<String, String> {
         .pieces
         .into_iter()
         .map(|p| CutPiece {
-            id: uuid::Uuid::parse_str(&p.id).unwrap_or_else(|_| uuid::Uuid::new_v4()),
+            id: if p.id.trim().is_empty() { uuid::Uuid::new_v4().to_string() } else { p.id },
             label: p.label,
             width: p.width,
             height: p.height,

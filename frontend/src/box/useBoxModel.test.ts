@@ -2,12 +2,21 @@ import { describe, it, expect } from 'vitest'
 import { nextTick } from 'vue'
 import { useBoxModel } from './useBoxModel'
 
-// Stub translate: return the last key segment, so labels are stable and unique.
-const t = (key: string) => key.split('.').pop() as string
+const labels = {
+  sideShort: 'side_short',
+  topShort: 'top_short',
+  bottomShort: 'bottom_short',
+  backShort: 'back_short',
+  shelfShort: 'shelf_short',
+  sideWall: 'side_wall',
+  topBottomWall: 'top_bottom_wall',
+  backWall: 'back_wall',
+  shelf: 'shelf',
+}
 
 describe('useBoxModel', () => {
   it('lists 5 pieces sorted by area desc with defaults (no shelves)', () => {
-    const m = useBoxModel(t)
+    const m = useBoxModel(labels)
     const pieces = m.allPieces()
     expect(pieces).toHaveLength(5)
     const areas = pieces.map(p => p.w * p.h)
@@ -17,7 +26,7 @@ describe('useBoxModel', () => {
   })
 
   it('adds shelves with per-shelf depth under bevel', () => {
-    const m = useBoxModel(t)
+    const m = useBoxModel(labels)
     m.NShelves.value = 2
     m.Bevel.value = 30
     const pieces = m.allPieces()
@@ -29,7 +38,7 @@ describe('useBoxModel', () => {
   })
 
   it('groups gallery as side/tb/back when flat, splits top/bot when beveled', () => {
-    const m = useBoxModel(t)
+    const m = useBoxModel(labels)
     expect(m.galPieces.value.map(p => p.id)).toEqual(['side', 'tb', 'back'])
     m.Bevel.value = 40
     expect(m.galPieces.value.map(p => p.id)).toEqual(['side', 'top', 'bot', 'back'])
@@ -40,7 +49,7 @@ describe('useBoxModel', () => {
   })
 
   it('clamps galIdx when the gallery list shrinks', async () => {
-    const m = useBoxModel(t)
+    const m = useBoxModel(labels)
     m.Bevel.value = 40
     m.NShelves.value = 3
     await nextTick()
@@ -54,7 +63,7 @@ describe('useBoxModel', () => {
   })
 
   it('computes cutting layout and stats reactively', () => {
-    const m = useBoxModel(t)
+    const m = useBoxModel(labels)
     const sheets = m.cuttingSheets.value
     expect(sheets.length).toBeGreaterThan(0)
     expect(m.cutStats.value.sheets).toBe(sheets.length)
@@ -73,7 +82,7 @@ describe('useBoxModel', () => {
   })
 
   it('flags pieces too big for the sheet in any orientation', () => {
-    const m = useBoxModel(t)
+    const m = useBoxModel(labels)
     expect(m.tooBigPieces.value).toHaveLength(0)
     m.W.value = 3000
     m.H.value = 3000
@@ -81,7 +90,7 @@ describe('useBoxModel', () => {
   })
 
   it('clamps interdependent parameters before geometry is generated', () => {
-    const m = useBoxModel(t)
+    const m = useBoxModel(labels)
     m.W.value = 50
     m.H.value = 50
     m.D.value = 50
@@ -96,12 +105,12 @@ describe('useBoxModel', () => {
     expect(m.NShelves.value).toBeLessThanOrEqual(m.paramLimits.value.maxShelves)
   })
 
-  it('pieceData resolves every layout label to a cut path', () => {
-    const m = useBoxModel(t)
+  it('pieceData resolves every stable layout source to a cut path', () => {
+    const m = useBoxModel(labels)
     m.NShelves.value = 2
     m.Bevel.value = 25
     for (const p of m.cuttingSheets.value.flat()) {
-      const pd = m.pieceData(p.label)
+      const pd = m.pieceData(p.sourceId)
       expect(pd.path.startsWith('M')).toBe(true)
       expect(pd.ow).toBeGreaterThan(0)
       expect(pd.oh).toBeGreaterThan(0)
@@ -113,12 +122,22 @@ describe('useBoxModel', () => {
   })
 
   it('getCutSheetTransform rotates 90deg only for rotated placements', () => {
-    const m = useBoxModel(t)
+    const m = useBoxModel(labels)
     for (const p of m.cuttingSheets.value.flat()) {
-      const pd = m.pieceData(p.label)
+      const pd = m.pieceData(p.sourceId)
       const rotated = Math.abs(p.w - pd.oh) < 1 && Math.abs(p.h - pd.ow) < 1
       const tf = m.getCutSheetTransform(p)
       expect(tf.includes('rotate(90)')).toBe(rotated)
     }
+  })
+
+  it('does not use translated labels as piece identity', () => {
+    const sameLabels = Object.fromEntries(Object.keys(labels).map(key => [key, 'Part'])) as typeof labels
+    const m = useBoxModel(sameLabels)
+    const pieces = m.allPieces()
+
+    expect(new Set(pieces.map(piece => piece.id)).size).toBe(pieces.length)
+    expect(m.pieceData('top').oh).toBe(m.TopD.value)
+    expect(m.pieceData('back').oh).toBe(m.H.value)
   })
 })

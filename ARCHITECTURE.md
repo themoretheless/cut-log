@@ -1,8 +1,8 @@
 # CutLog architecture
 
-Status: v0.1.52 review, after five implementation iterations. This document is
-the map of responsibilities and dependency rules. The canonical list of exactly
-500 findings and ideas is [recommendation.md](recommendation.md); the quick
+Status: v0.1.53 review, after six implementation iterations. This document is
+the map of responsibilities and dependency rules. The canonical list of 510
+findings and ideas is [recommendation.md](recommendation.md); the quick
 setup and reading path are in [README.md](README.md). The
 [100-repository benchmark](docs/top-100-repository-benchmark.md) records the
 external comparison behind iteration 5. `plan.md` is historical brainstorming,
@@ -64,7 +64,8 @@ pages/components -> composables -> services -> Worker/WASM -> Rust core
 Pure modules may depend on other pure modules and types. They never import Vue,
 components, composables, stores, `window`, localStorage, or Three.js. Services
 never import pages. A page may assemble several narrow modules, but it should
-not reimplement their policy.
+not reimplement their policy. `frontend/scripts/check-boundaries.mjs` enforces
+these directions in both `npm test` and `npm run build`.
 
 ## 3. SOLID and DRY in this repository
 
@@ -78,7 +79,10 @@ These principles are review rules, not reasons to add abstraction by default.
 - `useHomeHistory.ts` owns undo/redo timing and restore guards.
 - `useProjectSnapshots.ts` owns named-snapshot persistence.
 - `usePieceList.ts` owns piece CRUD, filters, transforms, and ordering.
+- `pieceIdentity.ts` owns opaque, unique source identity at trust boundaries.
 - `useProjectState.ts` owns project refs and detached read/apply/reset snapshots.
+- `useProjectActions.ts` owns named mutation effects: invalidation, persistence,
+  and history recording.
 - `useCommandPalette.ts` owns command search, enabled navigation, and execution.
 - `useCosting.ts` owns cost inputs and result-derived material totals.
 - `useResultSelection.ts` owns stable-ID selection and placement reconciliation.
@@ -91,12 +95,13 @@ These principles are review rules, not reasons to add abstraction by default.
 - `constraints.ts` owns legal box parameter relationships.
 - Three.js scene modules own and dispose every GPU resource they create.
 
-`Home.vue` is still the largest composition surface at about 1,650 lines, with
-roughly 900 lines of script. Project state, commands, costing, selection,
+`Home.vue` is still the largest composition surface at about 1,680 lines, with
+roughly 940 lines of script. Project state, commands, costing, selection,
 transactional import, history, snapshots, piece-list actions, shortcuts, and
-export effects now have dedicated owners. The next architectural work is to
-replace watcher feedback with named actions and enforce dependency boundaries
-(`CL-116` to `CL-120`).
+export effects now have dedicated owners. Watcher feedback has been replaced by
+named project actions, and dependency boundaries run in CI. The next slice is a
+route error boundary and cohesive page/component extraction (`CL-121` to
+`CL-125`).
 
 ### Open/Closed
 
@@ -274,7 +279,7 @@ those values mean. Renderers may not clamp parameters independently. Scene
 owners dispose geometries, materials, textures, controls, render lists, and
 animation loops they create.
 
-## 7. Five completed iterations
+## 7. Six completed iterations
 
 | Iteration | Goal | Delivered | Evidence |
 |---|---|---|---|
@@ -283,6 +288,7 @@ animation loops they create.
 | 3 | Product design and accessibility | Associated labels, bounded NumberField, keyboard reorder, command list navigation, semantic gallery controls, accessible SVG/3D names, stronger focus/disabled/error states | Desktop/mobile browser smoke and keyboard checks |
 | 4 | Home responsibility extraction | Dedicated history, snapshot, piece-list, shortcut, and export composables with injected effect boundaries | 16 focused composable tests plus page type-check |
 | 5 | Top-100 editor benchmark | Command registry, costing, stable-ID result selection, transactional import, and one project-state owner | 100-source benchmark, 13 focused tests, import preflight, and detached restore snapshots |
+| 6 | Explicit editor transactions | Named project actions, opaque end-to-end source IDs, translation-at-edge box labels, and executable import boundaries | Focused action/identity/history tests, Rust source-ID regression, TypeScript boundary check |
 
 The iterations deliberately combine a vertical behavior with its tests. They
 do not claim the architecture is finished: the remaining page orchestration is
@@ -301,9 +307,9 @@ listed honestly below.
 | 3c | Named snapshot orchestration | Done; retention/diffs pending | `CL-107`, `CL-133`, `CL-139` |
 | 4a | Piece-list actions | Done | `CL-108` |
 | 4b | Commands, costing, result selection, import, project-state owner | Done | `CL-111` to `CL-115` |
-| 4c | Stable piece identity | Pending | `CL-117`, `CL-151` |
+| 4c | Stable piece identity | Done end to end; selection UX follow-up pending | `CL-117`, `CL-151` |
 | 4d | Home export orchestration | Done | `CL-110` |
-| 5 | Locale-independent box piece catalog | Pending | `CL-214`, `CL-215` |
+| 5 | Locale-independent box piece catalog | Structural identity and edge labels done; catalog extraction pending | `CL-119`, `CL-214`, `CL-215` |
 | 6a | Complete Three.js disposal | Done | `CL-226` to `CL-230` |
 | 6b | Shared scene base | Deferred until measured | `CL-243` |
 
@@ -337,7 +343,7 @@ an effect a clear lifecycle.
 - No premature shared Three.js engine; disposal correctness comes first.
 - No test that merely snapshots thousands of opaque lines when a small invariant
   can be asserted directly.
-- No duplicate 500-item lists in README, architecture, and plan documents.
+- No duplicate full backlog lists in README, architecture, and plan documents.
 
 The desired end state is modest: pure policy is easy to test, effects have one
 owner and cleanup path, pages read as composition, and a contributor can learn
