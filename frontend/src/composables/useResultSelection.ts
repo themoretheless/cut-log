@@ -17,6 +17,13 @@ export interface SelectedPiecePlacement {
   isRotated: boolean
 }
 
+export interface SelectedPieceStats {
+  area: number
+  totalArea: number
+  placements: SelectedPiecePlacement[]
+  firstPlacement: SelectedPiecePlacement | undefined
+}
+
 export function useResultSelection(options: ResultSelectionOptions) {
   const selectedPiece = computed(() =>
     toValue(options.pieces).find(piece => piece.id === options.selectedPieceId.value) ?? null)
@@ -39,7 +46,7 @@ export function useResultSelection(options: ResultSelectionOptions) {
     )
   })
 
-  const stats = computed(() => {
+  const stats = computed<SelectedPieceStats | null>(() => {
     const piece = selectedPiece.value
     if (!piece) return null
     return {

@@ -1274,6 +1274,15 @@ input[type="number"] { -moz-appearance: textfield; }
     }
 }
 
+@media (max-width: 480px) {
+    .transform-group {
+        flex-wrap: wrap;
+    }
+    .transform-group > span {
+        flex: 1 0 100%;
+    }
+}
+
 .piece-item {
     display: flex;
     align-items: center;

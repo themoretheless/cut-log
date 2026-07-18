@@ -60,6 +60,15 @@ for (const file of sourceFiles(srcRoot)) {
   }
 }
 
+const lineBudgets = new Map([
+  ['pages/Home.vue', 800],
+])
+for (const [relative, limit] of lineBudgets) {
+  const contents = fs.readFileSync(path.join(srcRoot, relative), 'utf8')
+  const lines = contents.split(/\r?\n/).length
+  if (lines > limit) violations.push(`${relative} has ${lines} lines; architectural budget is ${limit}`)
+}
+
 if (violations.length) {
   console.error(`Dependency boundary violations:\n${violations.join('\n')}`)
   process.exitCode = 1

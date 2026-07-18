@@ -58,7 +58,7 @@ components:
    `useBoxModel.ts` -> `box/three/*` -> `pages/BoxBuilder.vue`.
 
 [ARCHITECTURE.md](ARCHITECTURE.md) expands this into layer rules, SOLID/DRY
-ownership, diagrams, the four completed iterations, and the next small
+ownership, diagrams, the seven completed iterations, and the next small
 refactoring slices.
 
 ## Architecture at a glance
@@ -91,7 +91,7 @@ downloads are not reimplemented in pages.
 
 ## 510-item review
 
-The v0.1.53 review tracks **510 unique, ID-addressable items**. The original
+The v0.1.54 review tracks **510 unique, ID-addressable items**. The original
 20 groups contain 25 findings each; the latest editor benchmark follow-up adds
 10 independently ranked ideas:
 
@@ -109,14 +109,14 @@ The v0.1.53 review tracks **510 unique, ID-addressable items**. The original
 | CL-226..250 | Three.js lifecycle | CL-476..500 | Documentation |
 | CL-501..510 | Editor-inspired next ideas | | |
 
-The canonical checklist, priorities, effort sizes, and 107 items delivered so
+The canonical checklist, priorities, effort sizes, and 112 items delivered so
 far are in [recommendation.md](recommendation.md). The catalog is
 not copied here or into architecture; that duplication would immediately make
 status unreliable. `plan.md` remains historical brainstorming.
 
 The [top-100 repository benchmark](docs/top-100-repository-benchmark.md)
 records five relevance cohorts, the source-verified editor patterns adopted in
-v0.1.52 and v0.1.53, and ten newly ranked candidates for later batches.
+v0.1.52 through v0.1.54, and ten newly ranked candidates for later batches.
 
 ## Build and run
 

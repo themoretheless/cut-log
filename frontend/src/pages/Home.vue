@@ -1,115 +1,51 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
-import NumberField from '@/components/NumberField.vue'
-import SheetCard from '@/components/SheetCard.vue'
-import { startOptimization, type OptimizationTask } from '@/services/optimizerWorker'
-import { type CutPiece, type CuttingResult, CuttingStrategy } from '@/services/types'
-import type { HomeState } from '@/lib/homeState'
-import { validateNewPiece } from '@/lib/validatePiece'
-import { buildShareUrl, readShareFromHash } from '@/lib/shareLink'
-import type { ProjectSnapshot } from '@/lib/projectSnapshots'
-import {
-  type PieceSortMode,
-  addDimensionDelta,
-  pieceArea,
-  roundDimensionsUp,
-  swapDimensions,
-} from '@/lib/pieceEditor'
-import { MAX_PIECE_QUANTITY, assertOptimizerCapacity, normalizeQuantity } from '@/lib/optimizerLimits'
-import { useToast } from '@/composables/useToast'
-import { useHomeStorage } from '@/composables/useHomeStorage'
-import { useHomeHistory } from '@/composables/useHomeHistory'
-import { useProjectSnapshots } from '@/composables/useProjectSnapshots'
-import type { QuickFilterMode } from '@/composables/usePieceList'
-import { useHomeExports } from '@/composables/useHomeExports'
-import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import OptimizationWorkspace from '@/components/OptimizationWorkspace.vue'
+import PieceEditorPanel from '@/components/PieceEditorPanel.vue'
+import ProjectActivityPanel from '@/components/ProjectActivityPanel.vue'
+import ProjectInputPanel from '@/components/ProjectInputPanel.vue'
 import { useCommandPalette, type PaletteCommand } from '@/composables/useCommandPalette'
 import { useCosting } from '@/composables/useCosting'
-import { usePieceImport } from '@/composables/usePieceImport'
+import { useHomeExports } from '@/composables/useHomeExports'
+import { useHomeHistory } from '@/composables/useHomeHistory'
+import { useHomeStorage } from '@/composables/useHomeStorage'
+import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
+import { useOptimizationSession } from '@/composables/useOptimizationSession'
+import type { NewPieceInput } from '@/composables/usePieceList'
 import { useProjectActions, type ProjectActionName } from '@/composables/useProjectActions'
+import { useProjectActivity } from '@/composables/useProjectActivity'
 import { useProjectState } from '@/composables/useProjectState'
 import { useResultSelection } from '@/composables/useResultSelection'
+import { useToast } from '@/composables/useToast'
+import { buildShareUrl, readShareFromHash } from '@/lib/shareLink'
+import {
+  addDimensionDelta,
+  roundDimensionsUp,
+  swapDimensions,
+  type PieceBulkDiff,
+  type PieceSortMode,
+} from '@/lib/pieceEditor'
+import { assertOptimizerCapacity } from '@/lib/optimizerLimits'
+import type { CutPiece } from '@/services/types'
+import { CuttingStrategy } from '@/services/types'
 import { useL10n } from '@/stores/l10n'
 
 const { t } = useL10n()
 const { message: toast, tone: toastTone, show: showToast, showError, clear: clearToast } = useToast()
-
-// ── Sheet presets ────────────────────────────────────────────────────────────
-const sheetPresets: { key: string; w: number; h: number }[] = [
-  { key: '2440x1220', w: 2440, h: 1220 },
-  { key: '2500x1250', w: 2500, h: 1250 },
-  { key: '1525x1525', w: 1525, h: 1525 },
-  { key: '2800x2070', w: 2800, h: 2070 },
-  { key: '2750x1830', w: 2750, h: 1830 },
-  { key: '2440x1830', w: 2440, h: 1830 },
-  { key: '3050x1525', w: 3050, h: 1525 },
-  { key: '1200x600', w: 1200, h: 600 },
-]
-
-// ── Sheet params ─────────────────────────────────────────────────────────────
 const minMachineCut = ref(30)
-const projectState = useProjectState({ minMachineCut })
-const {
-  sheetWidth,
-  sheetHeight,
-  kerf,
-  pieceList,
-  read: currentState,
-  apply: applyState,
-} = projectState
-const selectedPreset = computed(() =>
-  sheetPresets.find(preset => preset.w === sheetWidth.value && preset.h === sheetHeight.value)?.key ?? '')
 const selectedStrategy = ref<CuttingStrategy>(CuttingStrategy.Auto)
-
-function onPresetChanged(e: Event) {
-  const val = (e.target as HTMLSelectElement).value
-  const preset = sheetPresets.find(p => p.key === val)
-  if (preset && (sheetWidth.value !== preset.w || sheetHeight.value !== preset.h)) {
-    runProjectEdit('sheet.preset', () => {
-      sheetWidth.value = preset.w
-      sheetHeight.value = preset.h
-      return true
-    })
-  }
-}
-
-function onSheetWidthChanged(value: number) {
-  if (sheetWidth.value === value) return
-  runProjectEdit('sheet.width', () => { sheetWidth.value = value })
-}
-
-function onSheetHeightChanged(value: number) {
-  if (sheetHeight.value === value) return
-  runProjectEdit('sheet.height', () => { sheetHeight.value = value })
-}
-
-function onKerfChanged(value: number) {
-  if (kerf.value === value) return
-  runProjectEdit('sheet.kerf', () => { kerf.value = value })
-}
-
-// ── New piece form ───────────────────────────────────────────────────────────
-const newLabel = ref('')
-const newWidth = ref(400)
-const newHeight = ref(300)
-const newQty = ref(1)
-const newAllowRotation = ref(true)
-const addError = ref('')
-
-const result = ref<CuttingResult | null>(null)
-const calculated = ref(false)
-let calcGen = 0
-let activeOptimization: OptimizationTask | null = null
-
-// ── Editor controls ──────────────────────────────────────────────────────────
+const showImport = ref(false)
 const commandInputRef = ref<HTMLInputElement | null>(null)
+const projectInputRef = ref<{ submit: () => void } | null>(null)
 const transformStep = ref(2)
 const roundStep = ref(5)
-const operationLog = ref<OperationEntry[]>([])
-const operationQuery = ref('')
-const lastBulkDiff = ref<BulkDiff | null>(null)
-const snapshotCompare = ref<SnapshotComparison | null>(null)
+const lastBulkDiff = ref<PieceBulkDiff | null>(null)
+const dragStartIdx = ref(-1)
+const dragOverIdx = ref(-1)
+const isDragging = ref(false)
 
+const projectState = useProjectState({ minMachineCut })
+const { sheetWidth, sheetHeight, kerf, pieceList, read: currentState, apply: applyState } = projectState
 const {
   pieces,
   selectedPieceId,
@@ -124,91 +60,24 @@ const {
   rotationLockedCount,
   visiblePieces,
   visibleEditablePieces,
-  visibleLockedCount,
   hasPieceFilter,
   pieceIndexes,
-  pieceIndex,
 } = pieceList
 
+const optimization = useOptimizationSession()
+const { state: optimizationState, result } = optimization
 const resultSelection = useResultSelection({ pieces: () => pieces, result, selectedPieceId })
-const {
-  selectedPiece,
-  placements: selectedPiecePlacements,
-  stats: selectedPieceStats,
-  toggle: toggleSelect,
-  clear: clearSelection,
-} = resultSelection
-
-const {
-  pricePerSheet,
-  currency,
-  summary: costSummary,
-  isVisible: costingVisible,
-} = useCosting({
+const { selectedPiece, stats: selectedPieceStats, toggle: toggleSelect, clear: clearSelection } = resultSelection
+const { pricePerSheet, currency, summary: costSummary, isVisible: costingVisible } = useCosting({
   result,
   pricePerSheet: projectState.pricePerSheet,
   currency: projectState.currency,
 })
-
-function onPricePerSheetChanged(value: number) {
-  if (pricePerSheet.value === value) return
-  runMetadataEdit('cost.price', () => { pricePerSheet.value = value })
-}
-
-function onCurrencyChanged(event: Event) {
-  const value = (event.target as HTMLInputElement).value.trim()
-  if (currency.value === value) return
-  runMetadataEdit('cost.currency', () => { currency.value = value })
-}
-
 const { exportPiecesCsv, exportSvg, exportDxf, printLayout } = useHomeExports({
   pieces: () => pieces,
   result,
   translate: t,
 })
-
-const ALLOWANCE_PRESETS = [1, 2, 5]
-const OPERATION_LOG_KEY = 'operation_log'
-const OPERATION_LOG_LIMIT = 14
-
-interface PreflightCheck {
-  id: string
-  label: string
-  value: string
-  status: 'ok' | 'warn' | 'idle'
-}
-
-interface OperationEntry {
-  id: string
-  label: string
-  detail: string
-  createdAt: string
-}
-
-interface BulkDiff {
-  title: string
-  changed: number
-  skipped: number
-  beforeArea: string
-  afterArea: string
-  sampleBefore: string
-  sampleAfter: string
-}
-
-interface SnapshotComparison {
-  name: string
-  piecesDelta: number
-  areaDelta: string
-  added: number
-  removed: number
-  changed: number
-  sheetChanged: boolean
-}
-
-// ── Drag state ───────────────────────────────────────────────────────────────
-const dragStartIdx = ref(-1)
-const dragOverIdx = ref(-1)
-const isDragging = ref(false)
 
 const homeStorage = useHomeStorage({
   capture: currentState,
@@ -219,6 +88,10 @@ const saveState = homeStorage.scheduleSave
 const saveStateNow = homeStorage.saveNow
 const loadState = homeStorage.load
 
+function invalidateOptimization() {
+  optimization.invalidate()
+}
+
 const homeHistory = useHomeHistory({
   capture: currentState,
   apply: applyState,
@@ -226,84 +99,108 @@ const homeHistory = useHomeHistory({
   onRestore: invalidateOptimization,
 })
 const { canUndo, canRedo, record: recordHistory, undo: doUndo, redo: doRedo } = homeHistory
-
-const projectSnapshotStore = useProjectSnapshots({ capture: currentState })
-const { snapshots: projectSnapshots, name: snapshotName } = projectSnapshotStore
-
-function validOperationEntry(value: any): OperationEntry | null {
-  if (!value || typeof value !== 'object') return null
-  if (typeof value.label !== 'string' || typeof value.createdAt !== 'string') return null
-  return {
-    id: typeof value.id === 'string' && value.id ? value.id : crypto.randomUUID(),
-    label: value.label.slice(0, 80),
-    detail: typeof value.detail === 'string' ? value.detail.slice(0, 140) : '',
-    createdAt: value.createdAt,
-  }
-}
-
-function loadOperationLog() {
-  let raw = ''
-  try {
-    raw = localStorage.getItem(OPERATION_LOG_KEY) ?? ''
-  } catch {
-    raw = ''
-  }
-  if (!raw) return
-  try {
-    const parsed = JSON.parse(raw)
-    operationLog.value = Array.isArray(parsed)
-      ? parsed.map(validOperationEntry).filter((entry: OperationEntry | null): entry is OperationEntry => entry !== null).slice(0, OPERATION_LOG_LIMIT)
-      : []
-  } catch {
-    operationLog.value = []
-  }
-}
-
-function saveOperationLogNow() {
-  try {
-    localStorage.setItem(OPERATION_LOG_KEY, JSON.stringify(operationLog.value))
-  } catch { /* ignore */ }
-}
-
-function recordOperation(label: string, detail = '') {
-  operationLog.value = [{
-    id: crypto.randomUUID(),
-    label,
-    detail,
-    createdAt: new Date().toISOString(),
-  }, ...operationLog.value].slice(0, OPERATION_LOG_LIMIT)
-  saveOperationLogNow()
-}
-
-function clearOperationLog() {
-  operationLog.value = []
-  saveOperationLogNow()
-}
-
-function invalidateOptimization() {
-  ++calcGen
-  activeOptimization?.cancel()
-  activeOptimization = null
-  result.value = null
-  calculated.value = false
-}
-
 const projectActions = useProjectActions({
   invalidateLayout: invalidateOptimization,
   scheduleSave: saveState,
   recordHistory,
 })
 
+function resetAfterSnapshotRestore() {
+  selectedPieceId.value = null
+  pieceQuery.value = ''
+  quickFilterMode.value = 'all'
+  pieceSortMode.value = 'manual'
+  lastBulkDiff.value = null
+  optimization.invalidate()
+  homeHistory.reset()
+}
+
+function areaM2(areaMm2: number): string {
+  return (areaMm2 / 1_000_000).toFixed(2)
+}
+
+const projectActivity = useProjectActivity({
+  capture: currentState,
+  apply: applyState,
+  hasPieces: () => pieces.length > 0,
+  snapshotSummary: () => `${pieceSummary.value.totalTypes} ${t('piece_types')} · ${pieceSummary.value.totalQuantity} ${t('pieces_short')} · ${areaM2(pieceSummary.value.totalArea)} ${t('material_area')}`,
+  resetAfterRestore: resetAfterSnapshotRestore,
+  saveNow: saveStateNow,
+  translate: t,
+  showToast,
+})
+const {
+  operationLog,
+  operationQuery,
+  filteredOperationLog,
+  snapshotCompare,
+  snapshots: projectSnapshots,
+  snapshotName,
+  recordOperation,
+  clearOperationLog,
+  compareSnapshot: compareProjectSnapshot,
+  saveSnapshot: saveProjectSnapshot,
+  saveAutoSnapshot: saveAutoProjectSnapshot,
+  restoreSnapshot: restoreProjectSnapshot,
+  deleteSnapshot: deleteProjectSnapshot,
+} = projectActivity
+
 function runProjectEdit<T>(name: ProjectActionName, mutate: () => T): T {
   return projectActions.run(name, mutate)
 }
 
-function runMetadataEdit<T>(name: ProjectActionName, mutate: () => T): T {
-  return projectActions.run(name, mutate, { impact: 'metadata', history: false })
+function onSheetPreset(width: number, height: number) {
+  if (sheetWidth.value === width && sheetHeight.value === height) return
+  runProjectEdit('sheet.preset', () => {
+    sheetWidth.value = width
+    sheetHeight.value = height
+  })
 }
 
-// A shared link wins over saved state: open the linked project, then strip the
-// hash so a later edit + reload doesn't silently re-apply the old link.
+function onSheetWidthChanged(value: number) {
+  if (sheetWidth.value !== value) runProjectEdit('sheet.width', () => { sheetWidth.value = value })
+}
+
+function onSheetHeightChanged(value: number) {
+  if (sheetHeight.value !== value) runProjectEdit('sheet.height', () => { sheetHeight.value = value })
+}
+
+function onKerfChanged(value: number) {
+  if (kerf.value !== value) runProjectEdit('sheet.kerf', () => { kerf.value = value })
+}
+
+function onPricePerSheetChanged(value: number) {
+  if (pricePerSheet.value !== value) runProjectEdit('cost.price', () => { pricePerSheet.value = value })
+}
+
+function onCurrencyChanged(value: string) {
+  if (currency.value !== value) runProjectEdit('cost.currency', () => { currency.value = value })
+}
+
+function onStrategyChanged(value: CuttingStrategy) {
+  if (selectedStrategy.value !== value) runProjectEdit('strategy.select', () => { selectedStrategy.value = value })
+}
+
+function addPiece(input: NewPieceInput) {
+  runProjectEdit('piece.add', () => pieceList.add(input))
+  recordOperation(t('operation.add_piece'), `${input.label || t('unnamed_piece')} · ${input.width}×${input.height}`)
+}
+
+function importPieces(payload: { rows: readonly NewPieceInput[]; added: number; skipped: number }) {
+  saveAutoProjectSnapshot(t('snapshot.auto_before_import'))
+  runProjectEdit('piece.import', () => pieceList.addMany(payload.rows))
+  const message = payload.skipped
+    ? t('import_added_skipped').replace('{0}', String(payload.added)).replace('{1}', String(payload.skipped))
+    : t('import_added').replace('{0}', String(payload.added))
+  showToast(message)
+  recordOperation(
+    t('operation.import'),
+    payload.skipped
+      ? t('operation.import_detail_skipped').replace('{0}', String(payload.added)).replace('{1}', String(payload.skipped))
+      : t('operation.import_detail').replace('{0}', String(payload.added)),
+  )
+}
+
 function loadInitialState() {
   const shared = readShareFromHash(location.hash)
   if (shared) {
@@ -316,78 +213,12 @@ function loadInitialState() {
   loadState()
 }
 
-// ── Actions ──────────────────────────────────────────────────────────────────
-function addPiece() {
-  const err = validateNewPiece(
-    { width: newWidth.value, height: newHeight.value, quantity: newQty.value },
-    { sheetWidth: sheetWidth.value, sheetHeight: sheetHeight.value, kerf: kerf.value },
-  )
-  if (err) { addError.value = t(err); return }
-  addError.value = ''
-
-  const addedLabel = newLabel.value
-  const addedWidth = newWidth.value
-  const addedHeight = newHeight.value
-  runProjectEdit('piece.add', () => pieceList.add({
-    label: addedLabel,
-    width: addedWidth,
-    height: addedHeight,
-    quantity: newQty.value,
-    allowRotation: newAllowRotation.value,
-  }))
-
-  newLabel.value = ''
-  newWidth.value = 400
-  newHeight.value = 300
-  newQty.value = 1
-  recordOperation(t('operation.add_piece'), `${addedLabel || t('unnamed_piece')} · ${addedWidth}×${addedHeight}`)
-}
-
-// ── Bulk import (paste a cut list from a spreadsheet) ──────────────────────────
-const showImport = ref(false)
-const pieceImport = usePieceImport({
-  pieces: () => pieces,
-  sheetWidth,
-  sheetHeight,
-  kerf,
-})
-const { text: importText, preview: importPreview, canCommit: canCommitImport } = pieceImport
-
-function importPieces() {
-  if (importPreview.value.capacityExceeded) {
-    addError.value = t('qty_limit')
-    return
-  }
-  if (!canCommitImport.value) {
-    addError.value = t('import_none')
-    return
-  }
-
-  addError.value = ''
-  saveAutoProjectSnapshot(t('snapshot.auto_before_import'))
-  const imported = runProjectEdit(
-    'piece.import',
-    () => pieceImport.commit(rows => { pieceList.addMany(rows) }),
-  )
-  if (!imported) return
-  showImport.value = false
-  const msg = imported.skipped
-    ? t('import_added_skipped').replace('{0}', String(imported.added)).replace('{1}', String(imported.skipped))
-    : t('import_added').replace('{0}', String(imported.added))
-  showToast(msg)
-  recordOperation(t('operation.import'), imported.skipped
-    ? t('operation.import_detail_skipped').replace('{0}', String(imported.added)).replace('{1}', String(imported.skipped))
-    : t('operation.import_detail').replace('{0}', String(imported.added)))
-}
-
-function removePiece(p: CutPiece) {
+function removePiece(piece: CutPiece) {
   saveAutoProjectSnapshot(t('snapshot.auto_before_delete'))
-  if (!runProjectEdit('piece.remove', () => pieceList.remove(p))) return
-  recordOperation(t('operation.delete_piece'), p.label.trim() || t('unnamed_piece'))
+  if (!runProjectEdit('piece.remove', () => pieceList.remove(piece))) return
+  recordOperation(t('operation.delete_piece'), piece.label.trim() || t('unnamed_piece'))
 }
 
-// Duplicate the given piece (or the selected/last one for the Ctrl+D shortcut),
-// inserting the copy right after it with a fresh id and the next palette color.
 function duplicate(id: string | null) {
   runProjectEdit('piece.duplicate', () => pieceList.duplicate(id))
 }
@@ -396,20 +227,11 @@ function clearAll() {
   if (!pieces.length) return
   saveAutoProjectSnapshot(t('snapshot.auto_before_clear'))
   const count = runProjectEdit('piece.clear', () => pieceList.clear())
-  result.value = null
-  calculated.value = false
   lastBulkDiff.value = null
   recordOperation(t('operation.clear'), t('operation.clear_detail').replace('{0}', String(count)))
 }
 
-// The generation also changes whenever project inputs change, so a result can
-// never be committed for dimensions or pieces that are no longer on screen.
 async function calculate() {
-  activeOptimization?.cancel()
-  activeOptimization = null
-  const gen = ++calcGen
-  // Refuse non-finite / non-positive sheet inputs before they reach the WASM
-  // packer, which has no such guard and would return an empty/garbage layout.
   if (!Number.isFinite(sheetWidth.value) || sheetWidth.value <= 0
     || !Number.isFinite(sheetHeight.value) || sheetHeight.value <= 0
     || !Number.isFinite(kerf.value) || kerf.value < 0) {
@@ -422,221 +244,34 @@ async function calculate() {
     showError(t('qty_limit'))
     return
   }
-  calculated.value = true
-  const task = startOptimization({
+
+  const nextResult = await optimization.run({
     sheetWidth: sheetWidth.value,
     sheetHeight: sheetHeight.value,
     pieces: [...pieces],
     kerf: kerf.value,
     strategy: selectedStrategy.value,
   })
-  activeOptimization = task
-  try {
-    const res = await task.promise
-    if (gen !== calcGen) return // a newer calculate() superseded this one
-    result.value = res
+  if (nextResult) {
     recordOperation(
       t('operation.calculate'),
-      `${res.totalSheets} ${t('sheets')} · ${res.overallEfficiency.toFixed(1)}%`,
+      `${nextResult.totalSheets} ${t('sheets')} · ${nextResult.overallEfficiency.toFixed(1)}%`,
     )
-  } catch (e) {
-    if ((e as Error).name === 'AbortError') return
-    if (gen !== calcGen) return
-    console.error('Optimization failed', e)
-    result.value = null
-    calculated.value = false
+  } else if (optimization.state.value.status === 'error') {
+    console.error('Optimization failed', optimization.state.value.error)
     showError(t('calc_error'))
-  } finally {
-    if (activeOptimization === task) activeOptimization = null
   }
 }
 
-// ── Share link (encode the project into a copyable URL hash) ───────────────────
 async function copyShareLink() {
   const url = buildShareUrl(location.origin, location.pathname, currentState())
   try {
     await navigator.clipboard.writeText(url)
   } catch {
-    // Fallback for browsers/contexts without clipboard access: drop the link
-    // into the address bar so the user can copy it manually.
     history.replaceState(null, '', url)
   }
   showToast(t('link_copied'))
   recordOperation(t('operation.share'), t('operation.share_detail'))
-}
-
-const quickFilters = computed<{ id: QuickFilterMode; label: string; count: number }[]>(() => [
-  { id: 'all', label: t('filter.all'), count: pieces.length },
-  { id: 'unnamed', label: t('filter.unnamed'), count: unnamedPiecesCount.value },
-  { id: 'rotation_off', label: t('filter.rotation_off'), count: rotationLockedCount.value },
-  { id: 'oversized', label: t('filter.oversized'), count: oversizedPieces.value.length },
-  { id: 'locked', label: t('filter.locked'), count: lockedPiecesCount.value },
-  { id: 'machine', label: t('filter.machine'), count: smallMachinePieces.value.length },
-])
-const readinessIssues = computed(() => {
-  const issues: string[] = []
-  if (!pieces.length) return [t('readiness.empty')]
-  if (oversizedPieces.value.length) issues.push(t('readiness.oversized').replace('{0}', String(oversizedPieces.value.length)))
-  if (smallMachinePieces.value.length) issues.push(t('readiness.machine').replace('{0}', String(smallMachinePieces.value.length)))
-  if (unnamedPiecesCount.value) issues.push(t('readiness.unnamed').replace('{0}', String(unnamedPiecesCount.value)))
-  if (!result.value) issues.push(t('readiness.needs_layout'))
-  if (result.value?.unplacedPieces.length) issues.push(t('readiness.unplaced').replace('{0}', String(result.value.unplacedPieces.length)))
-  return issues
-})
-const readinessScore = computed(() => {
-  if (!pieces.length) return 0
-  let score = 100
-  score -= oversizedPieces.value.length ? 30 : 0
-  score -= smallMachinePieces.value.length ? 18 : 0
-  score -= unnamedPiecesCount.value ? 12 : 0
-  score -= result.value ? 0 : 18
-  score -= result.value?.unplacedPieces.length ? 24 : 0
-  if (result.value && result.value.overallEfficiency < 70) score -= 8
-  return Math.max(0, Math.min(100, score))
-})
-const readinessStatus = computed(() => readinessScore.value >= 86 ? 'ok' : readinessScore.value >= 60 ? 'idle' : 'warn')
-const readinessMessage = computed(() => readinessIssues.value[0] ?? t('readiness.ready'))
-const preflightChecks = computed<PreflightCheck[]>(() => [
-  {
-    id: 'oversized',
-    label: t('preflight.oversized'),
-    value: String(oversizedPieces.value.length),
-    status: oversizedPieces.value.length ? 'warn' : 'ok',
-  },
-  {
-    id: 'unnamed',
-    label: t('preflight.unnamed'),
-    value: String(unnamedPiecesCount.value),
-    status: unnamedPiecesCount.value ? 'warn' : 'ok',
-  },
-  {
-    id: 'rotation',
-    label: t('preflight.rotation_locked'),
-    value: String(rotationLockedCount.value),
-    status: rotationLockedCount.value ? 'idle' : 'ok',
-  },
-  {
-    id: 'locked',
-    label: t('preflight.locked'),
-    value: String(lockedPiecesCount.value),
-    status: lockedPiecesCount.value ? 'idle' : 'ok',
-  },
-  {
-    id: 'machine',
-    label: t('preflight.machine'),
-    value: String(smallMachinePieces.value.length),
-    status: smallMachinePieces.value.length ? 'warn' : 'ok',
-  },
-  {
-    id: 'layout',
-    label: t('preflight.layout'),
-    value: result.value ? `${result.value.totalSheets} ${t('sheets')}` : t('preflight.not_calculated'),
-    status: result.value ? 'ok' : 'idle',
-  },
-])
-function areaM2(areaMm2: number): string {
-  return (areaMm2 / 1_000_000).toFixed(2)
-}
-
-function snapshotSummaryText(): string {
-  return `${pieceSummary.value.totalTypes} ${t('piece_types')} · ${pieceSummary.value.totalQuantity} ${t('pieces_short')} · ${areaM2(pieceSummary.value.totalArea)} ${t('material_area')}`
-}
-
-function formatSnapshotDate(createdAt: string): string {
-  const date = new Date(createdAt)
-  return Number.isNaN(date.getTime()) ? createdAt : date.toLocaleString()
-}
-
-function formatOperationDate(createdAt: string): string {
-  return formatSnapshotDate(createdAt)
-}
-
-function stateArea(state: HomeState): number {
-  return state.pieces.reduce((sum, piece) => sum + pieceArea(piece) * piece.quantity, 0)
-}
-
-function buildSnapshotComparison(snapshot: ProjectSnapshot): SnapshotComparison {
-  const current = currentState()
-  const currentById = new Map(current.pieces.map(piece => [piece.id, piece]))
-  const snapshotById = new Map(snapshot.state.pieces.map(piece => [piece.id, piece]))
-  let changed = 0
-  for (const [id, piece] of currentById) {
-    const oldPiece = snapshotById.get(id)
-    if (!oldPiece) continue
-    if (
-      piece.label !== oldPiece.label
-      || piece.width !== oldPiece.width
-      || piece.height !== oldPiece.height
-      || piece.quantity !== oldPiece.quantity
-      || piece.allowRotation !== oldPiece.allowRotation
-      || piece.locked !== oldPiece.locked
-    ) changed++
-  }
-
-  const areaDelta = stateArea(current) - stateArea(snapshot.state)
-  return {
-    name: snapshot.name,
-    piecesDelta: current.pieces.length - snapshot.state.pieces.length,
-    areaDelta: `${areaDelta >= 0 ? '+' : ''}${areaM2(areaDelta)} ${t('material_area')}`,
-    added: current.pieces.filter(piece => !snapshotById.has(piece.id)).length,
-    removed: snapshot.state.pieces.filter(piece => !currentById.has(piece.id)).length,
-    changed,
-    sheetChanged: current.sheetWidth !== snapshot.state.sheetWidth
-      || current.sheetHeight !== snapshot.state.sheetHeight
-      || current.kerf !== snapshot.state.kerf,
-  }
-}
-
-function compareProjectSnapshot(snapshot: ProjectSnapshot) {
-  snapshotCompare.value = buildSnapshotComparison(snapshot)
-  recordOperation(t('operation.compare_snapshot'), snapshot.name)
-}
-
-const filteredOperationLog = computed(() => {
-  const query = operationQuery.value.trim().toLocaleLowerCase()
-  if (!query) return operationLog.value
-  return operationLog.value.filter(entry =>
-    entry.label.toLocaleLowerCase().includes(query)
-    || entry.detail.toLocaleLowerCase().includes(query),
-  )
-})
-
-function saveProjectSnapshot() {
-  if (!pieces.length) return
-  const snapshot = projectSnapshotStore.save(
-    snapshotSummaryText(),
-    `${t('snapshot.default_name')} ${projectSnapshots.value.length + 1}`,
-  )
-  showToast(t('snapshot_saved'))
-  recordOperation(t('operation.save_snapshot'), snapshot.name)
-}
-
-function saveAutoProjectSnapshot(name: string) {
-  if (!pieces.length) return
-  projectSnapshotStore.saveAuto(name, snapshotSummaryText())
-}
-
-function restoreProjectSnapshot(snapshot: ProjectSnapshot) {
-  saveAutoProjectSnapshot(t('snapshot.auto_before_restore'))
-  snapshotCompare.value = buildSnapshotComparison(snapshot)
-  applyState(snapshot.state)
-  selectedPieceId.value = null
-  pieceQuery.value = ''
-  quickFilterMode.value = 'all'
-  pieceSortMode.value = 'manual'
-  result.value = null
-  calculated.value = false
-  lastBulkDiff.value = null
-  homeHistory.reset()
-  saveStateNow()
-  showToast(t('snapshot_restored'))
-  recordOperation(t('operation.restore_snapshot'), snapshot.name)
-}
-
-function deleteProjectSnapshot(snapshot: ProjectSnapshot) {
-  projectSnapshotStore.remove(snapshot.id)
-  showToast(t('snapshot_deleted'))
-  recordOperation(t('operation.delete_snapshot'), snapshot.name)
 }
 
 function setPieceSortMode(mode: PieceSortMode) {
@@ -660,9 +295,7 @@ function deleteSelectedPiece() {
 }
 
 function togglePieceLock(piece: CutPiece) {
-  runProjectEdit('piece.lock', () => {
-    pieceList.toggleLock(piece)
-  })
+  runProjectEdit('piece.lock', () => { pieceList.toggleLock(piece) })
   showToast(piece.locked ? t('piece_locked') : t('piece_unlocked'))
   recordOperation(piece.locked ? t('operation.lock_piece') : t('operation.unlock_piece'), piece.label.trim() || t('unnamed_piece'))
 }
@@ -690,10 +323,7 @@ function togglePieceRotation(piece: CutPiece) {
 function setVisibleRotation(allowRotation: boolean) {
   if (!visibleEditablePieces.value.length) return
   saveAutoProjectSnapshot(t('snapshot.auto_before_rotation'))
-  const change = runProjectEdit(
-    'pieces.rotation',
-    () => pieceList.setVisibleRotation(allowRotation),
-  )
+  const change = runProjectEdit('pieces.rotation', () => pieceList.setVisibleRotation(allowRotation))
   if (!change) return
   showToast(allowRotation ? t('rotation_enabled') : t('rotation_disabled'))
   lastBulkDiff.value = {
@@ -705,20 +335,19 @@ function setVisibleRotation(allowRotation: boolean) {
     sampleBefore: t('bulk.rotation'),
     sampleAfter: allowRotation ? t('bulk.enabled') : t('bulk.disabled'),
   }
-  recordOperation(allowRotation ? t('operation.rotation_on') : t('operation.rotation_off'), t('operation.visible_count').replace('{0}', String(change.changed)))
+  recordOperation(
+    allowRotation ? t('operation.rotation_on') : t('operation.rotation_off'),
+    t('operation.visible_count').replace('{0}', String(change.changed)),
+  )
 }
 
 function mutateVisibleDimensions(
   transform: (piece: CutPiece) => { width: number; height: number },
-  toastKey: string,
   title = t('bulk.transform'),
 ) {
   if (!visibleEditablePieces.value.length) return
   saveAutoProjectSnapshot(t('snapshot.auto_before_transform'))
-  const change = runProjectEdit(
-    'pieces.transform',
-    () => pieceList.mutateVisibleDimensions(transform),
-  )
+  const change = runProjectEdit('pieces.transform', () => pieceList.mutateVisibleDimensions(transform))
   if (!change) return
   lastBulkDiff.value = {
     title,
@@ -729,27 +358,27 @@ function mutateVisibleDimensions(
     sampleBefore: change.sampleBefore,
     sampleAfter: change.sampleAfter,
   }
-  showToast(t(toastKey))
+  showToast(t('transform_done'))
   recordOperation(title, t('operation.visible_count').replace('{0}', String(change.changed)))
 }
 
 function addVisibleAllowance(sign = 1) {
   const delta = Math.max(1, Math.round(transformStep.value)) * sign
-  mutateVisibleDimensions(piece => addDimensionDelta(piece, delta), 'transform_done', `${delta > 0 ? '+' : ''}${delta} ${t('bulk.allowance')}`)
+  mutateVisibleDimensions(piece => addDimensionDelta(piece, delta), `${delta > 0 ? '+' : ''}${delta} ${t('bulk.allowance')}`)
 }
 
 function addVisibleAllowancePreset(delta: number) {
   transformStep.value = delta
-  mutateVisibleDimensions(piece => addDimensionDelta(piece, delta), 'transform_done', `+${delta} ${t('bulk.allowance')}`)
+  mutateVisibleDimensions(piece => addDimensionDelta(piece, delta), `+${delta} ${t('bulk.allowance')}`)
 }
 
 function swapVisibleDimensions() {
-  mutateVisibleDimensions(piece => swapDimensions(piece), 'transform_done', t('bulk.swap'))
+  mutateVisibleDimensions(piece => swapDimensions(piece), t('bulk.swap'))
 }
 
 function roundVisibleDimensions() {
   const step = Math.max(1, Math.round(roundStep.value))
-  mutateVisibleDimensions(piece => roundDimensionsUp(piece, step), 'transform_done', `${t('bulk.round')} ${step}`)
+  mutateVisibleDimensions(piece => roundDimensionsUp(piece, step), `${t('bulk.round')} ${step}`)
 }
 
 function applyPieceSort() {
@@ -758,12 +387,49 @@ function applyPieceSort() {
   recordOperation(t('operation.sort'), t(`sort.${pieceSortMode.value}`))
 }
 
+function loadExample() {
+  saveAutoProjectSnapshot(t('snapshot.auto_before_import'))
+  const example = [
+    { label: t('example.side'), width: 1800, height: 300, quantity: 2, allowRotation: true },
+    { label: t('example.shelf'), width: 760, height: 300, quantity: 4, allowRotation: true },
+    { label: t('example.back'), width: 1800, height: 800, quantity: 1, allowRotation: true },
+  ]
+  runProjectEdit('example.load', () => pieceList.addMany(example))
+  recordOperation(t('operation.load_example'), t('operation.import_detail').replace('{0}', String(example.length)))
+  calculate()
+}
+
+function onDragStart(index: number) {
+  if (pieces[index]?.locked) return
+  dragStartIdx.value = index
+  isDragging.value = true
+}
+
+function movePiece(sourceIndex: number, direction: -1 | 1) {
+  if (!runProjectEdit('pieces.reorder', () => pieceList.move(sourceIndex, direction))) return
+  recordOperation(t('operation.reorder'), t('operation.visible_count').replace('{0}', '1'))
+}
+
+function dropPiece(targetIndex: number) {
+  const unlockedCount = pieces.filter(piece => !piece.locked).length
+  if (!runProjectEdit('pieces.reorder', () => pieceList.drop(dragStartIdx.value, targetIndex))) return
+  dragStartIdx.value = -1
+  dragOverIdx.value = -1
+  recordOperation(t('operation.reorder'), t('operation.visible_count').replace('{0}', String(unlockedCount)))
+}
+
+function onDragEnd() {
+  dragStartIdx.value = -1
+  dragOverIdx.value = -1
+  isDragging.value = false
+}
+
 const paletteCommands = computed<PaletteCommand[]>(() => [
   { id: 'calculate', label: t('calculate'), shortcut: 'Ctrl+Enter', disabled: !pieces.length, run: calculate },
-  { id: 'add', label: t('add_piece'), shortcut: 'Enter', run: addPiece },
+  { id: 'add', label: t('add_piece'), shortcut: 'Enter', run: () => { projectInputRef.value?.submit() } },
   { id: 'duplicate', label: t('duplicate_selected'), disabled: !selectedPiece.value, run: () => duplicatePiece() },
   { id: 'delete', label: t('delete'), disabled: !selectedPiece.value, run: deleteSelectedPiece },
-  { id: 'lock-toggle', label: selectedPiece.value?.locked ? t('command.unlock_selected') : t('command.lock_selected'), disabled: !selectedPiece.value, run: () => selectedPiece.value && togglePieceLock(selectedPiece.value) },
+  { id: 'lock-toggle', label: selectedPiece.value?.locked ? t('command.unlock_selected') : t('command.lock_selected'), disabled: !selectedPiece.value, run: () => { if (selectedPiece.value) togglePieceLock(selectedPiece.value) } },
   { id: 'import', label: t('command.open_import'), disabled: showImport.value, run: () => { showImport.value = true } },
   { id: 'share', label: t('command.copy_share'), disabled: !pieces.length, run: copyShareLink },
   { id: 'snapshot-save', label: t('command.snapshot_save'), disabled: !pieces.length, run: saveProjectSnapshot },
@@ -771,9 +437,6 @@ const paletteCommands = computed<PaletteCommand[]>(() => [
   { id: 'undo', label: t('hotkey.undo'), shortcut: 'Ctrl+Z', disabled: !canUndo.value, run: () => { doUndo() } },
   { id: 'redo', label: t('hotkey.redo'), shortcut: 'Ctrl+Shift+Z', disabled: !canRedo.value, run: () => { doRedo() } },
   { id: 'clear-filter', label: t('command.clear_filter'), disabled: !hasPieceFilter.value, run: clearPieceFilters },
-  { id: 'filter-unnamed', label: t('command.filter_unnamed'), disabled: !unnamedPiecesCount.value, run: () => { quickFilterMode.value = 'unnamed' } },
-  { id: 'filter-oversized', label: t('command.filter_oversized'), disabled: !oversizedPieces.value.length, run: () => { quickFilterMode.value = 'oversized' } },
-  { id: 'filter-machine', label: t('command.filter_machine'), disabled: !smallMachinePieces.value.length, run: () => { quickFilterMode.value = 'machine' } },
   { id: 'sort-area', label: t('command.sort_area'), run: () => setPieceSortMode('area_desc') },
   { id: 'sort-name', label: t('command.sort_name'), run: () => setPieceSortMode('name_asc') },
   { id: 'sort-quantity', label: t('command.sort_quantity'), run: () => setPieceSortMode('quantity_desc') },
@@ -799,146 +462,41 @@ const {
 } = useCommandPalette({
   commands: paletteCommands,
   focusSearch: () => commandInputRef.value?.focus(),
-  scrollToIndex: index => {
-    document.getElementById(`command-option-${index}`)?.scrollIntoView({ block: 'nearest' })
-  },
+  scrollToIndex: index => document.getElementById(`command-option-${index}`)?.scrollIntoView({ block: 'nearest' }),
   onError: () => showError(t('command_error')),
 })
 
-// ── Example project (one-click starter for the empty state) ────────────────────
-function loadExample() {
-  saveAutoProjectSnapshot(t('snapshot.auto_before_import'))
-  const ex = [
-    { label: t('example.side'), w: 1800, h: 300, q: 2 },
-    { label: t('example.shelf'), w: 760, h: 300, q: 4 },
-    { label: t('example.back'), w: 1800, h: 800, q: 1 },
-  ]
-  runProjectEdit('example.load', () => pieceList.addMany(ex.map(piece => ({
-    label: piece.label,
-    width: piece.w,
-    height: piece.h,
-    quantity: piece.q,
-    allowRotation: true,
-  }))))
-  recordOperation(t('operation.load_example'), t('operation.import_detail').replace('{0}', String(ex.length)))
-  calculate()
-}
-
-// ── Drag & drop ──────────────────────────────────────────────────────────────
-function onDragStart(idx: number) {
-  if (pieces[idx]?.locked) return
-  dragStartIdx.value = idx
-  isDragging.value = true
-}
-
-function onDragOver(idx: number) {
-  dragOverIdx.value = idx
-}
-
-function onDragLeave() {
-  dragOverIdx.value = -1
-}
-
-function canMovePiece(sourceIndex: number, direction: -1 | 1): boolean {
-  return pieceList.canMove(sourceIndex, direction)
-}
-
-function movePiece(sourceIndex: number, direction: -1 | 1) {
-  if (!runProjectEdit('pieces.reorder', () => pieceList.move(sourceIndex, direction))) return
-  recordOperation(t('operation.reorder'), t('operation.visible_count').replace('{0}', '1'))
-}
-
-function dropPiece(targetIdx: number) {
-  const sourceIndex = dragStartIdx.value
-  const unlockedCount = pieces.filter(piece => !piece.locked).length
-  if (!runProjectEdit('pieces.reorder', () => pieceList.drop(sourceIndex, targetIdx))) return
-  dragStartIdx.value = -1
-  dragOverIdx.value = -1
-  recordOperation(t('operation.reorder'), t('operation.visible_count').replace('{0}', String(unlockedCount)))
-}
-
-function onDragEnd() {
-  dragStartIdx.value = -1
-  dragOverIdx.value = -1
-  isDragging.value = false
-}
-
-// ── Strategy display ─────────────────────────────────────────────────────────
-// Single source for both the <select> groups and strategyDisplayName.
-const strategyGroups: { labelKey: string; items: { value: CuttingStrategy; sortKey: string }[] }[] = [
-  { labelKey: 'strategy.best_area', items: [
-    { value: CuttingStrategy.BestArea_AreaDesc, sortKey: 'sort.area' },
-    { value: CuttingStrategy.BestArea_MaxSideDesc, sortKey: 'sort.max_side' },
-    { value: CuttingStrategy.BestArea_PerimeterDesc, sortKey: 'sort.perimeter' },
-  ] },
-  { labelKey: 'strategy.best_short', items: [
-    { value: CuttingStrategy.BestShortSide_AreaDesc, sortKey: 'sort.area' },
-    { value: CuttingStrategy.BestShortSide_MaxSideDesc, sortKey: 'sort.max_side' },
-    { value: CuttingStrategy.BestShortSide_PerimeterDesc, sortKey: 'sort.perimeter' },
-  ] },
-  { labelKey: 'strategy.best_long', items: [
-    { value: CuttingStrategy.BestLongSide_AreaDesc, sortKey: 'sort.area' },
-    { value: CuttingStrategy.BestLongSide_MaxSideDesc, sortKey: 'sort.max_side' },
-    { value: CuttingStrategy.BestLongSide_PerimeterDesc, sortKey: 'sort.perimeter' },
-  ] },
-]
-
-function strategyDisplayName(s: CuttingStrategy): string {
-  for (const g of strategyGroups)
-    for (const it of g.items)
-      if (it.value === s) return `${t(g.labelKey)} \u00b7 ${t(it.sortKey)}`
-  return t('strategy.auto')
-}
-
 useKeyboardShortcuts([
   { key: 'k', ctrlOrMeta: true, allowInEditable: true, run: openCommandPalette },
-  {
-    key: 'Escape',
-    allowInEditable: true,
-    when: () => commandPaletteOpen.value,
-    run: closeCommandPalette,
-  },
-  {
-    key: 'Enter',
-    ctrlOrMeta: true,
-    allowInEditable: true,
-    run: () => { if (pieces.length) calculate() },
-  },
-  { key: 'Enter', run: addPiece },
-  { key: 'z', ctrlOrMeta: true, run: () => { doUndo() } },
-  { key: 'z', ctrlOrMeta: true, shift: true, run: () => { doRedo() } },
-  { key: 'y', ctrlOrMeta: true, run: () => { doRedo() } },
+  { key: 'Escape', allowInEditable: true, when: () => commandPaletteOpen.value, run: closeCommandPalette },
+  { key: 'Enter', ctrlOrMeta: true, allowInEditable: true, run: () => { if (pieces.length) calculate() } },
+  { key: 'Enter', run: () => { projectInputRef.value?.submit() } },
+  { key: 'z', ctrlOrMeta: true, run: doUndo },
+  { key: 'z', ctrlOrMeta: true, shift: true, run: doRedo },
+  { key: 'y', ctrlOrMeta: true, run: doRedo },
   { key: 'd', ctrlOrMeta: true, run: () => { duplicate(selectedPieceId.value) } },
   {
     key: 'Escape',
     run: () => {
-      if (selectedPieceId.value !== null) {
-        pieceList.clearSelection()
-        return
-      }
-      result.value = null
-      calculated.value = false
+      if (selectedPieceId.value !== null) pieceList.clearSelection()
+      else optimization.invalidate()
     },
   },
 ])
 
-// ── Lifecycle ────────────────────────────────────────────────────────────────
 onMounted(() => {
   loadInitialState()
-  projectSnapshotStore.load()
-  loadOperationLog()
-  // Baseline the history on whatever was actually loaded (link/localStorage),
-  // so the first undo can't step back into the pre-load default.
+  projectActivity.load()
   homeHistory.reset()
 })
 
 onUnmounted(() => {
-  activeOptimization?.cancel()
+  optimization.dispose()
+  projectActivity.dispose()
   homeStorage.dispose()
   homeHistory.dispose()
   clearToast()
   saveStateNow()
-  saveOperationLogNow()
 })
 </script>
 
@@ -961,554 +519,121 @@ onUnmounted(() => {
 
     <div class="main-layout">
       <aside class="panel panel-input">
-        <!-- Sheet parameters -->
-        <section class="card">
-          <h2>{{ t('sheet_params') }}</h2>
-          <div class="form-row">
-            <label for="sheet-preset">{{ t('sheet_preset') }}</label>
-            <select id="sheet-preset" class="form-select" :value="selectedPreset" @change="onPresetChanged">
-              <option value="">{{ t('preset.custom') }}</option>
-              <option v-for="p in sheetPresets" :key="p.key" :value="p.key">{{ t(`preset.${p.key}`) }}</option>
-            </select>
-          </div>
-          <div class="form-row">
-            <label for="sheet-width">{{ t('width_mm') }}</label>
-            <NumberField id="sheet-width" :aria-label="t('width_mm')" :model-value="sheetWidth" @update:model-value="onSheetWidthChanged" :min="1" :step="1" />
-          </div>
-          <div class="form-row">
-            <label for="sheet-height">{{ t('height_mm') }}</label>
-            <NumberField id="sheet-height" :aria-label="t('height_mm')" :model-value="sheetHeight" @update:model-value="onSheetHeightChanged" :min="1" :step="1" />
-          </div>
-          <div class="form-row">
-            <label for="sheet-kerf">{{ t('kerf_mm') }}</label>
-            <NumberField id="sheet-kerf" :aria-label="t('kerf_mm')" :model-value="kerf" @update:model-value="onKerfChanged" :min="0" :step="1" />
-          </div>
-          <div class="form-row">
-            <label for="sheet-price">{{ t('cost.price_per_sheet') }}</label>
-            <div class="price-row">
-              <NumberField id="sheet-price" :aria-label="t('cost.price_per_sheet')" :model-value="pricePerSheet" @update:model-value="onPricePerSheetChanged" :min="0" :step="1" />
-              <input class="currency-input" type="text" :value="currency" @input="onCurrencyChanged" maxlength="3" :title="t('cost.currency')" :aria-label="t('cost.currency')" />
-            </div>
-          </div>
-          <div class="form-row">
-            <label for="cut-strategy">{{ t('strategy') }}</label>
-            <select id="cut-strategy" class="form-select" v-model.number="selectedStrategy">
-              <option :value="CuttingStrategy.Auto">{{ t('strategy.auto') }}</option>
-              <optgroup v-for="g in strategyGroups" :key="g.labelKey" :label="t(g.labelKey)">
-                <option v-for="it in g.items" :key="it.value" :value="it.value">{{ t(g.labelKey) }} &middot; {{ t(it.sortKey) }}</option>
-              </optgroup>
-            </select>
-          </div>
-        </section>
-
-        <!-- Add piece form -->
-        <section class="card">
-          <h2>{{ t('add_piece') }}</h2>
-          <div class="form-row">
-            <label for="new-piece-name">{{ t('name') }}</label>
-            <input id="new-piece-name" type="text" v-model="newLabel" :placeholder="t('name_placeholder')" maxlength="200" />
-          </div>
-          <div class="form-row">
-            <label for="new-piece-width">{{ t('width_mm') }}</label>
-            <NumberField id="new-piece-width" :aria-label="t('width_mm')" v-model="newWidth" :min="1" :step="1" />
-          </div>
-          <div class="form-row">
-            <label for="new-piece-height">{{ t('height_mm') }}</label>
-            <NumberField id="new-piece-height" :aria-label="t('height_mm')" v-model="newHeight" :min="1" :step="1" />
-          </div>
-          <div class="form-row">
-            <label for="new-piece-quantity">{{ t('quantity') }}</label>
-            <NumberField id="new-piece-quantity" :aria-label="t('quantity')" :model-value="newQty" @update:model-value="v => newQty = normalizeQuantity(v)" :min="1" :max="MAX_PIECE_QUANTITY" :step="1" />
-          </div>
-          <div class="form-row form-row-check">
-            <label>
-              <input type="checkbox" v-model="newAllowRotation" />
-              {{ t('allow_rotation') }}
-            </label>
-          </div>
-          <p v-if="addError" class="error">{{ addError }}</p>
-          <div class="card-actions">
-            <button class="btn btn-primary" @click="addPiece">+ {{ t('add') }}</button>
-            <button class="btn btn-ghost" @click="showImport = !showImport" :class="{ active: showImport }">{{ t('import') }}</button>
-          </div>
-
-          <!-- Bulk import: paste a cut list from a spreadsheet -->
-          <div v-if="showImport" class="import-box">
-            <textarea
-              v-model="importText"
-              class="import-textarea"
-              rows="5"
-              :placeholder="t('import_placeholder')"
-            ></textarea>
-            <p class="import-hint">{{ t('import_hint') }}</p>
-            <div
-              v-if="importText.trim()"
-              class="import-preflight"
-              :class="{ warn: importPreview.capacityExceeded || !importPreview.acceptedCount }"
-              aria-live="polite"
-            >
-              <span><strong>{{ importPreview.acceptedCount }}</strong> {{ t('import_ready') }}</span>
-              <span><strong>{{ importPreview.totalQuantity }}</strong> {{ t('import_units') }}</span>
-              <span v-if="importPreview.totalSkipped"><strong>{{ importPreview.totalSkipped }}</strong> {{ t('import_rejected') }}</span>
-            </div>
-            <p v-if="importPreview.capacityExceeded" class="error import-error">{{ t('import_capacity') }}</p>
-            <button class="btn btn-primary btn-compact" @click="importPieces" :disabled="!canCommitImport">
-              {{ t('import_add_all') }}
-            </button>
-          </div>
-        </section>
-
-        <!-- Project versions -->
-        <section class="card snapshot-card">
-          <div class="snapshot-head">
-            <h2>{{ t('snapshots') }}</h2>
-            <span>{{ projectSnapshots.length }}/8</span>
-          </div>
-          <div class="snapshot-save-row">
-            <input
-              v-model="snapshotName"
-              type="text"
-              class="snapshot-name-input"
-              :placeholder="t('snapshot_name_placeholder')"
-              @keydown.enter.prevent="saveProjectSnapshot"
-            />
-            <button class="btn btn-primary btn-compact" @click="saveProjectSnapshot" :disabled="!pieces.length">{{ t('save') }}</button>
-          </div>
-          <p class="snapshot-hint">{{ t('snapshot_hint') }}</p>
-          <div v-if="projectSnapshots.length" class="snapshot-list">
-            <div v-for="snapshot in projectSnapshots" :key="snapshot.id" class="snapshot-item">
-              <button type="button" class="snapshot-main" @click="restoreProjectSnapshot(snapshot)">
-                <strong>{{ snapshot.name }}</strong>
-                <span>{{ snapshot.summary }}</span>
-                <small>{{ formatSnapshotDate(snapshot.createdAt) }}</small>
-              </button>
-              <button class="btn btn-ghost btn-sm" @click="compareProjectSnapshot(snapshot)" :title="t('snapshot_compare')">Δ</button>
-              <button class="btn btn-danger btn-sm" @click="deleteProjectSnapshot(snapshot)" :title="t('delete')">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
-                </svg>
-              </button>
-            </div>
-          </div>
-          <p v-else class="snapshot-empty">{{ t('snapshot_empty') }}</p>
-          <div v-if="snapshotCompare" class="snapshot-compare">
-            <strong>{{ snapshotCompare.name }}</strong>
-            <span>{{ t('snapshot_compare_pieces') }}: {{ snapshotCompare.piecesDelta >= 0 ? '+' : '' }}{{ snapshotCompare.piecesDelta }}</span>
-            <span>{{ t('snapshot_compare_area') }}: {{ snapshotCompare.areaDelta }}</span>
-            <span>{{ t('snapshot_compare_changed') }}: {{ snapshotCompare.changed }} · +{{ snapshotCompare.added }} · -{{ snapshotCompare.removed }}</span>
-            <span v-if="snapshotCompare.sheetChanged">{{ t('snapshot_compare_sheet') }}</span>
-          </div>
-        </section>
-
-        <!-- Operation log -->
-        <section class="card operation-card">
-          <div class="operation-head">
-            <h2>{{ t('operation_log') }}</h2>
-            <button class="btn btn-ghost btn-sm" @click="clearOperationLog" :disabled="!operationLog.length" :title="t('clear_all')">×</button>
-          </div>
-          <input
-            v-model="operationQuery"
-            type="search"
-            class="snapshot-name-input"
-            :placeholder="t('operation_search')"
-          />
-          <div v-if="filteredOperationLog.length" class="operation-list">
-            <div v-for="entry in filteredOperationLog" :key="entry.id" class="operation-item">
-              <strong>{{ entry.label }}</strong>
-              <span v-if="entry.detail">{{ entry.detail }}</span>
-              <small>{{ formatOperationDate(entry.createdAt) }}</small>
-            </div>
-          </div>
-          <p v-else class="snapshot-empty">{{ t('operation_empty') }}</p>
-        </section>
+        <ProjectInputPanel
+          ref="projectInputRef"
+          v-model:show-import="showImport"
+          :sheet-width="sheetWidth"
+          :sheet-height="sheetHeight"
+          :kerf="kerf"
+          :price-per-sheet="pricePerSheet"
+          :currency="currency"
+          :selected-strategy="selectedStrategy"
+          :pieces="pieces"
+          @sheet-preset="onSheetPreset"
+          @sheet-width="onSheetWidthChanged"
+          @sheet-height="onSheetHeightChanged"
+          @kerf="onKerfChanged"
+          @price-per-sheet="onPricePerSheetChanged"
+          @currency="onCurrencyChanged"
+          @strategy="onStrategyChanged"
+          @add-piece="addPiece"
+          @import-pieces="importPieces"
+        />
+        <ProjectActivityPanel
+          v-model:snapshot-name="snapshotName"
+          v-model:operation-query="operationQuery"
+          :snapshots="projectSnapshots"
+          :operation-log="filteredOperationLog"
+          :snapshot-compare="snapshotCompare"
+          :has-pieces="pieces.length > 0"
+          @save="saveProjectSnapshot"
+          @restore="restoreProjectSnapshot"
+          @compare="compareProjectSnapshot"
+          @delete="deleteProjectSnapshot"
+          @clear-log="clearOperationLog"
+        />
       </aside>
 
       <main class="panel panel-result">
-        <!-- Piece list -->
-        <section v-if="pieces.length" class="card piece-list-top">
-          <div class="piece-list-top-header">
-            <div>
-              <h2>{{ t('piece_list') }}</h2>
-              <p class="editor-subtitle">{{ pieceSummary.totalTypes }} {{ t('piece_types') }} · {{ pieceSummary.totalQuantity }} {{ t('pieces_short') }}</p>
-            </div>
-            <div class="history-actions">
-              <button class="btn btn-ghost btn-square" @click="openCommandPalette" :title="t('command_palette')">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                  <path d="M4 7h16"/><path d="M4 12h10"/><path d="M4 17h7"/>
-                </svg>
-              </button>
-              <button class="btn btn-ghost btn-square" @click="doUndo" :disabled="!canUndo" :title="t('hotkey.undo')">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M9 14 4 9l5-5"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/>
-                </svg>
-              </button>
-              <button class="btn btn-ghost btn-square" @click="doRedo" :disabled="!canRedo" :title="t('hotkey.redo')">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="m15 14 5-5-5-5"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/>
-                </svg>
-              </button>
-            </div>
-          </div>
+        <PieceEditorPanel
+          v-model:piece-query="pieceQuery"
+          v-model:piece-sort-mode="pieceSortMode"
+          v-model:quick-filter-mode="quickFilterMode"
+          v-model:transform-step="transformStep"
+          v-model:round-step="roundStep"
+          v-model:min-machine-cut="minMachineCut"
+          :pieces="pieces"
+          :piece-summary="pieceSummary"
+          :oversized-pieces="oversizedPieces"
+          :small-machine-pieces="smallMachinePieces"
+          :locked-pieces-count="lockedPiecesCount"
+          :unnamed-pieces-count="unnamedPiecesCount"
+          :rotation-locked-count="rotationLockedCount"
+          :visible-pieces="visiblePieces"
+          :visible-editable-count="visibleEditablePieces.length"
+          :has-piece-filter="hasPieceFilter"
+          :selected-piece="selectedPiece"
+          :selected-piece-stats="selectedPieceStats"
+          :selected-piece-id="selectedPieceId"
+          :piece-indexes="pieceIndexes"
+          :result="result"
+          :can-undo="canUndo"
+          :can-redo="canRedo"
+          :last-bulk-diff="lastBulkDiff"
+          :is-dragging="isDragging"
+          :drag-over-index="dragOverIdx"
+          :drag-start-index="dragStartIdx"
+          :can-move-piece="pieceList.canMove"
+          @open-commands="openCommandPalette"
+          @undo="doUndo"
+          @redo="doRedo"
+          @calculate="calculate"
+          @clear-filters="clearPieceFilters"
+          @sort="applyPieceSort"
+          @duplicate-selected="duplicatePiece()"
+          @visible-rotation="setVisibleRotation"
+          @add-allowance="addVisibleAllowance"
+          @allowance-preset="addVisibleAllowancePreset"
+          @round-dimensions="roundVisibleDimensions"
+          @swap-dimensions="swapVisibleDimensions"
+          @toggle-lock="togglePieceLock"
+          @delete-selected="deleteSelectedPiece"
+          @clear-selection="clearSelection"
+          @drag-start="onDragStart"
+          @drag-over="dragOverIdx = $event"
+          @drag-leave="dragOverIdx = -1"
+          @drop="dropPiece"
+          @drag-end="onDragEnd"
+          @move-piece="movePiece"
+          @select-piece="toggleSelect"
+          @update-label="updatePieceLabel"
+          @update-width="updatePieceWidth"
+          @update-height="updatePieceHeight"
+          @update-quantity="updatePieceQuantity"
+          @toggle-rotation="togglePieceRotation"
+          @duplicate="duplicate"
+          @remove="removePiece"
+          @clear-all="clearAll"
+          @share="copyShareLink"
+          @export-csv="exportPiecesCsv"
+        />
 
-          <div class="editor-summary">
-            <span class="metric-pill"><strong>{{ areaM2(pieceSummary.totalArea) }}</strong> {{ t('material_area') }}</span>
-            <span class="metric-pill"><strong>{{ areaM2(pieceSummary.largestPieceArea) }}</strong> {{ t('largest_piece') }}</span>
-            <span class="metric-pill"><strong>{{ pieceSummary.rotationEnabled }}/{{ pieceSummary.totalTypes }}</strong> {{ t('rotation') }}</span>
-          </div>
-
-          <div class="readiness-strip" :class="`is-${readinessStatus}`">
-            <div class="readiness-main">
-              <span>{{ t('readiness') }}</span>
-              <strong>{{ readinessScore }}%</strong>
-            </div>
-            <div class="readiness-meter" aria-hidden="true">
-              <span :style="{ width: `${readinessScore}%` }"></span>
-            </div>
-            <p>{{ readinessMessage }}</p>
-            <button class="btn btn-ghost btn-compact" @click="calculate" :disabled="!pieces.length">{{ t('calculate') }}</button>
-          </div>
-
-          <div class="preflight-strip">
-            <span
-              v-for="check in preflightChecks"
-              :key="check.id"
-              class="preflight-item"
-              :class="`is-${check.status}`"
-            >
-              <strong>{{ check.value }}</strong>
-              {{ check.label }}
-            </span>
-          </div>
-
-          <div class="quick-filter-strip">
-            <button
-              v-for="filter in quickFilters"
-              :key="filter.id"
-              class="filter-chip"
-              :class="{ active: quickFilterMode === filter.id }"
-              :disabled="filter.id !== 'all' && !filter.count"
-              @click="quickFilterMode = filter.id"
-            >
-              <span>{{ filter.label }}</span>
-              <strong>{{ filter.count }}</strong>
-            </button>
-            <button class="filter-chip" :disabled="!hasPieceFilter" @click="clearPieceFilters">{{ t('filter.clear') }}</button>
-          </div>
-
-          <div class="editor-toolbar">
-            <label class="toolbar-search">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
-              </svg>
-              <input v-model="pieceQuery" type="search" :placeholder="t('search_pieces')" />
-            </label>
-            <select class="form-select toolbar-select" v-model="pieceSortMode" @change="applyPieceSort">
-              <option value="manual">{{ t('sort.manual') }}</option>
-              <option value="area_desc">{{ t('sort.area_desc') }}</option>
-              <option value="name_asc">{{ t('sort.name_asc') }}</option>
-              <option value="quantity_desc">{{ t('sort.quantity_desc') }}</option>
-            </select>
-            <div class="toolbar-actions">
-              <button class="btn btn-ghost btn-tool" @click="duplicatePiece()" :disabled="!selectedPiece" :title="t('duplicate_selected')">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
-                  <rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 0 1 2-2h10"/>
-                </svg>
-                {{ t('duplicate') }}
-              </button>
-              <button class="btn btn-ghost btn-square" @click="setVisibleRotation(true)" :disabled="!visiblePieces.length" :title="t('rotate_visible_on')">&#8635;</button>
-              <button class="btn btn-ghost btn-square" @click="setVisibleRotation(false)" :disabled="!visiblePieces.length" :title="t('rotate_visible_off')">&#8634;</button>
-            </div>
-          </div>
-
-          <div class="transform-strip">
-            <div class="transform-group">
-              <span>{{ t('transform.allowance') }}</span>
-              <NumberField
-                :aria-label="t('transform.allowance')"
-                :model-value="transformStep"
-                @update:model-value="v => transformStep = Math.max(1, Math.round(v))"
-                :min="1"
-                :step="1"
-              />
-              <button class="btn btn-ghost btn-square" @click="addVisibleAllowance(1)" :disabled="!visibleEditablePieces.length" :title="t('transform_add_visible')">+</button>
-              <button class="btn btn-ghost btn-square" @click="addVisibleAllowance(-1)" :disabled="!visibleEditablePieces.length" :title="t('transform_sub_visible')">−</button>
-              <button
-                v-for="preset in ALLOWANCE_PRESETS"
-                :key="preset"
-                class="preset-chip"
-                @click="addVisibleAllowancePreset(preset)"
-                :disabled="!visibleEditablePieces.length"
-              >+{{ preset }}</button>
-            </div>
-            <div class="transform-group">
-              <span>{{ t('transform.round') }}</span>
-              <NumberField
-                :aria-label="t('transform.round')"
-                :model-value="roundStep"
-                @update:model-value="v => roundStep = Math.max(1, Math.round(v))"
-                :min="1"
-                :step="1"
-              />
-              <button class="btn btn-ghost btn-square" @click="roundVisibleDimensions" :disabled="!visibleEditablePieces.length" :title="t('transform_round_visible')">⌈</button>
-              <button class="btn btn-ghost btn-square" @click="swapVisibleDimensions" :disabled="!visibleEditablePieces.length" :title="t('transform_swap_visible')">⇄</button>
-            </div>
-            <div class="transform-group transform-group-machine">
-              <span>{{ t('machine_min') }}</span>
-              <NumberField
-                :aria-label="t('machine_min')"
-                :model-value="minMachineCut"
-                @update:model-value="v => minMachineCut = Math.max(1, Math.round(v))"
-                :min="1"
-                :step="1"
-              />
-              <strong>{{ visibleEditablePieces.length }}/{{ visiblePieces.length }}</strong>
-            </div>
-          </div>
-
-          <div v-if="lastBulkDiff" class="bulk-diff">
-            <strong>{{ lastBulkDiff.title }}</strong>
-            <span>{{ t('bulk_changed') }}: {{ lastBulkDiff.changed }}</span>
-            <span v-if="lastBulkDiff.skipped">{{ t('bulk_skipped') }}: {{ lastBulkDiff.skipped }}</span>
-            <span>{{ lastBulkDiff.sampleBefore }} → {{ lastBulkDiff.sampleAfter }}</span>
-            <span>{{ lastBulkDiff.beforeArea }} → {{ lastBulkDiff.afterArea }} {{ t('material_area') }}</span>
-          </div>
-
-          <div v-if="selectedPiece && selectedPieceStats" class="selected-inspector">
-            <div class="selected-inspector-main">
-              <span class="piece-color inspector-color" :style="{ background: selectedPiece.color }">{{ pieceIndex(selectedPiece) }}</span>
-              <div class="selected-inspector-title">
-                <strong>{{ selectedPiece.label.trim() || t('unnamed_piece') }}</strong>
-                <span>{{ selectedPiece.width.toFixed(0) }}&times;{{ selectedPiece.height.toFixed(0) }} mm · {{ selectedPiece.quantity }} {{ t('pieces_short') }}</span>
-              </div>
-            </div>
-            <div class="selected-inspector-metrics">
-              <span><strong>{{ areaM2(selectedPieceStats.area) }}</strong> {{ t('piece_area') }}</span>
-              <span><strong>{{ areaM2(selectedPieceStats.totalArea) }}</strong> {{ t('total_piece_area') }}</span>
-              <span><strong>{{ selectedPieceStats.placements.length }}/{{ selectedPiece.quantity }}</strong> {{ t('placed_count') }}</span>
-              <span v-if="selectedPieceStats.firstPlacement">
-                <strong>{{ t('sheet') }} {{ selectedPieceStats.firstPlacement.sheetIndex + 1 }}</strong>
-                {{ t('first_position') }}: {{ selectedPieceStats.firstPlacement.x.toFixed(0) }}, {{ selectedPieceStats.firstPlacement.y.toFixed(0) }}
-              </span>
-            </div>
-            <div class="selected-inspector-actions">
-              <button class="btn btn-ghost btn-compact" @click="togglePieceLock(selectedPiece)">{{ selectedPiece.locked ? t('unlock') : t('lock') }}</button>
-              <button class="btn btn-ghost btn-compact" @click="duplicatePiece()">{{ t('duplicate') }}</button>
-              <button class="btn btn-danger btn-compact" @click="deleteSelectedPiece">{{ t('delete') }}</button>
-              <button class="btn btn-ghost btn-compact" @click="clearSelection">{{ t('clear_selection') }}</button>
-            </div>
-          </div>
-
-          <div v-if="oversizedPieces.length" class="alert alert-warn editor-alert">
-            <strong>{{ t('oversized_existing_warn') }}</strong>
-            <ul>
-              <li v-for="p in oversizedPieces" :key="p.id">
-                <template v-if="p.label.trim()">{{ p.label.trim() }} </template>({{ p.width.toFixed(0) }}&times;{{ p.height.toFixed(0) }})
-              </li>
-            </ul>
-          </div>
-
-          <div v-if="smallMachinePieces.length" class="alert alert-warn editor-alert">
-            <strong>{{ t('small_machine_warn').replace('{0}', String(minMachineCut)) }}</strong>
-            <ul>
-              <li v-for="p in smallMachinePieces" :key="p.id">
-                <template v-if="p.label.trim()">{{ p.label.trim() }} </template>({{ p.width.toFixed(0) }}&times;{{ p.height.toFixed(0) }})
-              </li>
-            </ul>
-          </div>
-
-          <p v-if="hasPieceFilter && !visiblePieces.length" class="piece-filter-empty">{{ t('no_matching_pieces') }}</p>
-          <div
-            v-else
-            class="piece-list piece-list-horizontal"
-            :class="{ 'is-dragging': isDragging }"
-            @dragleave="onDragLeave"
-          >
-            <div
-              v-for="entry in visiblePieces"
-              :key="entry.piece.id"
-              class="piece-item piece-item-editing"
-              :class="{ 'drag-over': dragOverIdx === entry.index, 'is-dragging-item': dragStartIdx === entry.index, selected: selectedPieceId === entry.piece.id, locked: entry.piece.locked }"
-              :draggable="!entry.piece.locked"
-              @dragstart="onDragStart(entry.index)"
-              @dragover.prevent="onDragOver(entry.index)"
-              @drop="dropPiece(entry.index)"
-              @dragend="onDragEnd"
-            >
-              <div class="piece-reorder-actions">
-                <button type="button" :disabled="!canMovePiece(entry.index, -1)" :aria-label="`${t('move_up')}: ${entry.piece.label || t('unnamed_piece')}`" @click="movePiece(entry.index, -1)">↑</button>
-                <button type="button" :disabled="!canMovePiece(entry.index, 1)" :aria-label="`${t('move_down')}: ${entry.piece.label || t('unnamed_piece')}`" @click="movePiece(entry.index, 1)">↓</button>
-              </div>
-              <span class="drag-handle" :title="t('drag_hint')">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                  <circle cx="9" cy="6" r="2"/><circle cx="15" cy="6" r="2"/>
-                  <circle cx="9" cy="12" r="2"/><circle cx="15" cy="12" r="2"/>
-                  <circle cx="9" cy="18" r="2"/><circle cx="15" cy="18" r="2"/>
-                </svg>
-              </span>
-              <button type="button" class="piece-color" :style="{ background: entry.piece.color }" :title="t('highlight_hint')" :aria-label="`${t('highlight_hint')}: ${entry.piece.label || t('unnamed_piece')}`" @click="toggleSelect(entry.piece.id)">{{ entry.index + 1 }}</button>
-              <div class="piece-edit-fields">
-                <input
-                  class="piece-edit-label"
-                  type="text"
-                  :value="entry.piece.label"
-                  :placeholder="t('name')"
-                  :aria-label="`${t('name')}: ${entry.index + 1}`"
-                  maxlength="200"
-                  @input="updatePieceLabel(entry.piece, ($event.target as HTMLInputElement).value)"
-                />
-                <div class="piece-edit-dims">
-                  <NumberField :aria-label="`${t('width_mm')}: ${entry.piece.label || entry.index + 1}`" :model-value="entry.piece.width" @update:model-value="v => updatePieceWidth(entry.piece, v)" :min="1" :step="1" />
-                  <span class="unit">&times;</span>
-                  <NumberField :aria-label="`${t('height_mm')}: ${entry.piece.label || entry.index + 1}`" :model-value="entry.piece.height" @update:model-value="v => updatePieceHeight(entry.piece, v)" :min="1" :step="1" />
-                  <span class="unit">mm</span>
-                  <NumberField
-                    :aria-label="`${t('quantity')}: ${entry.piece.label || entry.index + 1}`"
-                    :model-value="entry.piece.quantity"
-                    @update:model-value="v => updatePieceQuantity(entry.piece, v)"
-                    :min="1"
-                    :max="MAX_PIECE_QUANTITY"
-                    :step="1"
-                  />
-                  <button
-                    type="button"
-                    class="btn btn-primary btn-sm piece-edit-rot"
-                    :class="{ 'rot-on': entry.piece.allowRotation }"
-                    :title="t('rotation')"
-                    :aria-label="`${t('rotation')}: ${entry.piece.label || t('unnamed_piece')}`"
-                    @click="togglePieceRotation(entry.piece)"
-                  >&#8635;</button>
-                  <button
-                    type="button"
-                    class="btn btn-ghost btn-sm piece-lock-btn"
-                    :class="{ active: entry.piece.locked }"
-                    :title="entry.piece.locked ? t('unlock') : t('lock')"
-                    :aria-label="`${entry.piece.locked ? t('unlock') : t('lock')}: ${entry.piece.label || t('unnamed_piece')}`"
-                    @click="togglePieceLock(entry.piece)"
-                  >
-                    <svg v-if="entry.piece.locked" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                      <rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>
-                    </svg>
-                    <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                      <rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 7-2"/>
-                    </svg>
-                  </button>
-                </div>
-              </div>
-              <button class="btn btn-ghost btn-sm" @click="duplicate(entry.piece.id)" :title="t('duplicate')" :aria-label="`${t('duplicate')}: ${entry.piece.label || t('unnamed_piece')}`">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                </svg>
-              </button>
-              <button class="btn btn-danger btn-sm" @click="removePiece(entry.piece)" :title="t('delete')" :aria-label="`${t('delete')}: ${entry.piece.label || t('unnamed_piece')}`">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
-                </svg>
-              </button>
-            </div>
-          </div>
-          <div class="card-actions card-actions-bottom">
-            <button class="btn btn-danger" @click="clearAll">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px">
-                <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
-              </svg>
-              {{ t('clear_all') }}
-            </button>
-            <button class="btn btn-ghost" @click="copyShareLink" :title="t('share')">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px">
-                <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>
-              </svg>
-              {{ t('share') }}
-            </button>
-            <button class="btn btn-ghost" @click="exportPiecesCsv" :title="t('export.parts_csv')">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
-              </svg>
-              CSV
-            </button>
-            <button class="btn btn-primary" @click="calculate">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px">
-                <polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/>
-              </svg>
-              {{ t('calculate') }}
-            </button>
-          </div>
-        </section>
-
-        <!-- Empty state -->
-        <div v-if="!result && !calculated" class="empty-state">
-          <div class="empty-icon">&#129690;</div>
-          <p>{{ t('empty_hint') }}</p>
-          <button class="btn btn-ghost" @click="loadExample">{{ t('load_example') }}</button>
-        </div>
-
-        <!-- Results -->
-        <template v-else-if="result">
-          <div class="stats-bar">
-            <div class="stat">
-              <span class="stat-value">{{ result.totalSheets }}</span>
-              <span class="stat-label">{{ t('sheets') }}</span>
-            </div>
-            <div class="stat">
-              <span class="stat-value">{{ result.overallEfficiency.toFixed(1) }}%</span>
-              <span class="stat-label">{{ t('efficiency') }}</span>
-            </div>
-            <div class="stat">
-              <span class="stat-value">{{ (result.totalArea - result.totalUsedArea).toFixed(0) }} mm&sup2;</span>
-              <span class="stat-label">{{ t('waste') }}</span>
-            </div>
-            <div class="stat">
-              <span class="stat-value stat-value-sm">{{ strategyDisplayName(result.autoPickedStrategy ?? result.strategy) }}</span>
-              <span class="stat-label">{{ t('strategy.used') }}</span>
-            </div>
-          </div>
-
-          <!-- Material cost (shown once a sheet price is set) -->
-          <div v-if="costingVisible && costSummary" class="cost-bar">
-            <span class="cost-title">{{ t('cost.summary') }}</span>
-            <div class="cost-item">
-              <span class="cost-value">{{ costSummary.totalCost.toFixed(0) }} {{ currency }}</span>
-              <span class="cost-label">{{ t('cost.total') }}</span>
-            </div>
-            <div class="cost-item">
-              <span class="cost-value">{{ costSummary.costPerPart.toFixed(2) }} {{ currency }}</span>
-              <span class="cost-label">{{ t('cost.per_part') }}</span>
-            </div>
-            <div class="cost-item">
-              <span class="cost-value">{{ costSummary.wasteCost.toFixed(0) }} {{ currency }}</span>
-              <span class="cost-label">{{ t('cost.waste_cost') }}</span>
-            </div>
-          </div>
-
-          <!-- Export -->
-          <div class="export-bar">
-            <span class="export-label">{{ t('export') }}</span>
-            <button class="btn btn-ghost btn-export" @click="exportSvg">SVG</button>
-            <button class="btn btn-ghost btn-export" @click="exportDxf">DXF</button>
-            <button class="btn btn-ghost btn-export" @click="printLayout">{{ t('export.print') }}</button>
-          </div>
-
-          <!-- Unplaced warnings -->
-          <div v-if="result.unplacedPieces.length" class="alert alert-warn">
-            <strong>{{ t('unplaced_warn') }}</strong>
-            <ul>
-              <li v-for="(u, ui) in result.unplacedPieces" :key="`${u.sourceId}-${ui}`">
-                <template v-if="u.label.trim()">{{ u.label.trim() }} </template>({{ u.width.toFixed(0) }}&times;{{ u.height.toFixed(0) }})
-              </li>
-            </ul>
-          </div>
-
-          <!-- Sheets grid -->
-          <div class="sheets-grid">
-            <SheetCard
-              v-for="sheet in result.sheets"
-              :key="sheet.index"
-              :sheet="sheet"
-              :selected-piece-id="selectedPieceId"
-              :piece-indexes="pieceIndexes"
-              @select="toggleSelect"
-            />
-          </div>
-        </template>
+        <OptimizationWorkspace
+          :state="optimizationState"
+          :costing-visible="costingVisible"
+          :cost-summary="costSummary"
+          :currency="currency"
+          :selected-piece-id="selectedPieceId"
+          :piece-indexes="pieceIndexes"
+          :can-retry="pieces.length > 0"
+          @load-example="loadExample"
+          @cancel="optimization.cancel"
+          @retry="calculate"
+          @export-svg="exportSvg"
+          @export-dxf="exportDxf"
+          @print="printLayout"
+          @select="toggleSelect"
+        />
       </main>
     </div>
 
@@ -1516,9 +641,7 @@ onUnmounted(() => {
       <div v-if="commandPaletteOpen" class="command-palette-backdrop" @click.self="closeCommandPalette">
         <div class="command-palette" role="dialog" aria-modal="true" :aria-label="t('command_palette')">
           <label class="command-search">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-              <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
-            </svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
             <input
               ref="commandInputRef"
               v-model="commandQuery"
@@ -1561,97 +684,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.import-box {
-  margin-top: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.import-textarea {
-  width: 100%;
-  resize: vertical;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  padding: 8px 10px;
-  border: 1px solid var(--border, #d0d0d0);
-  border-radius: 6px;
-  background: var(--input-bg, #fff);
-  color: inherit;
-  box-sizing: border-box;
-}
-.import-hint {
-  margin: 0;
-  font-size: 11px;
-  opacity: 0.7;
-}
-.import-preflight {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
-  padding: 7px 9px;
-  border-left: 3px solid var(--eff-good-tx);
-  background: var(--eff-good-bg);
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.35;
-}
-.import-preflight strong {
-  color: var(--eff-good-tx);
-  font-variant-numeric: tabular-nums;
-}
-.import-preflight.warn {
-  border-left-color: var(--alert-warn-bd);
-  background: var(--alert-warn-bg);
-}
-.import-preflight.warn strong { color: var(--alert-warn-tx); }
-.import-error { margin: 0; }
-.price-row {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-.currency-input {
-  width: 48px;
-  text-align: center;
-  padding: 6px 4px;
-  border: 1px solid var(--border, #d0d0d0);
-  border-radius: 6px;
-  background: var(--input-bg, #fff);
-  color: inherit;
-  box-sizing: border-box;
-}
-.cost-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 14px 22px;
-  padding: 10px 14px;
-  margin-bottom: 12px;
-  border: 1px solid var(--border, #d0d0d0);
-  border-radius: 8px;
-  background: var(--input-bg, #fff);
-}
-.cost-title {
-  font-size: 12px;
-  font-weight: 600;
-  opacity: 0.65;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.cost-item {
-  display: flex;
-  flex-direction: column;
-}
-.cost-value {
-  font-size: 16px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-.cost-label {
-  font-size: 11px;
-  opacity: 0.7;
-}
 .toast {
   position: fixed;
   left: 50%;
@@ -1672,12 +704,7 @@ onUnmounted(() => {
   box-shadow: 0 12px 32px rgba(0,0,0,.25), inset 3px 0 0 var(--eff-poor-tx);
 }
 .toast-fade-enter-active,
-.toast-fade-leave-active {
-  transition: opacity 0.25s ease, transform 0.25s ease;
-}
+.toast-fade-leave-active { transition: opacity 0.25s ease, transform 0.25s ease; }
 .toast-fade-enter-from,
-.toast-fade-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) translateY(8px);
-}
+.toast-fade-leave-to { opacity: 0; transform: translateX(-50%) translateY(8px); }
 </style>

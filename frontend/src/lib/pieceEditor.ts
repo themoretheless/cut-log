@@ -10,6 +10,16 @@ export interface PieceSummary {
   rotationEnabled: number
 }
 
+export interface PieceBulkDiff {
+  title: string
+  changed: number
+  skipped: number
+  beforeArea: string
+  afterArea: string
+  sampleBefore: string
+  sampleAfter: string
+}
+
 export interface PieceDimensions {
   width: number
   height: number

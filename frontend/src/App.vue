@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import RouteErrorBoundary from './components/RouteErrorBoundary.vue'
 import { useL10n } from './stores/l10n'
 
 const { lang, t, toggleLang } = useL10n()
@@ -121,7 +122,11 @@ function spawnStars() {
     </div>
   </nav>
 
-  <router-view />
+  <router-view v-slot="{ Component, route }">
+    <RouteErrorBoundary v-slot="{ retryKey }">
+      <component :is="Component" :key="`${route.fullPath}:${retryKey}`" />
+    </RouteErrorBoundary>
+  </router-view>
 
   <footer class="app-footer">
     <span class="version-badge" :title="appSha">{{ appVersion }}</span>
