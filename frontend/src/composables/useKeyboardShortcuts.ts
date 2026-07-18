@@ -26,6 +26,7 @@ function matches(event: KeyboardEvent, shortcut: KeyboardShortcut): boolean {
 
 export function createShortcutHandler(shortcuts: readonly KeyboardShortcut[]) {
   return (event: KeyboardEvent) => {
+    if (event.defaultPrevented) return
     for (const shortcut of shortcuts) {
       if (!matches(event, shortcut)) continue
       if (!shortcut.allowInEditable && isEditableTarget(event.target as HTMLElement | null)) continue

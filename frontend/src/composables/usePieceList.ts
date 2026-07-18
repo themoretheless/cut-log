@@ -24,6 +24,11 @@ export interface NewPieceInput {
   allowRotation: boolean
 }
 
+export interface VisiblePieceEntry {
+  piece: CutPiece
+  index: number
+}
+
 export interface PieceMutationSummary {
   changed: number
   skipped: number
@@ -72,7 +77,7 @@ export function usePieceList(options: PieceListOptions) {
     return true
   }
 
-  const visiblePieces = computed(() => pieces
+  const visiblePieces = computed<VisiblePieceEntry[]>(() => pieces
     .map((piece, index) => ({ piece, index }))
     .filter(({ piece }) => pieceMatchesQuery(piece, pieceQuery.value) && matchesQuickFilter(piece)))
   const visibleEditablePieces = computed(() => visiblePieces.value.filter(({ piece }) => !piece.locked))

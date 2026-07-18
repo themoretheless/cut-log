@@ -1,6 +1,6 @@
 # CutLog architecture
 
-Status: v0.1.53 review, after six implementation iterations. This document is
+Status: v0.1.54 review, after seven implementation iterations. This document is
 the map of responsibilities and dependency rules. The canonical list of 510
 findings and ideas is [recommendation.md](recommendation.md); the quick
 setup and reading path are in [README.md](README.md). The
@@ -83,6 +83,10 @@ These principles are review rules, not reasons to add abstraction by default.
 - `useProjectState.ts` owns project refs and detached read/apply/reset snapshots.
 - `useProjectActions.ts` owns named mutation effects: invalidation, persistence,
   and history recording.
+- `useOptimizationSession.ts` owns Worker lifetime and the explicit
+  idle/running/success/error/cancelled state machine.
+- `useProjectActivity.ts` owns the operation trail plus snapshot comparison and
+  restore orchestration.
 - `useCommandPalette.ts` owns command search, enabled navigation, and execution.
 - `useCosting.ts` owns cost inputs and result-derived material totals.
 - `useResultSelection.ts` owns stable-ID selection and placement reconciliation.
@@ -92,16 +96,19 @@ These principles are review rules, not reasons to add abstraction by default.
 - `useToast.ts` owns transient feedback lifecycle.
 - `sheetPresentation.ts` owns SVG display calculations.
 - `SheetCard.vue` owns rendering and selection events for one sheet.
+- `ProjectInputPanel.vue`, `ProjectActivityPanel.vue`, `PieceEditorPanel.vue`,
+  and `OptimizationWorkspace.vue` own cohesive Home presentation regions.
+- `RouteErrorBoundary.vue` owns route render recovery without clearing browser
+  project storage.
 - `constraints.ts` owns legal box parameter relationships.
 - Three.js scene modules own and dispose every GPU resource they create.
 
-`Home.vue` is still the largest composition surface at about 1,680 lines, with
-roughly 940 lines of script. Project state, commands, costing, selection,
-transactional import, history, snapshots, piece-list actions, shortcuts, and
-export effects now have dedicated owners. Watcher feedback has been replaced by
-named project actions, and dependency boundaries run in CI. The next slice is a
-route error boundary and cohesive page/component extraction (`CL-121` to
-`CL-125`).
+`Home.vue` is now a 710-line composition surface, down from 1,683 lines. Input,
+activity, piece editing, and optimization rendering are cohesive components;
+project activity and Worker state have dedicated effect owners. Named project
+actions use a complete side-effect registry, and the dependency check enforces
+an 800-line budget for the page. The next slice is persisted-data recovery and
+versioned migration (`CL-128` to `CL-132`).
 
 ### Open/Closed
 
@@ -279,7 +286,7 @@ those values mean. Renderers may not clamp parameters independently. Scene
 owners dispose geometries, materials, textures, controls, render lists, and
 animation loops they create.
 
-## 7. Six completed iterations
+## 7. Seven completed iterations
 
 | Iteration | Goal | Delivered | Evidence |
 |---|---|---|---|
@@ -289,6 +296,7 @@ animation loops they create.
 | 4 | Home responsibility extraction | Dedicated history, snapshot, piece-list, shortcut, and export composables with injected effect boundaries | 16 focused composable tests plus page type-check |
 | 5 | Top-100 editor benchmark | Command registry, costing, stable-ID result selection, transactional import, and one project-state owner | 100-source benchmark, 13 focused tests, import preflight, and detached restore snapshots |
 | 6 | Explicit editor transactions | Named project actions, opaque end-to-end source IDs, translation-at-edge box labels, and executable import boundaries | Focused action/identity/history tests, Rust source-ID regression, TypeScript boundary check |
+| 7 | Recoverable, componentized editor | Route error recovery, four cohesive Home regions, explicit optimization states, declared action effects, and SheetCard interaction coverage | 710-line Home baseline, 200 Vitest tests, desktop/mobile browser checks, and keyboard regression coverage |
 
 The iterations deliberately combine a vertical behavior with its tests. They
 do not claim the architecture is finished: the remaining page orchestration is
@@ -309,6 +317,8 @@ listed honestly below.
 | 4b | Commands, costing, result selection, import, project-state owner | Done | `CL-111` to `CL-115` |
 | 4c | Stable piece identity | Done end to end; selection UX follow-up pending | `CL-117`, `CL-151` |
 | 4d | Home export orchestration | Done | `CL-110` |
+| 4e | Route recovery and cohesive Home regions | Done; 800-line budget enforced | `CL-121` to `CL-125` |
+| 4f | Persisted-data recovery and migrations | Next | `CL-128` to `CL-132` |
 | 5 | Locale-independent box piece catalog | Structural identity and edge labels done; catalog extraction pending | `CL-119`, `CL-214`, `CL-215` |
 | 6a | Complete Three.js disposal | Done | `CL-226` to `CL-230` |
 | 6b | Shared scene base | Deferred until measured | `CL-243` |

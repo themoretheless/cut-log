@@ -2,19 +2,19 @@
 
 This is the canonical backlog for CutLog. It contains **510 distinct,
 actionable observations**: defects, design debt, improvements, product ideas,
-and work completed through v0.1.53. `ARCHITECTURE.md` explains the module
+and work completed through v0.1.54. `ARCHITECTURE.md` explains the module
 boundaries; `README.md` gives the short reading path. Keeping the detailed list
 here avoids copying hundreds of lines across three documents and follows DRY.
 
 Legend: `Bug`, `Debt`, `Improve`, `Idea`, or `Done`; priority `P0` (protect data
 or correctness) through `P3` (optional); effort `S`, `M`, or `L`. Checked items
-landed through the current v0.1.53 change set. Unchecked items are candidates, not
+landed through the current v0.1.54 change set. Unchecked items are candidates, not
 promises; take them in small, independently testable slices.
 
 ## Current focus
 
-1. Add a route error boundary, continue cohesive `Home.vue` extraction, and
-   test the main sheet interaction surface (`CL-121` to `CL-125`).
+1. Preserve malformed storage, version persisted records, add migrations, and
+   prepare larger-project storage visibility (`CL-128` to `CL-132`).
 2. Add optimizer progress, cooperative cancellation, and protocol tests
    (`CL-059`, `CL-060`, `CL-070`).
 3. Version persisted/share state and add migrations before the schema grows
@@ -156,11 +156,11 @@ promises; take them in small, independently testable slices.
 - [x] **CL-118 · Done · P2 · L** — Express complex multi-field edits as named actions so state transitions are traceable.
 - [x] **CL-119 · Done · P1 · S** — Keep translation access out of pure modules by passing display strings at the component edge.
 - [x] **CL-120 · Done · P2 · M** — Add dependency-boundary lint rules for `lib`, `services`, composables, and pages.
-- [ ] **CL-121 · Improve · P2 · M** — Add a route-level error boundary that preserves the current project after a render failure.
-- [ ] **CL-122 · Debt · P2 · L** — Reduce `Home.vue` below 800 lines through cohesive extractions, not line-shuffling wrappers.
-- [ ] **CL-123 · Improve · P2 · M** — Add focused component tests for SheetCard selection, labels, and keyboard behavior.
-- [ ] **CL-124 · Improve · P2 · M** — Model optimization as idle/running/success/error/cancelled states instead of related booleans.
-- [ ] **CL-125 · Debt · P1 · S** — Require page actions to declare side effects rather than hiding persistence in unrelated watchers.
+- [x] **CL-121 · Done · P2 · M** — Add a route-level error boundary that preserves the current project after a render failure.
+- [x] **CL-122 · Done · P2 · L** — Reduce `Home.vue` below 800 lines through cohesive extractions, not line-shuffling wrappers.
+- [x] **CL-123 · Done · P2 · M** — Add focused component tests for SheetCard selection, labels, and keyboard behavior.
+- [x] **CL-124 · Done · P2 · M** — Model optimization as idle/running/success/error/cancelled states instead of related booleans.
+- [x] **CL-125 · Done · P1 · S** — Require page actions to declare side effects rather than hiding persistence in unrelated watchers.
 
 ## 6. Persistence, history, and recovery (CL-126..CL-150)
 

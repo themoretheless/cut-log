@@ -12,6 +12,7 @@ function event(
     shiftKey: false,
     altKey: false,
     target: null,
+    defaultPrevented: false,
     preventDefault: vi.fn(),
     ...options,
   } as unknown as KeyboardEvent
@@ -55,6 +56,16 @@ describe('createShortcutHandler', () => {
     const run = vi.fn()
     const keydown = event('Escape')
     createShortcutHandler([{ key: 'Escape', when: () => false, run }])(keydown)
+    expect(run).not.toHaveBeenCalled()
+    expect(keydown.preventDefault).not.toHaveBeenCalled()
+  })
+
+  it('does not run a global shortcut after a focused control handled the key', () => {
+    const run = vi.fn()
+    const keydown = event('Enter', { defaultPrevented: true })
+
+    createShortcutHandler([{ key: 'Enter', run }])(keydown)
+
     expect(run).not.toHaveBeenCalled()
     expect(keydown.preventDefault).not.toHaveBeenCalled()
   })

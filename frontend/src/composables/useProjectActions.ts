@@ -1,39 +1,49 @@
 import { ref, shallowRef } from 'vue'
 
-export type ProjectActionName =
-  | 'sheet.preset'
-  | 'sheet.width'
-  | 'sheet.height'
-  | 'sheet.kerf'
-  | 'cost.price'
-  | 'cost.currency'
-  | 'piece.add'
-  | 'piece.import'
-  | 'piece.remove'
-  | 'piece.duplicate'
-  | 'piece.clear'
-  | 'piece.lock'
-  | 'piece.label'
-  | 'piece.width'
-  | 'piece.height'
-  | 'piece.quantity'
-  | 'piece.rotation'
-  | 'pieces.rotation'
-  | 'pieces.transform'
-  | 'pieces.sort'
-  | 'pieces.reorder'
-  | 'example.load'
+export interface ProjectActionEffects {
+  invalidateLayout: boolean
+  persist: boolean
+  history: boolean
+}
+
+/**
+ * Every editor command declares its browser-visible effects in one reviewable
+ * registry. Adding a command without an effects policy is therefore a type
+ * error instead of an implicit watcher or a special option at the call site.
+ */
+export const PROJECT_ACTION_EFFECTS = {
+  'sheet.preset': { invalidateLayout: true, persist: true, history: true },
+  'sheet.width': { invalidateLayout: true, persist: true, history: true },
+  'sheet.height': { invalidateLayout: true, persist: true, history: true },
+  'sheet.kerf': { invalidateLayout: true, persist: true, history: true },
+  'cost.price': { invalidateLayout: false, persist: true, history: false },
+  'cost.currency': { invalidateLayout: false, persist: true, history: false },
+  'strategy.select': { invalidateLayout: true, persist: false, history: false },
+  'piece.add': { invalidateLayout: true, persist: true, history: true },
+  'piece.import': { invalidateLayout: true, persist: true, history: true },
+  'piece.remove': { invalidateLayout: true, persist: true, history: true },
+  'piece.duplicate': { invalidateLayout: true, persist: true, history: true },
+  'piece.clear': { invalidateLayout: true, persist: true, history: true },
+  'piece.lock': { invalidateLayout: true, persist: true, history: true },
+  'piece.label': { invalidateLayout: true, persist: true, history: true },
+  'piece.width': { invalidateLayout: true, persist: true, history: true },
+  'piece.height': { invalidateLayout: true, persist: true, history: true },
+  'piece.quantity': { invalidateLayout: true, persist: true, history: true },
+  'piece.rotation': { invalidateLayout: true, persist: true, history: true },
+  'pieces.rotation': { invalidateLayout: true, persist: true, history: true },
+  'pieces.transform': { invalidateLayout: true, persist: true, history: true },
+  'pieces.sort': { invalidateLayout: true, persist: true, history: true },
+  'pieces.reorder': { invalidateLayout: true, persist: true, history: true },
+  'example.load': { invalidateLayout: true, persist: true, history: true },
+} as const satisfies Record<string, ProjectActionEffects>
+
+export type ProjectActionName = keyof typeof PROJECT_ACTION_EFFECTS
 
 export interface ProjectActionEvent {
   name: ProjectActionName
   revision: number
   impact: 'layout' | 'metadata'
   committedAt: string
-}
-
-interface ProjectActionOptions {
-  impact?: ProjectActionEvent['impact']
-  history?: boolean
 }
 
 interface UseProjectActionsOptions {
@@ -54,11 +64,12 @@ export function useProjectActions(options: UseProjectActionsOptions) {
   const lastAction = shallowRef<ProjectActionEvent | null>(null)
   const actionTrail = shallowRef<ProjectActionEvent[]>([])
 
-  function commit(name: ProjectActionName, actionOptions: ProjectActionOptions = {}) {
-    const impact = actionOptions.impact ?? 'layout'
-    if (impact === 'layout') options.invalidateLayout()
-    options.scheduleSave()
-    if (actionOptions.history !== false) options.recordHistory(name)
+  function commit(name: ProjectActionName) {
+    const effects = PROJECT_ACTION_EFFECTS[name]
+    const impact: ProjectActionEvent['impact'] = effects.invalidateLayout ? 'layout' : 'metadata'
+    if (effects.invalidateLayout) options.invalidateLayout()
+    if (effects.persist) options.scheduleSave()
+    if (effects.history) options.recordHistory(name)
 
     revision.value++
     const event: ProjectActionEvent = {
@@ -71,13 +82,9 @@ export function useProjectActions(options: UseProjectActionsOptions) {
     actionTrail.value = [event, ...actionTrail.value].slice(0, options.trailLimit ?? 50)
   }
 
-  function run<T>(
-    name: ProjectActionName,
-    mutate: () => T,
-    actionOptions: ProjectActionOptions = {},
-  ): T {
+  function run<T>(name: ProjectActionName, mutate: () => T): T {
     const result = mutate()
-    if (result !== false && result !== null) commit(name, actionOptions)
+    if (result !== false && result !== null) commit(name)
     return result
   }
 
