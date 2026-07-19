@@ -4,7 +4,7 @@ import type { BoxParams } from './geometry'
 
 const defaults: BoxParams = {
   w: 300, h: 400, d: 200, t: 6, kerf: 0.1,
-  tabH: 30, nTab: 1, nShelves: 0, bevel: 0,
+  tabH: 30, nTab: 1, nShelves: 0, bevel: 0, backInset: 0,
 }
 
 describe('box parameter constraints', () => {
@@ -42,5 +42,25 @@ describe('box parameter constraints', () => {
     expect(safe.kerf).toBe(0)
     expect(Number.isInteger(safe.nTab)).toBe(true)
     expect(Number.isInteger(safe.nShelves)).toBe(true)
+  })
+
+  it('clamps the back inset to a non-negative usable range', () => {
+    expect(clampBoxParams({ ...defaults, backInset: -10 }).backInset).toBe(0)
+    expect(clampBoxParams({ ...defaults, backInset: Number.NaN }).backInset).toBe(0)
+    const limits = boxParamLimits(defaults)
+    const safe = clampBoxParams({ ...defaults, backInset: 999 })
+    expect(safe.backInset).toBe(limits.maxBackInset)
+    // the recessed back must still leave room in front of it
+    expect(safe.d - safe.backInset - (safe.t + safe.kerf)).toBeGreaterThan(0)
+  })
+
+  it('shrinks the back-inset limit when a bevel eats into the depth', () => {
+    const flat = boxParamLimits(defaults)
+    const beveled = boxParamLimits({ ...defaults, bevel: 60 })
+    expect(beveled.maxBackInset).toBe(flat.maxBackInset - 60)
+    const safe = clampBoxParams({ ...defaults, bevel: 60, backInset: 999 })
+    expect(safe.backInset).toBe(beveled.maxBackInset)
+    // worst-case shelf keeps a positive depth: d - inset - |bevel| > 0
+    expect(safe.d - safe.backInset - Math.abs(safe.bevel)).toBeGreaterThan(0)
   })
 })

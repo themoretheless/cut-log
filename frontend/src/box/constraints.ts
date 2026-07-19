@@ -11,6 +11,7 @@ const clamp = (value: number, min: number, max: number): number => Math.min(max,
 export interface BoxParamLimits {
   maxThickness: number
   maxAbsBevel: number
+  maxBackInset: number
   maxKerf: number
   maxTabSize: number
   maxTabs: number
@@ -31,10 +32,16 @@ export function boxParamLimits(input: BoxParams): BoxParamLimits {
   const maxTabs = Math.max(1, Math.floor((shortestTabbedEdge - MIN_TAB_GAP) / (tabH + MIN_TAB_GAP)))
   const shelfPitch = Math.max(1, t + kerf)
   const maxShelves = Math.max(0, Math.floor((h - 2 * t) / shelfPitch) - 1)
+  const maxAbsBevel = Math.max(0, d - 1)
+  // The recessed back's through-slots must stay clear of the bevel clip and
+  // leave the shelves a usable depth, so the bevel is subtracted first.
+  const bevel = clamp(finite(input.bevel, 0), -maxAbsBevel, maxAbsBevel)
+  const maxBackInset = Math.max(0, d - Math.abs(bevel) - (t + kerf) - MIN_TAB_GAP)
 
   return {
     maxThickness,
-    maxAbsBevel: Math.max(0, d - 1),
+    maxAbsBevel,
+    maxBackInset,
     maxKerf,
     maxTabSize,
     maxTabs,
@@ -59,5 +66,6 @@ export function clampBoxParams(input: BoxParams): BoxParams {
     nTab: clamp(Math.round(finite(input.nTab, 1)), 1, limits.maxTabs),
     nShelves: clamp(Math.round(finite(input.nShelves, 0)), 0, limits.maxShelves),
     bevel: clamp(finite(input.bevel, 0), -limits.maxAbsBevel, limits.maxAbsBevel),
+    backInset: clamp(finite(input.backInset, 0), 0, limits.maxBackInset),
   }
 }

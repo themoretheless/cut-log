@@ -194,17 +194,20 @@ export function useAssemblyScene(model: BoxModel, labelSource: MaybeRefOrGetter<
     const Bevel = model.Bevel.value
 
     // Panels (at base positions; explode offsets applied via applyExplode)
+    const backY = model.BackD.value
     const lh = model.sideHoles3D(0)
     const rh = model.sideHoles3D(w)
-    const bh = model.backHoles3D(d)
+    const bh = model.backHoles3D(backY)
+    const th = model.horizHoles3D(h, model.TopD.value, Math.max(Bevel, 0))
+    const bth = model.horizHoles3D(0, model.BotD.value, Math.max(-Bevel, 0))
     const sel = model.galPieces.value[model.galIdx.value]?.id ?? null
     type TaggedPanel = PanelData & { gid: string; axis: number; sign: number }
     const panels: TaggedPanel[] = [
       { c: model.sidePts3D(0), n: [1, 0, 0], t: thick, col: '#2980b9', ec: '#1a5276', h: lh.length > 0 ? lh : undefined, gid: 'side', axis: 0, sign: -1 },
       { c: model.sidePts3D(w), n: [-1, 0, 0], t: thick, col: '#2980b9', ec: '#1a5276', h: rh.length > 0 ? rh : undefined, gid: 'side', axis: 0, sign: 1 },
-      { c: model.horizPts3D(h, model.TopD.value, Math.max(Bevel, 0)), n: [0, 0, -1], t: thick, col: '#27ae60', ec: '#1e8449', gid: 'top', axis: 2, sign: 1 },
-      { c: model.horizPts3D(0, model.BotD.value, Math.max(-Bevel, 0)), n: [0, 0, 1], t: thick, col: Bevel !== 0 ? '#1abc9c' : '#27ae60', ec: Bevel !== 0 ? '#27ae60' : '#1e8449', gid: 'bot', axis: 2, sign: -1 },
-      { c: model.backPts3D(d), n: [0, -1, 0], t: thick, col: '#a855f7', ec: '#7d3c98', h: bh.length > 0 ? bh : undefined, gid: 'back', axis: 1, sign: 1 },
+      { c: model.horizPts3D(h, model.TopD.value, Math.max(Bevel, 0)), n: [0, 0, -1], t: thick, col: '#27ae60', ec: '#1e8449', h: th.length > 0 ? th : undefined, gid: 'top', axis: 2, sign: 1 },
+      { c: model.horizPts3D(0, model.BotD.value, Math.max(-Bevel, 0)), n: [0, 0, 1], t: thick, col: Bevel !== 0 ? '#1abc9c' : '#27ae60', ec: Bevel !== 0 ? '#27ae60' : '#1e8449', h: bth.length > 0 ? bth : undefined, gid: 'bot', axis: 2, sign: -1 },
+      { c: model.backPts3D(backY), n: [0, -1, 0], t: thick, col: '#a855f7', ec: '#7d3c98', h: bh.length > 0 ? bh : undefined, gid: 'back', axis: 1, sign: 1 },
     ]
     const clipTop = Math.max(Bevel, 0)
     const clipBot = Math.max(-Bevel, 0)
@@ -212,7 +215,7 @@ export function useAssemblyScene(model: BoxModel, labelSource: MaybeRefOrGetter<
     for (let si = 0; si < shSlots.length; si++) {
       const frac = shSlots[si] / h
       const shelfYOff = clipBot + (clipTop - clipBot) * frac
-      const shelfDepth = d - shelfYOff
+      const shelfDepth = backY - shelfYOff
       const sc = Bevel !== 0 ? model.shelfColor(si) : '#e67e22'
       const sec = Bevel !== 0 ? model.shelfEdgeColor(si) : '#ca6f1e'
       panels.push({ c: model.shelfPts3D(shSlots[si], shelfDepth, shelfYOff), n: [0, 0, 1], t: thick, col: sc, ec: sec, gid: `shelf${si}`, axis: -1, sign: 0 })
@@ -274,7 +277,7 @@ export function useAssemblyScene(model: BoxModel, labelSource: MaybeRefOrGetter<
     addLabel(text.bottomShort, '#a0e0a0', sz(w, d), w / 2, d / 2, 0, 2, -1)
     addLabel(text.sideShort, '#80c0e0', sz(d + Bevel, h), 0, d / 2, h / 2, 0, -1)
     addLabel(text.sideShort, '#80c0e0', sz(d + Bevel, h), w, d / 2, h / 2, 0, 1)
-    addLabel(text.backShort, '#c0a0d0', sz(w, h), w / 2, d, h / 2, 1, 1)
+    addLabel(text.backShort, '#c0a0d0', sz(w, h), w / 2, backY, h / 2, 1, 1)
 
     const shYs = model.shelfSlotYs()
     for (let i = 0; i < shYs.length; i++)

@@ -9,7 +9,7 @@ const goldenPath = fileURLToPath(new URL('../../../scripts/golden.json', import.
 const golden: Record<string, any> = JSON.parse(readFileSync(goldenPath, 'utf8'))
 
 function params(c: any): G.BoxParams {
-  return { w: c.W, h: c.H, d: c.D, t: c.T, kerf: c.Kerf, tabH: c.TabH, nTab: c.NTab, nShelves: c.NShelves, bevel: c.Bevel }
+  return { w: c.W, h: c.H, d: c.D, t: c.T, kerf: c.Kerf, tabH: c.TabH, nTab: c.NTab, nShelves: c.NShelves, bevel: c.Bevel, backInset: c.BackInset ?? 0 }
 }
 
 const EPS = 1e-9

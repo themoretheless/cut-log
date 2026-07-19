@@ -24,7 +24,7 @@ const boxLabels = computed(() => ({
 
 const model = useBoxModel(boxLabels)
 const {
-  W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, SheetW, SheetH, CutGap, galIdx, paramLimits,
+  W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, BackInset, SheetW, SheetH, CutGap, galIdx, paramLimits,
   Wi, Hi, SideOW, TopD, BotD,
   shelfSlotYs, shelfDepthAt,
   cuttingSheets, cutStats, cutScale, tooBigPieces,
@@ -66,7 +66,7 @@ onUnmounted(() => {
 })
 
 watch(
-  [W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel],
+  [W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, BackInset],
   () => { assembly.update(); gallery.update() },
   { flush: 'post' },
 )
@@ -103,6 +103,7 @@ function galDlSvg() {
           <div class="form-row"><label for="box-height">{{ t('box.height') }}</label><NumberField id="box-height" :aria-label="t('box.height')" v-model="H" :min="50" :step="10" /></div>
           <div class="form-row"><label for="box-depth">{{ t('box.depth') }}</label><NumberField id="box-depth" :aria-label="t('box.depth')" v-model="D" :min="50" :step="10" /></div>
           <div class="form-row"><label for="box-bevel">{{ t('box.bevel') }}</label><NumberField id="box-bevel" :aria-label="t('box.bevel')" v-model="Bevel" :min="-paramLimits.maxAbsBevel" :max="paramLimits.maxAbsBevel" :step="5" /></div>
+          <div class="form-row"><label for="box-back-inset">{{ t('box.back_inset') }}</label><NumberField id="box-back-inset" :aria-label="t('box.back_inset')" v-model="BackInset" :min="0" :max="paramLimits.maxBackInset" :step="1" /></div>
         </section>
         <section class="card">
           <h2>{{ t('box.material') }}</h2>
@@ -120,7 +121,7 @@ function galDlSvg() {
           <div v-if="Bevel !== 0" class="shelf-part-row"><span>{{ t('box.bottom_short') }}</span><span>1 &times; {{ W.toFixed(0) }}&times;{{ BotD.toFixed(0) }} mm</span></div>
           <div class="shelf-part-row"><span>{{ t('box.back') }}</span><span>1 &times; {{ W.toFixed(0) }}&times;{{ H.toFixed(0) }} mm</span></div>
           <template v-if="NShelves > 0 && Bevel === 0">
-            <div class="shelf-part-row"><span>{{ t('box.shelf') }}</span><span>{{ NShelves }} &times; {{ W.toFixed(0) }}&times;{{ D.toFixed(0) }} mm</span></div>
+            <div class="shelf-part-row"><span>{{ t('box.shelf') }}</span><span>{{ NShelves }} &times; {{ W.toFixed(0) }}&times;{{ (D - BackInset).toFixed(0) }} mm</span></div>
           </template>
           <template v-else-if="NShelves > 0">
             <div v-for="(sy, i) in shelfSlotYs()" :key="i" class="shelf-part-row"><span>{{ t('box.shelf_short') }}{{ i + 1 }}</span><span>1 &times; {{ W.toFixed(0) }}&times;{{ shelfDepthAt(sy).toFixed(0) }} mm</span></div>
@@ -137,7 +138,7 @@ function galDlSvg() {
           <h2>{{ t('box.assembly') }}</h2>
           <p style="font-size:0.82rem;color:var(--muted);line-height:1.5">
             {{ t('box.inner') }}
-            <strong>{{ Wi.toFixed(0) }}&times;{{ Hi.toFixed(0) }}&times;{{ (D - T).toFixed(0) }} mm</strong>
+            <strong>{{ Wi.toFixed(0) }}&times;{{ Hi.toFixed(0) }}&times;{{ (D - T - BackInset).toFixed(0) }} mm</strong>
           </p>
         </section>
       </aside>
