@@ -131,6 +131,33 @@ describe('useBoxModel', () => {
     }
   })
 
+  it('shortens shelves and inner depth when the back wall is inset', () => {
+    const m = useBoxModel(labels)
+    m.NShelves.value = 2
+    m.BackInset.value = 30
+    expect(m.BackD.value).toBe(m.D.value - 30)
+    const pieces = m.allPieces()
+    const shelves = pieces.filter(p => p.label.startsWith('shelf_short'))
+    expect(shelves).toHaveLength(2)
+    for (const s of shelves) expect(s.h).toBe(m.D.value - 30)
+    // the back wall piece itself keeps its full outer size
+    const back = pieces.find(p => p.label === 'back_short')!
+    expect(back.w).toBe(m.W.value)
+    expect(back.h).toBe(m.H.value)
+    // grouped shelf gallery entry reflects the shortened depth
+    const gal = m.galPieces.value.find(p => p.id === 'shelf')!
+    expect(gal.ph).toBe(m.D.value - 30)
+  })
+
+  it('clamps the back inset against depth and bevel', () => {
+    const m = useBoxModel(labels)
+    m.BackInset.value = 10_000
+    expect(m.BackInset.value).toBeLessThanOrEqual(m.paramLimits.value.maxBackInset)
+    expect(m.BackInset.value).toBeLessThan(m.D.value)
+    m.Bevel.value = 100
+    expect(m.D.value - m.BackInset.value - m.Bevel.value).toBeGreaterThan(0)
+  })
+
   it('does not use translated labels as piece identity', () => {
     const sameLabels = Object.fromEntries(Object.keys(labels).map(key => [key, 'Part'])) as typeof labels
     const m = useBoxModel(sameLabels)

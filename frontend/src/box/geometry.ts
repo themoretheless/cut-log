@@ -16,6 +16,8 @@ export interface BoxParams {
   nTab: number
   nShelves: number
   bevel: number
+  /** Recess of the back wall from the rear edge, mm. 0 keeps the back flush. */
+  backInset: number
 }
 
 export type Pt3 = [number, number, number]
@@ -26,6 +28,8 @@ export const wi = (p: BoxParams) => p.w - 2 * p.t
 export const hi = (p: BoxParams) => p.h - 2 * p.t
 export const topD = (p: BoxParams) => p.d - Math.max(p.bevel, 0)
 export const botD = (p: BoxParams) => p.d - Math.max(-p.bevel, 0)
+/** Depth of the back wall's outer face (its rear plane). */
+export const backD = (p: BoxParams) => p.d - p.backInset
 
 // ── Tabs and shelves ─────────────────────────────────────────────────────────
 export function tabPositions(p: BoxParams, L: number): number[] {
@@ -64,7 +68,7 @@ export function shelfOffsetAt(p: BoxParams, sy: number): number {
 }
 
 export function shelfDepthAt(p: BoxParams, sy: number): number {
-  return p.d - shelfOffsetAt(p, sy)
+  return backD(p) - shelfOffsetAt(p, sy)
 }
 
 // ── Panel contours (the single tab-walk shared by SVG + 3D) ──────────────────
@@ -113,7 +117,8 @@ function sideContour(p: BoxParams, cStart: number, cEnd: number): UV[] {
     a(ty, 0); a(ty, t); a(ty + th, t); a(ty + th, 0)
   }
   a(d, 0)
-  for (const tz of tabPositions(p, h)) { a(d, tz); a(d - t, tz); a(d - t, tz + th); a(d, tz + th) }
+  if (p.backInset === 0)
+    for (const tz of tabPositions(p, h)) { a(d, tz); a(d - t, tz); a(d - t, tz + th); a(d, tz + th) }
   a(d, h)
   for (const ty of [...tabPositions(p, d)].reverse()) {
     if (ty < cEnd) continue
@@ -121,6 +126,32 @@ function sideContour(p: BoxParams, cStart: number, cEnd: number): UV[] {
   }
   a(cEnd, h)
   return out
+}
+
+/** Through-slots in the side wall for the back-wall tabs when the back is inset
+ *  (u = depth, v = height). With no inset the tabs use rear-edge notches instead. */
+function sideBackSlots(p: BoxParams): UV[][] {
+  if (p.backInset <= 0) return []
+  const t = tf(p), th = p.tabH, u1 = backD(p)
+  return tabPositions(p, p.h).map((tz): UV[] => [
+    [u1 - t, tz], [u1, tz], [u1, tz + th], [u1 - t, tz + th],
+  ])
+}
+
+/** Through-slots for the back-wall tabs in a horizontal panel (u = width, v = depth). */
+function horizBackSlots(p: BoxParams, depth: number): UV[][] {
+  if (p.backInset <= 0) return []
+  const t = tf(p), th = p.tabH, v1 = depth - p.backInset
+  return tabPositions(p, wi(p)).map((tx): UV[] => {
+    const rx = p.t + tx
+    return [[rx, v1 - t], [rx + th, v1 - t], [rx + th, v1], [rx, v1]]
+  })
+}
+
+function holeSubpath(s: UV[]): string {
+  let d = ` M${f(s[0][0])},${f(s[0][1])}`
+  for (let i = 1; i < s.length; i++) d += ` L${f(s[i][0])},${f(s[i][1])}`
+  return d + ' Z'
 }
 
 /** Top / bottom wall (u = width, v = depth). */
@@ -132,10 +163,11 @@ function horizContour(p: BoxParams, depth: number, off: number): UV[] {
   a(t, 0); a(w - t, 0)
   for (const ty of sTabs) { a(w - t, ty); a(w, ty); a(w, ty + th); a(w - t, ty + th) }
   a(w - t, depth)
-  for (const tx of [...tabPositions(p, wiv)].reverse()) {
-    const rx = t + tx
-    a(rx + th, depth); a(rx + th, depth - tfv); a(rx, depth - tfv); a(rx, depth)
-  }
+  if (p.backInset === 0)
+    for (const tx of [...tabPositions(p, wiv)].reverse()) {
+      const rx = t + tx
+      a(rx + th, depth); a(rx + th, depth - tfv); a(rx, depth - tfv); a(rx, depth)
+    }
   a(t, depth)
   for (const ty of [...sTabs].reverse()) { a(t, ty + th); a(0, ty + th); a(0, ty); a(t, ty) }
   return out
@@ -182,7 +214,7 @@ export function pathSide(p: BoxParams): string {
   const clipBot = Math.max(0, -p.bevel)
   // Side wall: depth (u) keeps 2-decimal zeros, height (v) prints bare 0.
   let d = contourToPath(sideContour(p, clipTop, clipBot), f, fz)
-  const t = tf(p), th = p.tabH, pw = p.d
+  const t = tf(p), th = p.tabH, pw = backD(p)
   for (const sy of shelfSlotYs(p)) {
     const sOff = shelfOffsetAt(p, sy)
     for (const x of tabPositions(p, p.d)) {
@@ -190,11 +222,15 @@ export function pathSide(p: BoxParams): string {
       d += ` M${f(x)},${f(sy)} L${f(x + th)},${f(sy)} L${f(x + th)},${f(sy + t)} L${f(x)},${f(sy + t)} Z`
     }
   }
+  for (const s of sideBackSlots(p)) d += holeSubpath(s)
   return d
 }
 
 export function pathTopBottom(p: BoxParams, depth?: number, depthOff = 0): string {
-  return contourToPath(horizContour(p, depth ?? p.d, depthOff), fz, fz, [p.t, 0])
+  const dep = depth ?? p.d
+  let d = contourToPath(horizContour(p, dep, depthOff), fz, fz, [p.t, 0])
+  for (const s of horizBackSlots(p, dep)) d += holeSubpath(s)
+  return d
 }
 
 export function pathBack(p: BoxParams): string {
@@ -207,7 +243,7 @@ export function pathBack(p: BoxParams): string {
 }
 
 export function pathShelf(p: BoxParams, depth?: number, depthOff = 0): string {
-  return contourToPath(shelfContour(p, depth ?? p.d, depthOff), fz, fz, [p.t, 0])
+  return contourToPath(shelfContour(p, depth ?? backD(p), depthOff), fz, fz, [p.t, 0])
 }
 
 export function svgScale(pw: number, ph: number): number {
@@ -231,22 +267,28 @@ export function backPts3D(p: BoxParams, y0: number): Pt3[] {
 }
 
 export function shelfPts3D(p: BoxParams, z0: number, depth?: number, yOff = 0): Pt3[] {
-  return shelfContour(p, depth ?? p.d, yOff).map(([u, v]): Pt3 => [u, v + yOff, z0])
+  return shelfContour(p, depth ?? backD(p), yOff).map(([u, v]): Pt3 => [u, v + yOff, z0])
+}
+
+/** Back-tab through-slots of a horizontal panel, in assembly coordinates. */
+export function horizHoles3D(p: BoxParams, z0: number, depth?: number, yOff = 0): Pt3[][] {
+  return horizBackSlots(p, depth ?? p.d).map(s => s.map(([u, v]): Pt3 => [u, v + yOff, z0]))
 }
 
 export function sideHoles3D(p: BoxParams, x0: number): Pt3[][] {
   const holes: Pt3[][] = []
-  const t = tf(p), th = p.tabH, d = p.d
+  const t = tf(p), th = p.tabH, bd = backD(p)
   for (const sz of shelfSlotYs(p)) {
     const sOff = shelfOffsetAt(p, sz)
-    for (const ty of tabPositions(p, d)) {
-      if (ty < sOff || ty + th > d) continue
+    for (const ty of tabPositions(p, p.d)) {
+      if (ty < sOff || ty + th > bd) continue
       holes.push([
         [x0, ty, sz], [x0, ty + th, sz],
         [x0, ty + th, sz + t], [x0, ty, sz + t],
       ])
     }
   }
+  for (const s of sideBackSlots(p)) holes.push(s.map(([u, v]): Pt3 => [x0, u, v]))
   return holes
 }
 

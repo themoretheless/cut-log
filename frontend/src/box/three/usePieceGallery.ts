@@ -176,11 +176,14 @@ export function usePieceGallery(model: BoxModel) {
       if (gp.id === 'side') {
         panels.push({ c: model.sidePts3D(0), n: [1, 0, 0], t: thick, col: '#2980b9', ec: '#1a5276', h: model.sideHoles3D(0).length > 0 ? model.sideHoles3D(0) : undefined })
       } else if (gp.id === 'tb') {
-        panels.push({ c: model.horizPts3D(0), n: [0, 0, 1], t: thick, col: '#27ae60', ec: '#1e8449' })
+        const hh = model.horizHoles3D(0)
+        panels.push({ c: model.horizPts3D(0), n: [0, 0, 1], t: thick, col: '#27ae60', ec: '#1e8449', h: hh.length > 0 ? hh : undefined })
       } else if (gp.id === 'top') {
-        panels.push({ c: model.horizPts3D(0, model.TopD.value, Math.max(Bevel, 0)), n: [0, 0, 1], t: thick, col: '#27ae60', ec: '#1e8449' })
+        const hh = model.horizHoles3D(0, model.TopD.value, Math.max(Bevel, 0))
+        panels.push({ c: model.horizPts3D(0, model.TopD.value, Math.max(Bevel, 0)), n: [0, 0, 1], t: thick, col: '#27ae60', ec: '#1e8449', h: hh.length > 0 ? hh : undefined })
       } else if (gp.id === 'bot') {
-        panels.push({ c: model.horizPts3D(0, model.BotD.value, Math.max(-Bevel, 0)), n: [0, 0, 1], t: thick, col: '#1abc9c', ec: '#148f77' })
+        const hh = model.horizHoles3D(0, model.BotD.value, Math.max(-Bevel, 0))
+        panels.push({ c: model.horizPts3D(0, model.BotD.value, Math.max(-Bevel, 0)), n: [0, 0, 1], t: thick, col: '#1abc9c', ec: '#148f77', h: hh.length > 0 ? hh : undefined })
       } else if (gp.id === 'back') {
         panels.push({ c: model.backPts3D(0), n: [0, -1, 0], t: thick, col: '#a855f7', ec: '#7d3c98', h: model.backHoles3D(0).length > 0 ? model.backHoles3D(0) : undefined })
       } else if (gp.id.startsWith('shelf')) {

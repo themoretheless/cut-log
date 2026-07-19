@@ -41,6 +41,7 @@ export function useBoxModel(labelSource: MaybeRefOrGetter<BoxLabels>) {
   const NTab = ref(1)
   const NShelves = ref(0)
   const Bevel = ref(0)
+  const BackInset = ref(0)
 
   const SheetW = ref(1220)
   const SheetH = ref(2440)
@@ -51,12 +52,12 @@ export function useBoxModel(labelSource: MaybeRefOrGetter<BoxLabels>) {
   const galIdx = ref(0)
 
   function rawParams(): G.BoxParams {
-    return { w: W.value, h: H.value, d: D.value, t: T.value, kerf: Kerf.value, tabH: TabH.value, nTab: NTab.value, nShelves: NShelves.value, bevel: Bevel.value }
+    return { w: W.value, h: H.value, d: D.value, t: T.value, kerf: Kerf.value, tabH: TabH.value, nTab: NTab.value, nShelves: NShelves.value, bevel: Bevel.value, backInset: BackInset.value }
   }
 
   const paramLimits = computed(() => boxParamLimits(clampBoxParams(rawParams())))
 
-  watch([W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel], () => {
+  watch([W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, BackInset], () => {
     const safe = clampBoxParams(rawParams())
     W.value = safe.w
     H.value = safe.h
@@ -67,6 +68,7 @@ export function useBoxModel(labelSource: MaybeRefOrGetter<BoxLabels>) {
     NTab.value = safe.nTab
     NShelves.value = safe.nShelves
     Bevel.value = safe.bevel
+    BackInset.value = safe.backInset
   }, { flush: 'sync' })
 
   // ── Derived dimensions ────────────────────────────────────────────────────
@@ -77,6 +79,7 @@ export function useBoxModel(labelSource: MaybeRefOrGetter<BoxLabels>) {
   const SideOff = computed(() => 0)
   const TopD = computed(() => D.value - Math.max(Bevel.value, 0))
   const BotD = computed(() => D.value - Math.max(-Bevel.value, 0))
+  const BackD = computed(() => D.value - BackInset.value)
 
   // ── Geometry (thin wrappers over the pure module src/box/geometry.ts) ─────
   function bp(): G.BoxParams {
@@ -98,6 +101,7 @@ export function useBoxModel(labelSource: MaybeRefOrGetter<BoxLabels>) {
   const shelfPts3D = (z0: number, depth?: number, yOff = 0) => G.shelfPts3D(bp(), z0, depth, yOff)
   const sideHoles3D = (x0: number) => G.sideHoles3D(bp(), x0)
   const backHoles3D = (y0: number) => G.backHoles3D(bp(), y0)
+  const horizHoles3D = (z0: number, depth?: number, yOff = 0) => G.horizHoles3D(bp(), z0, depth, yOff)
 
   function shelfColor(i: number) { return colorAt(SHELF_COLORS, i) }
   function shelfEdgeColor(i: number) { return colorAt(SHELF_EDGE_COLORS, i) }
@@ -189,7 +193,7 @@ export function useBoxModel(labelSource: MaybeRefOrGetter<BoxLabels>) {
     list.push({ id: 'back', title: text.backWall, count: 1, pw: W.value, ph: H.value, d: pathBack(), s: thumb(W.value, H.value), color: '#a855f7', xOff: 0 })
     const sys = shelfSlotYs()
     if (bv === 0 && sys.length > 0) {
-      list.push({ id: 'shelf', title: text.shelf, count: sys.length, pw: W.value, ph: D.value, d: pathShelf(), s: thumb(W.value, D.value), color: '#e67e22', xOff: 0 })
+      list.push({ id: 'shelf', title: text.shelf, count: sys.length, pw: W.value, ph: BackD.value, d: pathShelf(), s: thumb(W.value, BackD.value), color: '#e67e22', xOff: 0 })
     } else {
       for (let i = 0; i < sys.length; i++) {
         const sd = shelfDepthAt(sys[i])
@@ -232,13 +236,13 @@ export function useBoxModel(labelSource: MaybeRefOrGetter<BoxLabels>) {
 
   return {
     // parameters
-    W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, SheetW, SheetH, CutGap, galIdx, paramLimits,
+    W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, BackInset, SheetW, SheetH, CutGap, galIdx, paramLimits,
     // derived dimensions
-    TF, Wi, Hi, SideOW, SideOff, TopD, BotD,
+    TF, Wi, Hi, SideOW, SideOff, TopD, BotD, BackD,
     // geometry wrappers
     tabPositions, shelfSlotYs, shelfOffsetAt, shelfDepthAt,
     pathSide, pathTopBottom, pathBack, pathShelf,
-    sidePts3D, horizPts3D, backPts3D, shelfPts3D, sideHoles3D, backHoles3D,
+    sidePts3D, horizPts3D, backPts3D, shelfPts3D, sideHoles3D, backHoles3D, horizHoles3D,
     shelfColor, shelfEdgeColor,
     // pieces / layout / stats
     pieceData, allPieces, cuttingSheets, cuttingPieces, cutStats, cutScale, tooBigPieces,
