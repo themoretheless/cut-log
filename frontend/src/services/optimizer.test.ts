@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { optimize } from './optimizer'
+import { OptimizerInputError, OptimizerProtocolError, optimize } from './optimizer'
 import { CuttingStrategy, type CutPiece } from './types'
 
 // Capture the JSON the service sends into wasm, and return a crafted raw result.
@@ -25,13 +25,13 @@ const rawResult = {
 // Mutable so individual tests can make the optimizer return malformed output,
 // or throw the way the wasm binding does when Rust returns Err (bad input JSON).
 let wasmOutput = JSON.stringify(rawResult)
-let wasmThrows = false
+let wasmRejection: unknown = undefined
 
 vi.mock('./rustService', () => ({
   ensureWasm: async () => ({
     optimize_sync: (input: string) => {
       captured = input
-      if (wasmThrows) throw new Error('invalid optimizer input JSON')
+      if (wasmRejection !== undefined) throw wasmRejection
       return wasmOutput
     },
   }),
@@ -41,7 +41,11 @@ const piece: CutPiece = {
   id: 'p1', label: 'A', width: 400, height: 300, quantity: 2, allowRotation: false, color: '#111',
 }
 
-beforeEach(() => { captured = ''; wasmOutput = JSON.stringify(rawResult); wasmThrows = false })
+beforeEach(() => {
+  captured = ''
+  wasmOutput = JSON.stringify(rawResult)
+  wasmRejection = undefined
+})
 
 describe('optimize() service glue', () => {
   it('builds the wasm request with snake_case fields', async () => {
@@ -68,17 +72,97 @@ describe('optimize() service glue', () => {
 
   it('throws a clear error when wasm returns invalid JSON', async () => {
     wasmOutput = 'this is not json'
-    await expect(optimize(2440, 1220, [piece], 3)).rejects.toThrow(/invalid JSON/i)
+    await expect(optimize(2440, 1220, [piece], 3)).rejects.toMatchObject({
+      name: 'OptimizerProtocolError',
+      code: 'invalid_json',
+      message: expect.stringMatching(/invalid JSON/i),
+    })
   })
 
   it('throws when the wasm output shape is unexpected', async () => {
     wasmOutput = JSON.stringify({ sheets: 'nope' })
-    await expect(optimize(2440, 1220, [piece], 3)).rejects.toThrow(/unexpected shape/i)
+    await expect(optimize(2440, 1220, [piece], 3)).rejects.toMatchObject({
+      name: 'OptimizerProtocolError',
+      code: 'unexpected_output',
+      message: expect.stringMatching(/unexpected shape/i),
+    })
   })
 
-  it('propagates a thrown wasm error (Rust Err on bad input) instead of swallowing it', async () => {
-    wasmThrows = true
-    await expect(optimize(2440, 1220, [piece], 3)).rejects.toThrow()
+  it.each([
+    {
+      ...rawResult,
+      sheets: [{ ...rawResult.sheets[0], placed_pieces: null }],
+    },
+    {
+      ...rawResult,
+      sheets: [{ ...rawResult.sheets[0], width: '2440' }],
+    },
+    {
+      ...rawResult,
+      auto_picked_strategy: 255,
+    },
+  ])('rejects malformed nested WASM output as a protocol error', async malformed => {
+    wasmOutput = JSON.stringify(malformed)
+
+    await expect(optimize(2440, 1220, [piece], 3)).rejects.toMatchObject({
+      name: 'OptimizerProtocolError',
+      code: 'unexpected_output',
+    })
+  })
+
+  it.each([
+    ['invalid_kerf', 'kerf must be zero or greater'],
+    ['invalid_strategy', 'strategy 255 is not supported'],
+    ['duplicate_piece_id', "duplicate piece id 'piece-1'"],
+    ['invalid_piece_id', 'piece at index 0 id must not be empty'],
+  ])('maps the %s WASM validation envelope to OptimizerInputError', async (code, message) => {
+    wasmRejection = { kind: 'validation', code, message }
+
+    await expect(optimize(2440, 1220, [piece], 3)).rejects.toMatchObject({
+      name: 'OptimizerInputError',
+      code,
+      message,
+    })
+  })
+
+  it('maps an Error-wrapped validation envelope without losing its message', async () => {
+    wasmRejection = new Error(JSON.stringify({
+      kind: 'validation',
+      code: 'invalid_kerf',
+      message: 'kerf must be zero or greater',
+    }))
+
+    const result = optimize(2440, 1220, [piece], 3)
+    await expect(result).rejects.toBeInstanceOf(OptimizerInputError)
+    await expect(result).rejects.toMatchObject({
+      code: 'invalid_kerf',
+      message: 'kerf must be zero or greater',
+    })
+  })
+
+  it('turns an unstructured WASM rejection into a readable protocol error', async () => {
+    wasmRejection = new Error('WASM runtime failed')
+
+    const result = optimize(2440, 1220, [piece], 3)
+    await expect(result).rejects.toBeInstanceOf(OptimizerProtocolError)
+    await expect(result).rejects.toMatchObject({
+      code: 'wasm_rejection',
+      message: expect.stringContaining('WASM runtime failed'),
+    })
+  })
+
+  it('keeps a structured WASM protocol rejection distinct from malformed success JSON', async () => {
+    wasmRejection = {
+      kind: 'protocol',
+      code: 'invalid_input_json',
+      message: 'Optimizer input payload is not valid JSON',
+    }
+
+    await expect(optimize(2440, 1220, [piece], 3)).rejects.toMatchObject({
+      name: 'OptimizerProtocolError',
+      code: 'invalid_input_json',
+      message: 'Optimizer input payload is not valid JSON',
+    })
   })
 
   it('rejects excessive quantity before loading or calling wasm', async () => {

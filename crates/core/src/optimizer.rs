@@ -1,19 +1,216 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use tracing::{debug, info, instrument, warn};
 
 use crate::models::*;
 
 pub const MAX_EXPANDED_PIECES: u64 = 2_000;
+pub const MAX_PIECE_ID_BYTES: usize = 256;
+pub const MAX_PIECE_LABEL_CHARS: usize = 200;
+pub const MAX_PIECE_COLOR_CHARS: usize = 32;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DimensionAxis {
+    Width,
+    Height,
+}
+
+impl std::fmt::Display for DimensionAxis {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Width => f.write_str("width"),
+            Self::Height => f.write_str("height"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NumericViolation {
+    NotFinite,
+    NotPositive,
+    Negative,
+    UnsafeMagnitude,
+}
+
+impl std::fmt::Display for NumericViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFinite => f.write_str("must be finite"),
+            Self::NotPositive => f.write_str("must be greater than zero"),
+            Self::Negative => f.write_str("must be zero or greater"),
+            Self::UnsafeMagnitude => {
+                f.write_str("has a magnitude that makes derived arithmetic non-finite")
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OptimizeError {
-    ZeroQuantity { label: String },
-    TooManyPieces { total: u64, max: u64 },
+#[non_exhaustive]
+pub enum DerivedCalculation {
+    SheetArea,
+    PieceArea { id: String },
+    PieceReserve { id: String, axis: DimensionAxis },
+    PiecePerimeter { id: String },
+    AreaScore { id: String },
+    ResultSheetArea { index: usize },
+    ResultSheetUsedArea { index: usize },
+    ResultSheetEfficiency { index: usize },
+    ResultTotalArea,
+    ResultTotalUsedArea,
+    ResultEfficiency,
 }
+
+impl std::fmt::Display for DerivedCalculation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SheetArea => f.write_str("sheet area"),
+            Self::PieceArea { id } => write!(f, "piece '{id}' area"),
+            Self::PieceReserve { id, axis } => {
+                write!(f, "piece '{id}' reserved {axis}")
+            }
+            Self::PiecePerimeter { id } => write!(f, "piece '{id}' perimeter score"),
+            Self::AreaScore { id } => write!(f, "piece '{id}' area fit score"),
+            Self::ResultSheetArea { index } => write!(f, "result sheet {index} area"),
+            Self::ResultSheetUsedArea { index } => {
+                write!(f, "result sheet {index} used area")
+            }
+            Self::ResultSheetEfficiency { index } => {
+                write!(f, "result sheet {index} efficiency")
+            }
+            Self::ResultTotalArea => f.write_str("result total area"),
+            Self::ResultTotalUsedArea => f.write_str("result total used area"),
+            Self::ResultEfficiency => f.write_str("result efficiency"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PieceIdViolation {
+    Empty,
+    NotTrimmed,
+    TooLong { bytes: usize, max_bytes: usize },
+}
+
+impl std::fmt::Display for PieceIdViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Empty => f.write_str("must not be empty"),
+            Self::NotTrimmed => f.write_str("must not have surrounding whitespace"),
+            Self::TooLong { bytes, max_bytes } => {
+                write!(f, "is {bytes} bytes; maximum is {max_bytes}")
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MetadataField {
+    Label,
+    Color,
+}
+
+impl std::fmt::Display for MetadataField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Label => f.write_str("label"),
+            Self::Color => f.write_str("color"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MetadataViolation {
+    TooLong { max_chars: usize },
+}
+
+impl std::fmt::Display for MetadataViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooLong { max_chars } => {
+                write!(f, "must contain at most {max_chars} Unicode scalar values")
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OptimizeError {
+    InvalidSheetDimension {
+        axis: DimensionAxis,
+        violation: NumericViolation,
+    },
+    InvalidPieceDimension {
+        id: String,
+        label: String,
+        axis: DimensionAxis,
+        violation: NumericViolation,
+    },
+    InvalidKerf {
+        violation: NumericViolation,
+    },
+    InvalidPieceId {
+        index: usize,
+        violation: PieceIdViolation,
+    },
+    InvalidPieceMetadata {
+        index: usize,
+        field: MetadataField,
+        violation: MetadataViolation,
+    },
+    DuplicatePieceId {
+        id: String,
+    },
+    UnsafeDerivedValue {
+        calculation: DerivedCalculation,
+        violation: NumericViolation,
+    },
+    ZeroQuantity {
+        label: String,
+    },
+    TooManyPieces {
+        total: u64,
+        max: u64,
+    },
+}
+
+pub type OptimizationError = OptimizeError;
 
 impl std::fmt::Display for OptimizeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidSheetDimension { axis, violation } => {
+                write!(f, "sheet {axis} {violation}")
+            }
+            Self::InvalidPieceDimension {
+                id,
+                label,
+                axis,
+                violation,
+            } => {
+                let description = if label.is_empty() { id } else { label };
+                write!(f, "piece '{description}' {axis} {violation}")
+            }
+            Self::InvalidKerf { violation } => write!(f, "kerf {violation}"),
+            Self::InvalidPieceId { index, violation } => {
+                write!(f, "piece at index {index} id {violation}")
+            }
+            Self::InvalidPieceMetadata {
+                index,
+                field,
+                violation,
+            } => write!(f, "piece at index {index} {field} {violation}"),
+            Self::DuplicatePieceId { id } => write!(f, "duplicate piece id '{id}'"),
+            Self::UnsafeDerivedValue {
+                calculation,
+                violation,
+            } => write!(f, "{calculation} {violation}"),
             Self::ZeroQuantity { label } => write!(f, "piece '{label}' has zero quantity"),
             Self::TooManyPieces { total, max } => {
                 write!(f, "expanded piece count {total} exceeds the limit {max}")
@@ -210,6 +407,14 @@ struct PackCtx {
 
 // ── Optimizer ─────────────────────────────────────────────────────────────────
 
+/// Compatibility wrapper for callers migrating from 0.1.
+///
+/// Valid inputs behave exactly like [`try_optimize`]. Invalid inputs panic
+/// instead of returning a plausible but incomplete result; new code must use
+/// [`try_optimize`] and handle [`OptimizeError`] explicitly.
+#[deprecated(
+    note = "use try_optimize to handle typed input validation errors; invalid inputs panic"
+)]
 #[instrument(skip(pieces), fields(pieces_count = pieces.len()))]
 pub fn optimize(
     sheet_width: f64,
@@ -220,9 +425,7 @@ pub fn optimize(
 ) -> CuttingResult {
     try_optimize(sheet_width, sheet_height, pieces, kerf, strategy).unwrap_or_else(|error| {
         warn!(%error, "optimizer input rejected");
-        let mut result = CuttingResult::new(strategy);
-        result.unplaced_pieces.extend(pieces.iter().map(unplaced));
-        result
+        panic!("optimizer input rejected: {error}")
     })
 }
 
@@ -232,9 +435,106 @@ pub fn try_optimize(
     pieces: &[CutPiece],
     kerf: f64,
     strategy: CuttingStrategy,
-) -> Result<CuttingResult, OptimizeError> {
-    let mut total = 0_u64;
+) -> Result<CuttingResult, OptimizationError> {
+    validate_piece_metadata_and_quantity(pieces)?;
+
+    validate_positive_dimension(sheet_width).map_err(|violation| {
+        OptimizeError::InvalidSheetDimension {
+            axis: DimensionAxis::Width,
+            violation,
+        }
+    })?;
+    validate_positive_dimension(sheet_height).map_err(|violation| {
+        OptimizeError::InvalidSheetDimension {
+            axis: DimensionAxis::Height,
+            violation,
+        }
+    })?;
+    validate_kerf(kerf).map_err(|violation| OptimizeError::InvalidKerf { violation })?;
+    let sheet_area =
+        validate_positive_derived(sheet_width * sheet_height, DerivedCalculation::SheetArea)?;
+
+    let id_capacity = pieces.len().min(MAX_EXPANDED_PIECES as usize);
+    let mut piece_ids = HashSet::with_capacity(id_capacity);
     for piece in pieces {
+        if !piece_ids.insert(piece.id.as_str()) {
+            return Err(OptimizeError::DuplicatePieceId {
+                id: piece.id.clone(),
+            });
+        }
+        validate_positive_dimension(piece.width).map_err(|violation| {
+            OptimizeError::InvalidPieceDimension {
+                id: piece.id.clone(),
+                label: piece.label.clone(),
+                axis: DimensionAxis::Width,
+                violation,
+            }
+        })?;
+        validate_positive_dimension(piece.height).map_err(|violation| {
+            OptimizeError::InvalidPieceDimension {
+                id: piece.id.clone(),
+                label: piece.label.clone(),
+                axis: DimensionAxis::Height,
+                violation,
+            }
+        })?;
+
+        validate_positive_derived(
+            piece.width + kerf,
+            DerivedCalculation::PieceReserve {
+                id: piece.id.clone(),
+                axis: DimensionAxis::Width,
+            },
+        )?;
+        validate_positive_derived(
+            piece.height + kerf,
+            DerivedCalculation::PieceReserve {
+                id: piece.id.clone(),
+                axis: DimensionAxis::Height,
+            },
+        )?;
+        let piece_area = validate_positive_derived(
+            piece.width * piece.height,
+            DerivedCalculation::PieceArea {
+                id: piece.id.clone(),
+            },
+        )?;
+        validate_positive_derived(
+            piece.width + piece.height,
+            DerivedCalculation::PiecePerimeter {
+                id: piece.id.clone(),
+            },
+        )?;
+        validate_finite_derived(
+            sheet_area - piece_area,
+            DerivedCalculation::AreaScore {
+                id: piece.id.clone(),
+            },
+        )?;
+    }
+
+    let result = optimize_validated(sheet_width, sheet_height, pieces, kerf, strategy);
+    validate_result_metrics(&result)?;
+    Ok(result)
+}
+
+fn validate_piece_metadata_and_quantity(pieces: &[CutPiece]) -> Result<u64, OptimizeError> {
+    let mut total = 0_u64;
+    for (index, piece) in pieces.iter().enumerate() {
+        validate_piece_id(index, &piece.id)?;
+        validate_metadata_length(
+            index,
+            MetadataField::Label,
+            &piece.label,
+            MAX_PIECE_LABEL_CHARS,
+        )?;
+        validate_metadata_length(
+            index,
+            MetadataField::Color,
+            &piece.color,
+            MAX_PIECE_COLOR_CHARS,
+        )?;
+
         if piece.quantity == 0 {
             return Err(OptimizeError::ZeroQuantity {
                 label: piece.label.clone(),
@@ -248,14 +548,119 @@ pub fn try_optimize(
             });
         }
     }
+    Ok(total)
+}
 
-    Ok(optimize_validated(
-        sheet_width,
-        sheet_height,
-        pieces,
-        kerf,
-        strategy,
-    ))
+fn validate_piece_id(index: usize, id: &str) -> Result<(), OptimizeError> {
+    let violation = if id.is_empty() {
+        Some(PieceIdViolation::Empty)
+    } else if id.len() > MAX_PIECE_ID_BYTES {
+        Some(PieceIdViolation::TooLong {
+            bytes: id.len(),
+            max_bytes: MAX_PIECE_ID_BYTES,
+        })
+    } else if id.trim() != id {
+        Some(PieceIdViolation::NotTrimmed)
+    } else {
+        None
+    };
+
+    match violation {
+        Some(violation) => Err(OptimizeError::InvalidPieceId { index, violation }),
+        None => Ok(()),
+    }
+}
+
+fn validate_metadata_length(
+    index: usize,
+    field: MetadataField,
+    value: &str,
+    max_chars: usize,
+) -> Result<(), OptimizeError> {
+    if value.chars().nth(max_chars).is_some() {
+        Err(OptimizeError::InvalidPieceMetadata {
+            index,
+            field,
+            violation: MetadataViolation::TooLong { max_chars },
+        })
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_positive_dimension(value: f64) -> Result<(), NumericViolation> {
+    if !value.is_finite() {
+        Err(NumericViolation::NotFinite)
+    } else if value <= 0.0 {
+        Err(NumericViolation::NotPositive)
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_kerf(value: f64) -> Result<(), NumericViolation> {
+    if !value.is_finite() {
+        Err(NumericViolation::NotFinite)
+    } else if value < 0.0 {
+        Err(NumericViolation::Negative)
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_finite_derived(
+    value: f64,
+    calculation: DerivedCalculation,
+) -> Result<f64, OptimizeError> {
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(OptimizeError::UnsafeDerivedValue {
+            calculation,
+            violation: NumericViolation::UnsafeMagnitude,
+        })
+    }
+}
+
+fn validate_positive_derived(
+    value: f64,
+    calculation: DerivedCalculation,
+) -> Result<f64, OptimizeError> {
+    if value.is_finite() && value > 0.0 {
+        Ok(value)
+    } else {
+        Err(OptimizeError::UnsafeDerivedValue {
+            calculation,
+            violation: NumericViolation::UnsafeMagnitude,
+        })
+    }
+}
+
+fn validate_result_metrics(result: &CuttingResult) -> Result<(), OptimizeError> {
+    for sheet in &result.sheets {
+        validate_positive_derived(
+            sheet.total_area(),
+            DerivedCalculation::ResultSheetArea { index: sheet.index },
+        )?;
+        validate_finite_derived(
+            sheet.used_area(),
+            DerivedCalculation::ResultSheetUsedArea { index: sheet.index },
+        )?;
+        validate_finite_derived(
+            sheet.efficiency(),
+            DerivedCalculation::ResultSheetEfficiency { index: sheet.index },
+        )?;
+    }
+    validate_finite_derived(result.total_area(), DerivedCalculation::ResultTotalArea)?;
+    validate_finite_derived(
+        result.total_used_area(),
+        DerivedCalculation::ResultTotalUsedArea,
+    )?;
+    validate_finite_derived(
+        result.overall_efficiency(),
+        DerivedCalculation::ResultEfficiency,
+    )?;
+    Ok(())
 }
 
 fn optimize_validated(
@@ -420,21 +825,19 @@ fn run_packed(
             continue;
         }
 
-        if !fits_on_blank(piece, &ctx) {
+        if !open_new_sheet_and_place(&mut result, &mut sheet_free_rects, piece, &ctx) {
             warn!(label = %piece.label, width = piece.width, height = piece.height, "piece too large, cannot place");
             result.unplaced_pieces.push(unplaced(piece));
-            continue;
         }
-
-        debug!(
-            width = piece.width,
-            height = piece.height,
-            sheet = result.sheets.len(),
-            "opening new sheet"
-        );
-        open_new_sheet_and_place(&mut result, &mut sheet_free_rects, piece, &ctx);
     }
 
+    debug_assert!(
+        result
+            .sheets
+            .iter()
+            .all(|sheet| !sheet.placed_pieces.is_empty()),
+        "optimizer must never return empty sheets"
+    );
     result
 }
 
@@ -474,47 +877,39 @@ fn try_place_on_existing(
     false
 }
 
-fn fits_on_blank(piece: &CutPiece, ctx: &PackCtx) -> bool {
-    (piece.width <= ctx.sheet_w && piece.height <= ctx.sheet_h)
-        || (piece.allow_rotation && piece.height <= ctx.sheet_w && piece.width <= ctx.sheet_h)
-}
-
 fn open_new_sheet_and_place(
     result: &mut CuttingResult,
     sheet_free_rects: &mut Vec<SheetSpace>,
     piece: &CutPiece,
     ctx: &PackCtx,
-) {
-    sheet_free_rects.push(SheetSpace::new(FreeRect {
+) -> bool {
+    let mut space = SheetSpace::new(FreeRect {
         x: 0.0,
         y: 0.0,
         w: ctx.sheet_w,
         h: ctx.sheet_h,
-    }));
+    });
+    let Some((fit_idx, rotated)) = find_best_fit(&space.free, piece, ctx) else {
+        return false;
+    };
 
-    let sheet = Sheet {
+    debug!(
+        width = piece.width,
+        height = piece.height,
+        sheet = result.sheets.len(),
+        "opening new sheet"
+    );
+    let mut sheet = Sheet {
         index: result.sheets.len(),
         width: ctx.sheet_w,
         height: ctx.sheet_h,
         placed_pieces: Vec::new(),
     };
+    let fit = space.free[fit_idx];
+    place_piece(&mut sheet, &mut space, fit_idx, fit, piece, rotated, ctx);
     result.sheets.push(sheet);
-
-    let si = sheet_free_rects.len() - 1;
-    if let Some((fit_idx, rotated)) = find_best_fit(&sheet_free_rects[si].free, piece, ctx) {
-        let fit = sheet_free_rects[si].free[fit_idx];
-        place_piece(
-            &mut result.sheets[si],
-            &mut sheet_free_rects[si],
-            fit_idx,
-            fit,
-            piece,
-            rotated,
-            ctx,
-        );
-    } else {
-        result.unplaced_pieces.push(unplaced(piece));
-    }
+    sheet_free_rects.push(space);
+    true
 }
 
 fn place_piece(

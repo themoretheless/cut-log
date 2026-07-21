@@ -22,8 +22,151 @@ interface RawSheet {
 interface RawUnplaced { source_id: string; label: string; width: number; height: number }
 interface RawOutput {
   sheets: RawSheet[]; unplaced_pieces: RawUnplaced[]
-  strategy: CuttingStrategy; auto_picked_strategy?: CuttingStrategy
+  strategy: CuttingStrategy; auto_picked_strategy?: CuttingStrategy | null
   total_sheets: number; total_used_area: number; total_area: number; overall_efficiency: number
+}
+
+interface WasmErrorEnvelope {
+  kind: 'validation' | 'protocol' | 'internal'
+  code: string
+  message: string
+}
+
+export class OptimizerInputError extends Error {
+  readonly code: string
+
+  constructor(code: string, message: string) {
+    super(message)
+    this.name = 'OptimizerInputError'
+    this.code = code
+  }
+}
+
+export class OptimizerProtocolError extends Error {
+  readonly code: string
+
+  constructor(code: string, message: string) {
+    super(message)
+    this.name = 'OptimizerProtocolError'
+    this.code = code
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function isPositiveNumber(value: unknown): value is number {
+  return isFiniteNumber(value) && value > 0
+}
+
+function isNonNegativeNumber(value: unknown): value is number {
+  return isFiniteNumber(value) && value >= 0
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function isStrategy(value: unknown): value is CuttingStrategy {
+  return isNonNegativeInteger(value) && value <= CuttingStrategy.BestLongSide_PerimeterDesc
+}
+
+function isRawPlaced(value: unknown): value is RawPlaced {
+  if (!isRecord(value)) return false
+  return typeof value.source_id === 'string'
+    && typeof value.source_label === 'string'
+    && typeof value.source_color === 'string'
+    && isNonNegativeNumber(value.x)
+    && isNonNegativeNumber(value.y)
+    && isPositiveNumber(value.width)
+    && isPositiveNumber(value.height)
+    && typeof value.is_rotated === 'boolean'
+}
+
+function isRawSheet(value: unknown): value is RawSheet {
+  if (!isRecord(value) || !Array.isArray(value.placed_pieces)) return false
+  return isNonNegativeInteger(value.index)
+    && isPositiveNumber(value.width)
+    && isPositiveNumber(value.height)
+    && isNonNegativeNumber(value.used_area)
+    && isPositiveNumber(value.total_area)
+    && isNonNegativeNumber(value.efficiency)
+    && value.placed_pieces.every(isRawPlaced)
+}
+
+function isRawUnplaced(value: unknown): value is RawUnplaced {
+  if (!isRecord(value)) return false
+  return typeof value.source_id === 'string'
+    && typeof value.label === 'string'
+    && isPositiveNumber(value.width)
+    && isPositiveNumber(value.height)
+}
+
+function isRawOutput(value: unknown): value is RawOutput {
+  if (!isRecord(value) || !Array.isArray(value.sheets) || !Array.isArray(value.unplaced_pieces)) {
+    return false
+  }
+  const autoStrategy = value.auto_picked_strategy
+  return value.sheets.every(isRawSheet)
+    && value.unplaced_pieces.every(isRawUnplaced)
+    && isStrategy(value.strategy)
+    && (autoStrategy == null || isStrategy(autoStrategy))
+    && isNonNegativeInteger(value.total_sheets)
+    && isNonNegativeNumber(value.total_used_area)
+    && isNonNegativeNumber(value.total_area)
+    && isNonNegativeNumber(value.overall_efficiency)
+}
+
+function asErrorEnvelope(value: unknown): WasmErrorEnvelope | null {
+  if (!value || typeof value !== 'object') return null
+  const candidate = value as Record<string, unknown>
+  if (
+    candidate.kind !== 'validation'
+    && candidate.kind !== 'protocol'
+    && candidate.kind !== 'internal'
+  ) return null
+  if (typeof candidate.code !== 'string' || candidate.code.length === 0) return null
+  if (typeof candidate.message !== 'string' || candidate.message.length === 0) return null
+  return {
+    kind: candidate.kind,
+    code: candidate.code,
+    message: candidate.message,
+  }
+}
+
+function parseWasmRejection(error: unknown): WasmErrorEnvelope | null {
+  let candidate: unknown = error instanceof Error ? error.message : error
+  if (typeof candidate === 'string') {
+    try {
+      candidate = JSON.parse(candidate) as unknown
+    } catch {
+      return null
+    }
+  }
+  return asErrorEnvelope(candidate)
+}
+
+function rejectionMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === 'string' && error) return error
+  return 'Unknown WASM rejection'
+}
+
+function mapWasmRejection(error: unknown): OptimizerInputError | OptimizerProtocolError {
+  const envelope = parseWasmRejection(error)
+  if (envelope?.kind === 'validation') {
+    return new OptimizerInputError(envelope.code, envelope.message)
+  }
+  if (envelope) return new OptimizerProtocolError(envelope.code, envelope.message)
+  return new OptimizerProtocolError(
+    'wasm_rejection',
+    `Optimizer rejected the request: ${rejectionMessage(error)}`,
+  )
 }
 
 export async function optimize(
@@ -51,15 +194,24 @@ export async function optimize(
     })),
   })
 
-  let raw: RawOutput
+  let outputJson: string
   try {
-    raw = JSON.parse(wasm.optimize_sync(input)) as RawOutput
+    outputJson = wasm.optimize_sync(input)
   } catch (e) {
-    throw new Error(`Optimizer returned invalid JSON: ${(e as Error).message}`)
+    throw mapWasmRejection(e)
   }
-  if (!raw || !Array.isArray(raw.sheets) || !Array.isArray(raw.unplaced_pieces)) {
-    throw new Error('Optimizer returned an unexpected shape')
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(outputJson) as unknown
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e)
+    throw new OptimizerProtocolError('invalid_json', `Optimizer returned invalid JSON: ${detail}`)
   }
+  if (!isRawOutput(parsed)) {
+    throw new OptimizerProtocolError('unexpected_output', 'Optimizer returned an unexpected shape')
+  }
+  const raw = parsed
 
   const piecesById = new Map(pieces.map(p => [p.id, p]))
 

@@ -89,4 +89,17 @@ describe('optimizer Worker client', () => {
     await expect(task.promise).rejects.toThrow('Worker crashed')
     expect(worker.terminated).toBe(true)
   })
+
+  it('preserves a validation message returned by the Worker', async () => {
+    vi.stubGlobal('Worker', FakeWorker)
+    const task = startOptimization(input())
+    const worker = FakeWorker.instances[0]
+
+    worker.onmessage?.({
+      data: { ok: false, error: 'kerf must be zero or greater' },
+    } as MessageEvent)
+
+    await expect(task.promise).rejects.toThrow('kerf must be zero or greater')
+    expect(worker.terminated).toBe(true)
+  })
 })

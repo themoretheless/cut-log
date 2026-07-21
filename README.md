@@ -160,10 +160,21 @@ echo '{
 
 ## Verification
 
+### Rust API migration to 0.2
+
+App release v0.1.56 moves all Rust workspace crates to v0.2.0. In
+`cutter-core`, use `try_optimize(...)` and handle its typed
+`OptimizationError`; the infallible `optimize(...)` wrapper is deprecated and
+panics on invalid input instead of fabricating a partial result. In
+`cutter-ui`, `render_sheet_svg(...)` and `render_result_svg(...)` now return
+`Result<String, RenderSvgError>`, so callers must propagate or handle rendering
+failures. The WASM API rejects unsupported strategy values and inputs above
+4 MiB with structured `{ kind, code, message }` errors.
+
 ```bash
 cargo test --workspace
 cd frontend
-npm test
+npm test -- --typecheck.enabled
 npx vue-tsc --noEmit
 npm run build
 ```
