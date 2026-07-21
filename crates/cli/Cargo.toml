@@ -1,11 +1,11 @@
 [package]
 name = "cutter-cli"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 
 [dependencies]
-cutter-core = { path = "../core" }
-cutter-ui = { path = "../ui" }
+cutter-core = { version = "0.2.0", path = "../core" }
+cutter-ui = { version = "0.2.0", path = "../ui" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"

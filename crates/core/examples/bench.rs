@@ -4,13 +4,16 @@
 use std::time::Instant;
 
 use cutter_core::models::CutPiece;
-use cutter_core::optimizer::{optimize, CuttingStrategy};
+use cutter_core::optimizer::{try_optimize, CuttingStrategy};
 
 struct Lcg(u64);
 
 impl Lcg {
     fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         self.0 >> 33
     }
 
@@ -36,13 +39,15 @@ fn make_pieces(types: usize, max_qty: u64, seed: u64) -> Vec<CutPiece> {
 
 fn bench(name: &str, pieces: &[CutPiece], strategy: CuttingStrategy, iters: u32) {
     // warmup
-    let result = optimize(2440.0, 1220.0, pieces, 3.0, strategy);
+    let result =
+        try_optimize(2440.0, 1220.0, pieces, 3.0, strategy).expect("benchmark input must be valid");
     let total: u32 = pieces.iter().map(|p| p.quantity).sum();
 
     let mut times: Vec<f64> = Vec::with_capacity(iters as usize);
     for _ in 0..iters {
         let t = Instant::now();
-        let r = optimize(2440.0, 1220.0, pieces, 3.0, strategy);
+        let r = try_optimize(2440.0, 1220.0, pieces, 3.0, strategy)
+            .expect("benchmark input must be valid");
         times.push(t.elapsed().as_secs_f64() * 1000.0);
         assert_eq!(r.total_sheets(), result.total_sheets());
     }
@@ -64,5 +69,10 @@ fn main() {
     bench("small/auto", &small, CuttingStrategy::Auto, 200);
     bench("medium/auto", &medium, CuttingStrategy::Auto, 30);
     bench("large/auto", &large, CuttingStrategy::Auto, 10);
-    bench("large/single", &large, CuttingStrategy::BestAreaAreaDesc, 30);
+    bench(
+        "large/single",
+        &large,
+        CuttingStrategy::BestAreaAreaDesc,
+        30,
+    );
 }

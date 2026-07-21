@@ -56,6 +56,10 @@ export function useBoxModel(labelSource: MaybeRefOrGetter<BoxLabels>) {
   }
 
   const paramLimits = computed(() => boxParamLimits(clampBoxParams(rawParams())))
+  const backInsetStep = computed(() => {
+    const min = paramLimits.value.minBackInset
+    return min > 0 && BackInset.value <= min ? min : 1
+  })
 
   watch([W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, BackInset], () => {
     const safe = clampBoxParams(rawParams())
@@ -236,7 +240,7 @@ export function useBoxModel(labelSource: MaybeRefOrGetter<BoxLabels>) {
 
   return {
     // parameters
-    W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, BackInset, SheetW, SheetH, CutGap, galIdx, paramLimits,
+    W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, BackInset, SheetW, SheetH, CutGap, galIdx, paramLimits, backInsetStep,
     // derived dimensions
     TF, Wi, Hi, SideOW, SideOff, TopD, BotD, BackD,
     // geometry wrappers

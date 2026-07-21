@@ -22,6 +22,8 @@
     --alert-warn-bg:  #2a1f00;
     --alert-warn-bd:  #664400;
     --alert-warn-tx:  #f0c060;
+    --field-error:    #e45b5b;
+    --field-error-contrast: #111111;
     --eff-good-bg:    #0f2d18;
     --eff-good-tx:    #5dca7e;
     --eff-ok-bg:      #252200;
@@ -63,6 +65,8 @@
     --alert-warn-bg:  #fff8e6;
     --alert-warn-bd:  #e0a020;
     --alert-warn-tx:  #7a5000;
+    --field-error:    #b42318;
+    --field-error-contrast: #ffffff;
     --eff-good-bg:    #d4f0e0;
     --eff-good-tx:    #1a6b38;
     --eff-ok-bg:      #fdf4d0;
@@ -486,12 +490,17 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 input[type="number"] { -moz-appearance: textfield; }
 
 .num-wrap {
-    display: flex;
+    --num-button-width: 34px;
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--num-button-width) minmax(0, 1fr) var(--num-button-width);
     align-items: stretch;
+    width: 100%;
+    min-width: 0;
     background: var(--input-bg);
     border: 1px solid var(--border-input);
     border-radius: 7px;
-    overflow: hidden;
+    box-sizing: border-box;
     transition: border-color .15s;
     min-height: 36px;
 }
@@ -502,14 +511,15 @@ input[type="number"] { -moz-appearance: textfield; }
 }
 
 .num-wrap input[type="number"] {
-    flex: 1;
+    min-width: 0;
     background: transparent;
     border: none;
     color: var(--text);
     padding: 8px 4px;
     font-size: 0.9rem;
     text-align: center;
-    width: 0;
+    width: 100%;
+    box-sizing: border-box;
     outline: none;
 }
 
@@ -517,14 +527,18 @@ input[type="number"] { -moz-appearance: textfield; }
     background: transparent;
     border: none;
     color: var(--muted);
-    padding: 0 10px;
+    width: var(--num-button-width);
+    min-width: var(--num-button-width);
+    padding: 0;
     cursor: pointer;
     font-size: 1rem;
     line-height: 1;
     user-select: none;
     transition: background .12s, color .12s;
-    min-width: 34px;
 }
+
+.num-btn:first-child { border-radius: 6px 0 0 6px; }
+.num-btn:nth-of-type(2) { border-radius: 0 6px 6px 0; }
 
 .num-btn:hover { background: var(--piece-hover); color: var(--text); }
 .num-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -1111,9 +1125,11 @@ input[type="number"] { -moz-appearance: textfield; }
 }
 
 .transform-group .num-wrap {
-    width: 88px;
+    --num-button-width: 28px;
+    width: 100px;
     height: 32px;
-    flex: 0 0 88px;
+    min-height: 32px;
+    flex: 0 0 100px;
 }
 
 .transform-group .num-wrap input[type="number"] {
@@ -1446,19 +1462,20 @@ input[type="number"] { -moz-appearance: textfield; }
 
 /* Compact NumberField inside edit row */
 .piece-edit-fields .num-wrap {
+    --num-button-width: 28px;
     height: 28px;
-    min-width: 72px;
+    min-height: 28px;
+    min-width: 96px;
     flex: 1;
 }
 
 .piece-edit-fields .num-wrap input[type="number"] {
     padding: 2px 2px;
     font-size: 12px;
-    width: 28px;
+    width: 100%;
 }
 
 .piece-edit-fields .num-btn {
-    padding: 0 6px;
     font-size: 13px;
 }
 
@@ -1512,11 +1529,11 @@ input[type="number"] { -moz-appearance: textfield; }
         flex-wrap: wrap;
     }
     .piece-edit-dims .num-wrap {
-        flex: 1 1 82px;
-        min-width: 82px;
+        flex: 1 1 96px;
+        min-width: 96px;
     }
     .piece-edit-dims .num-wrap:last-of-type {
-        flex: 0 1 72px;
+        flex: 0 1 96px;
     }
     .piece-edit-dims span.unit:last-of-type {
         margin-right: 0;

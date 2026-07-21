@@ -19,14 +19,20 @@ export function useHomeStorage(options: HomeStorageOptions) {
   const delay = options.delay ?? 300
   let timer: ReturnType<typeof setTimeout> | undefined
 
-  function saveNow() {
+  function saveState(state: HomeState): boolean {
     clearTimeout(timer)
     timer = undefined
     try {
-      storage.setItem(HOME_STATE_KEY, serializeHomeState(options.capture()))
+      storage.setItem(HOME_STATE_KEY, serializeHomeState(state))
+      return true
     } catch (error) {
       options.onError?.(error)
+      return false
     }
+  }
+
+  function saveNow(): boolean {
+    return saveState(options.capture())
   }
 
   function scheduleSave() {
@@ -59,5 +65,5 @@ export function useHomeStorage(options: HomeStorageOptions) {
   }
 
   onScopeDispose(dispose)
-  return { scheduleSave, saveNow, load, dispose }
+  return { scheduleSave, saveNow, saveState, load, dispose }
 }

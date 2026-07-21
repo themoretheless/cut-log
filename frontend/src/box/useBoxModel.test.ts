@@ -151,6 +151,18 @@ describe('useBoxModel', () => {
 
   it('clamps the back inset against depth and bevel', () => {
     const m = useBoxModel(labels)
+    expect(m.paramLimits.value.minBackInset).toBeCloseTo(m.TF.value)
+    const minInset = m.paramLimits.value.minBackInset
+    expect(m.backInsetStep.value).toBeCloseTo(minInset)
+    m.BackInset.value += m.backInsetStep.value
+    expect(m.BackInset.value).toBeCloseTo(minInset)
+    expect(m.backInsetStep.value).toBeCloseTo(minInset)
+    m.BackInset.value -= m.backInsetStep.value
+    expect(m.BackInset.value).toBe(0)
+    m.BackInset.value = minInset + 1
+    expect(m.backInsetStep.value).toBe(1)
+    m.BackInset.value = 1
+    expect(m.BackInset.value).toBeCloseTo(minInset)
     m.BackInset.value = 10_000
     expect(m.BackInset.value).toBeLessThanOrEqual(m.paramLimits.value.maxBackInset)
     expect(m.BackInset.value).toBeLessThan(m.D.value)

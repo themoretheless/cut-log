@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { serializeHomeState, parseHomeState, type HomeState } from './homeState'
+import {
+  isDefaultHomeState,
+  serializeHomeState,
+  parseHomeState,
+  type HomeState,
+} from './homeState'
 
 const valid: HomeState = {
   sheetWidth: 2440,
@@ -16,6 +21,13 @@ describe('homeState persistence', () => {
   it('round-trips a valid state', () => {
     const parsed = parseHomeState(serializeHomeState(valid))
     expect(parsed).toEqual(valid)
+  })
+
+  it('distinguishes a pristine project from settings-only content', () => {
+    const empty = { ...valid, pieces: [] }
+    expect(isDefaultHomeState(empty)).toBe(true)
+    expect(isDefaultHomeState({ ...empty, sheetWidth: 1800 })).toBe(false)
+    expect(isDefaultHomeState({ ...empty, pricePerSheet: 50 })).toBe(false)
   })
 
   it('returns null for missing / empty / malformed input', () => {
@@ -78,6 +90,22 @@ describe('homeState persistence', () => {
     }))!
     expect(parsed.pieces.length).toBe(1000)         // piece count capped
     expect(parsed.pieces[0].label.length).toBe(200) // label length capped
+  })
+
+  it('preserves up to 200 Unicode scalar values without splitting surrogate pairs', () => {
+    const accepted = '😀'.repeat(200)
+    const oversized = `${accepted}😀tail`
+    const parsed = parseHomeState(serializeHomeState({
+      ...valid,
+      pieces: [
+        { ...valid.pieces[0], id: 'accepted', label: accepted },
+        { ...valid.pieces[0], id: 'oversized', label: oversized },
+      ],
+    }))!
+
+    expect(parsed.pieces[0].label).toBe(accepted)
+    expect(parsed.pieces[1].label).toBe(accepted)
+    expect([...parsed.pieces[1].label]).toHaveLength(200)
   })
 
   it('keeps valid hex colors but replaces non-hex / injected ones with the default', () => {

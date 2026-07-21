@@ -2,6 +2,9 @@ name: Build
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  RUST_VERSION: 1.96.0
+  WASM_PACK_VERSION: 0.15.0
+  WASM_OPT_VERSION: 0.116.1
 
 on:
   pull_request:
@@ -13,9 +16,9 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 0
@@ -62,60 +65,80 @@ jobs:
           fi
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable action
         with:
+          toolchain: ${{ env.RUST_VERSION }}
           targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
 
       - name: Cache Cargo
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: ${{ runner.os }}-cargo-${{ env.RUST_VERSION }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-${{ env.RUST_VERSION }}-
 
       - name: Cache tools
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
             ~/.cargo/bin/wasm-pack
             ~/.cargo/bin/wasm-opt
-          key: ${{ runner.os }}-tools
+            ~/.cargo/bin/wasm-opt.version
+          key: ${{ runner.os }}-tools-wasm-pack-${{ env.WASM_PACK_VERSION }}-wasm-opt-${{ env.WASM_OPT_VERSION }}
 
       - name: Install wasm-pack
-        run: which wasm-pack || cargo install wasm-pack --locked
+        run: |
+          wasm-pack --version 2>/dev/null | grep -qx "wasm-pack ${WASM_PACK_VERSION}" \
+            || cargo install wasm-pack --version "${WASM_PACK_VERSION}" --locked --force
 
-      - name: Run Rust tests
-        run: cargo test -p cutter-core
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Check Rust formatting
+        run: cargo fmt --all --check
+
+      - name: Lint Rust workspace
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test Rust workspace
+        run: cargo test --workspace
 
       - name: Build WASM
         working-directory: crates/wasm
         run: wasm-pack build --target web --release
 
       - name: Install wasm-opt
-        run: which wasm-opt || cargo install wasm-opt --locked
+        run: |
+          if [ ! -x "${CARGO_HOME}/bin/wasm-opt" ] \
+            || [ "$(cat "${CARGO_HOME}/bin/wasm-opt.version" 2>/dev/null)" != "${WASM_OPT_VERSION}" ]; then
+            cargo install wasm-opt --version "${WASM_OPT_VERSION}" --locked --force
+            printf '%s\n' "${WASM_OPT_VERSION}" > "${CARGO_HOME}/bin/wasm-opt.version"
+          fi
+          "${CARGO_HOME}/bin/wasm-opt" --version
 
       - name: Optimize WASM
         run: |
-          wasm-opt -Oz --enable-bulk-memory \
+          "${CARGO_HOME}/bin/wasm-opt" -Oz --enable-bulk-memory \
             crates/wasm/pkg/cutter_wasm_bg.wasm \
             -o crates/wasm/pkg/cutter_wasm_bg.wasm
           ls -lh crates/wasm/pkg/cutter_wasm_bg.wasm
+
+      - name: Smoke test generated WASM
+        run: node scripts/wasm-smoke.mjs
 
       - name: Copy WASM to frontend
         run: |
           mkdir -p frontend/wasm frontend/public
           cp -r crates/wasm/pkg/* frontend/wasm/
           cp crates/wasm/pkg/cutter_wasm_bg.wasm frontend/public/
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
         working-directory: frontend
@@ -125,7 +148,7 @@ jobs:
         working-directory: frontend
         run: |
           npx vue-tsc --noEmit
-          npm test
+          npm test -- --typecheck.enabled
 
       - name: Build Vue
         working-directory: frontend
@@ -138,6 +161,6 @@ jobs:
         run: cp frontend/dist/index.html frontend/dist/404.html
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
           path: frontend/dist

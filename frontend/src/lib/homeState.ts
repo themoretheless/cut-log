@@ -29,6 +29,23 @@ export interface HomeState {
   currency: string
 }
 
+export const DEFAULT_HOME_SETTINGS: Omit<HomeState, 'pieces'> = {
+  sheetWidth: 2440,
+  sheetHeight: 1220,
+  kerf: 3,
+  pricePerSheet: 0,
+  currency: '₽',
+}
+
+export function isDefaultHomeState(state: HomeState): boolean {
+  return state.pieces.length === 0
+    && state.sheetWidth === DEFAULT_HOME_SETTINGS.sheetWidth
+    && state.sheetHeight === DEFAULT_HOME_SETTINGS.sheetHeight
+    && state.kerf === DEFAULT_HOME_SETTINGS.kerf
+    && state.pricePerSheet === DEFAULT_HOME_SETTINGS.pricePerSheet
+    && state.currency === DEFAULT_HOME_SETTINGS.currency
+}
+
 export function serializeHomeState(state: HomeState): string {
   return JSON.stringify({ version: VERSION, ...state })
 }
@@ -43,6 +60,17 @@ const isNonNegNum = (v: unknown): v is number => typeof v === 'number' && Number
 const isHexColor = (v: unknown): v is string =>
   typeof v === 'string' && /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(v)
 
+function takeUnicodeScalars(value: string, maximum: number): string {
+  let result = ''
+  let count = 0
+  for (const scalar of value) {
+    if (count === maximum) break
+    result += scalar
+    count++
+  }
+  return result
+}
+
 function validPiece(p: any, usedIds: Set<string>, remainingQuantity = MAX_TOTAL_QUANTITY): CutPiece | null {
   if (!p || typeof p !== 'object') return null
   if (!isPosNum(p.width) || !isPosNum(p.height)) return null
@@ -50,7 +78,7 @@ function validPiece(p: any, usedIds: Set<string>, remainingQuantity = MAX_TOTAL_
   if (quantity <= 0) return null
   const piece: CutPiece = {
     id: claimPieceId(p.id, usedIds),
-    label: typeof p.label === 'string' ? p.label.slice(0, MAX_LABEL) : '',
+    label: typeof p.label === 'string' ? takeUnicodeScalars(p.label, MAX_LABEL) : '',
     width: p.width,
     height: p.height,
     quantity,
@@ -92,9 +120,11 @@ export function parseHomeState(raw: string | null): HomeState | null {
 
   // Both costing fields are optional and back-compatible: a state saved before
   // costing existed simply gets the defaults, so no schema-version bump is needed.
-  const pricePerSheet = isNonNegNum(data.pricePerSheet) ? data.pricePerSheet : 0
+  const pricePerSheet = isNonNegNum(data.pricePerSheet)
+    ? data.pricePerSheet
+    : DEFAULT_HOME_SETTINGS.pricePerSheet
   const rawCurrency = typeof data.currency === 'string' ? data.currency.trim().slice(0, 3) : ''
-  const currency = CURRENCY_RE.test(rawCurrency) ? rawCurrency : '₽'
+  const currency = CURRENCY_RE.test(rawCurrency) ? rawCurrency : DEFAULT_HOME_SETTINGS.currency
 
   return { sheetWidth: data.sheetWidth, sheetHeight: data.sheetHeight, kerf: data.kerf, pieces, pricePerSheet, currency }
 }

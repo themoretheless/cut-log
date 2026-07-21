@@ -38,8 +38,28 @@ describe('useHomeStorage', () => {
       storage: { getItem: () => null, setItem: () => { throw error } },
       onError,
     }))!
-    channel.saveNow()
+    expect(channel.saveNow()).toBe(false)
     expect(onError).toHaveBeenCalledWith(error)
+    scope.stop()
+  })
+
+  it('persists an explicit state before a caller applies it', () => {
+    const values = new Map<string, string>()
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value) },
+    }
+    const scope = effectScope()
+    const channel = scope.run(() => useHomeStorage({
+      capture: state,
+      apply: () => undefined,
+      storage,
+    }))!
+    const target = { ...state(), sheetWidth: 1800 }
+
+    expect(channel.saveState(target)).toBe(true)
+    expect(channel.load()).toBe(true)
+    expect(JSON.parse(values.get('home_state')!).sheetWidth).toBe(1800)
     scope.stop()
   })
 

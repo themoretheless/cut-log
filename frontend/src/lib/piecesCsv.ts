@@ -6,19 +6,24 @@
  */
 import type { CutPiece } from '@/services/types'
 
-// A field whose first character is one of = + - @ (or a leading tab/CR that some
-// spreadsheets also treat as a formula lead-in) is evaluated as a formula when
-// the CSV is opened in Excel / Sheets / Numbers. Prefix such a field with a
-// single quote so it is treated as text. This is the standard CSV-injection
-// (a.k.a. formula/DDE injection) mitigation; piece labels are user-controlled.
-const FORMULA_LEAD = /^[=+\-@\t\r]/
+// Spreadsheet software may ignore leading spaces/apostrophes before deciding
+// that a cell is a formula. Prefix every such label with one apostrophe. The
+// parser uses the same predicate and removes exactly this added character, so
+// even labels that already contain apostrophes round-trip without ambiguity.
+function needsFormulaEscape(value: string): boolean {
+  let index = 0
+  while (value[index] === ' ' || value[index] === "'") index++
+  const lead = value[index]
+  return lead === '=' || lead === '+' || lead === '-' || lead === '@'
+    || lead === '\t' || lead === '\r' || lead === '\n'
+}
 
 /**
  * Serialize one field: neutralize formula leads, then quote per RFC 4180 only
  * when the (possibly prefixed) value contains a delimiter, quote, or newline.
  */
 function csvField(s: string): string {
-  const v = FORMULA_LEAD.test(s) ? `'${s}` : s
+  const v = needsFormulaEscape(s) ? `'${s}` : s
   return /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v
 }
 

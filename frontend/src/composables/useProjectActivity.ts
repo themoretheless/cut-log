@@ -2,7 +2,10 @@ import { computed, ref } from 'vue'
 import type { HomeState } from '@/lib/homeState'
 import { pieceArea } from '@/lib/pieceEditor'
 import type { ProjectSnapshot } from '@/lib/projectSnapshots'
-import { useProjectSnapshots } from './useProjectSnapshots'
+import {
+  useProjectSnapshots,
+  type SnapshotOperationResult,
+} from './useProjectSnapshots'
 
 const OPERATION_LOG_KEY = 'operation_log'
 const OPERATION_LOG_LIMIT = 14
@@ -29,15 +32,24 @@ export interface SnapshotComparison {
   sheetChanged: boolean
 }
 
+export type ProjectActivitySnapshotResult =
+  | SnapshotOperationResult<ProjectSnapshot>
+  | { ok: false; reason: 'empty_project' }
+
+export function safetySnapshotAllowsMutation(result: ProjectActivitySnapshotResult): boolean {
+  return result.ok || result.reason === 'empty_project'
+}
+
 interface UseProjectActivityOptions {
   capture: () => HomeState
   apply: (state: HomeState) => void
-  hasPieces: () => boolean
+  hasContent: () => boolean
   snapshotSummary: () => string
   resetAfterRestore: () => void
-  saveNow: () => void
+  persist: (state: HomeState) => boolean
   translate: (key: string) => string
   showToast: (message: string) => void
+  showError: (message: string) => void
   storage?: ActivityStorage
   createId?: () => string
   now?: () => string
@@ -73,6 +85,7 @@ export function useProjectActivity(options: UseProjectActivityOptions) {
     storage,
     createId,
     now: options.now,
+    onError: () => options.showError(options.translate('storage_error')),
   })
   const { snapshots, name: snapshotName } = snapshotStore
 
@@ -169,35 +182,44 @@ export function useProjectActivity(options: UseProjectActivityOptions) {
     recordOperation(options.translate('operation.compare_snapshot'), snapshot.name)
   }
 
-  function saveSnapshot() {
-    if (!options.hasPieces()) return
-    const snapshot = snapshotStore.save(
+  function saveSnapshot(): ProjectActivitySnapshotResult {
+    if (!options.hasContent()) return { ok: false, reason: 'empty_project' }
+    const result = snapshotStore.save(
       options.snapshotSummary(),
       `${options.translate('snapshot.default_name')} ${snapshots.value.length + 1}`,
     )
+    if (!result.ok) return result
+    const snapshot = result.value
     options.showToast(options.translate('snapshot_saved'))
     recordOperation(options.translate('operation.save_snapshot'), snapshot.name)
+    return result
   }
 
-  function saveAutoSnapshot(name: string) {
-    if (!options.hasPieces()) return
-    snapshotStore.saveAuto(name, options.snapshotSummary())
+  function saveAutoSnapshot(name: string): ProjectActivitySnapshotResult {
+    if (!options.hasContent()) return { ok: false, reason: 'empty_project' }
+    return snapshotStore.saveAuto(name, options.snapshotSummary())
   }
 
-  function restoreSnapshot(snapshot: ProjectSnapshot) {
-    saveAutoSnapshot(options.translate('snapshot.auto_before_restore'))
+  function restoreSnapshot(snapshot: ProjectSnapshot): ProjectActivitySnapshotResult {
+    const safetySnapshot = saveAutoSnapshot(options.translate('snapshot.auto_before_restore'))
+    if (!safetySnapshotAllowsMutation(safetySnapshot)) return safetySnapshot
+    if (!options.persist(snapshot.state)) {
+      return { ok: false, reason: 'persistence', error: new Error('home state persistence failed') }
+    }
     snapshotCompare.value = buildComparison(snapshot)
     options.apply(snapshot.state)
     options.resetAfterRestore()
-    options.saveNow()
     options.showToast(options.translate('snapshot_restored'))
     recordOperation(options.translate('operation.restore_snapshot'), snapshot.name)
+    return { ok: true, value: snapshot }
   }
 
-  function deleteSnapshot(snapshot: ProjectSnapshot) {
-    snapshotStore.remove(snapshot.id)
+  function deleteSnapshot(snapshot: ProjectSnapshot): SnapshotOperationResult<ProjectSnapshot> {
+    const result = snapshotStore.remove(snapshot.id)
+    if (!result.ok) return result
     options.showToast(options.translate('snapshot_deleted'))
     recordOperation(options.translate('operation.delete_snapshot'), snapshot.name)
+    return result
   }
 
   function dispose() {

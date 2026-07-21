@@ -1,5 +1,5 @@
 import { ref, type MaybeRefOrGetter } from 'vue'
-import type { HomeState } from '@/lib/homeState'
+import { DEFAULT_HOME_SETTINGS, type HomeState } from '@/lib/homeState'
 import { usePieceList } from './usePieceList'
 
 interface ProjectStateOptions {
@@ -7,20 +7,12 @@ interface ProjectStateOptions {
   createId?: () => string
 }
 
-const DEFAULT_STATE: Omit<HomeState, 'pieces'> = {
-  sheetWidth: 2440,
-  sheetHeight: 1220,
-  kerf: 3,
-  pricePerSheet: 0,
-  currency: '₽',
-}
-
 export function useProjectState(options: ProjectStateOptions) {
-  const sheetWidth = ref(DEFAULT_STATE.sheetWidth)
-  const sheetHeight = ref(DEFAULT_STATE.sheetHeight)
-  const kerf = ref(DEFAULT_STATE.kerf)
-  const pricePerSheet = ref(DEFAULT_STATE.pricePerSheet)
-  const currency = ref(DEFAULT_STATE.currency)
+  const sheetWidth = ref(DEFAULT_HOME_SETTINGS.sheetWidth)
+  const sheetHeight = ref(DEFAULT_HOME_SETTINGS.sheetHeight)
+  const kerf = ref(DEFAULT_HOME_SETTINGS.kerf)
+  const pricePerSheet = ref(DEFAULT_HOME_SETTINGS.pricePerSheet)
+  const currency = ref(DEFAULT_HOME_SETTINGS.currency)
   const pieceList = usePieceList({
     sheetWidth,
     sheetHeight,
@@ -49,7 +41,7 @@ export function useProjectState(options: ProjectStateOptions) {
   }
 
   function reset() {
-    apply({ ...DEFAULT_STATE, pieces: [] })
+    apply({ ...DEFAULT_HOME_SETTINGS, pieces: [] })
     pieceList.clearFilters()
     pieceList.clearSelection()
   }

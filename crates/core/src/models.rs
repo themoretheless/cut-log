@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::optimizer::CuttingStrategy;
+use serde::{Deserialize, Serialize};
 
 // ── CutPiece ──────────────────────────────────────────────────────────────────
 
@@ -19,10 +19,18 @@ pub struct CutPiece {
     pub color: String,
 }
 
-fn one() -> u32 { 1 }
-fn yes() -> bool { true }
-fn default_color() -> String { "#4A90D9".into() }
-fn new_id() -> String { uuid::Uuid::new_v4().to_string() }
+fn one() -> u32 {
+    1
+}
+fn yes() -> bool {
+    true
+}
+fn default_color() -> String {
+    "#4A90D9".into()
+}
+fn new_id() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
 
 // ── PlacedPiece ───────────────────────────────────────────────────────────────
 
@@ -59,7 +67,11 @@ impl Sheet {
 
     pub fn efficiency(&self) -> f64 {
         let total = self.total_area();
-        if total > 0.0 { self.used_area() / total * 100.0 } else { 0.0 }
+        if total > 0.0 {
+            self.used_area() / total * 100.0
+        } else {
+            0.0
+        }
     }
 }
 
@@ -107,6 +119,10 @@ impl CuttingResult {
 
     pub fn overall_efficiency(&self) -> f64 {
         let total = self.total_area();
-        if total > 0.0 { self.total_used_area() / total * 100.0 } else { 0.0 }
+        if total > 0.0 {
+            self.total_used_area() / total * 100.0
+        } else {
+            0.0
+        }
     }
 }

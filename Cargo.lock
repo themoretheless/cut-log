@@ -37,7 +37,7 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "cutter-cli"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "cutter-core",
  "cutter-ui",
@@ -49,7 +49,7 @@ dependencies = [
 
 [[package]]
 name = "cutter-core"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -59,23 +59,21 @@ dependencies = [
 
 [[package]]
 name = "cutter-ui"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "cutter-core",
 ]
 
 [[package]]
 name = "cutter-wasm"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "cutter-core",
- "cutter-ui",
  "js-sys",
  "serde",
  "serde_json",
  "tracing",
  "tracing-wasm",
- "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
 ]

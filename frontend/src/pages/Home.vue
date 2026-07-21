@@ -13,7 +13,7 @@ import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 import { useOptimizationSession } from '@/composables/useOptimizationSession'
 import type { NewPieceInput } from '@/composables/usePieceList'
 import { useProjectActions, type ProjectActionName } from '@/composables/useProjectActions'
-import { useProjectActivity } from '@/composables/useProjectActivity'
+import { safetySnapshotAllowsMutation, useProjectActivity } from '@/composables/useProjectActivity'
 import { useProjectState } from '@/composables/useProjectState'
 import { useResultSelection } from '@/composables/useResultSelection'
 import { useToast } from '@/composables/useToast'
@@ -26,6 +26,7 @@ import {
   type PieceSortMode,
 } from '@/lib/pieceEditor'
 import { assertOptimizerCapacity } from '@/lib/optimizerLimits'
+import { isDefaultHomeState } from '@/lib/homeState'
 import type { CutPiece } from '@/services/types'
 import { CuttingStrategy } from '@/services/types'
 import { useL10n } from '@/stores/l10n'
@@ -46,6 +47,7 @@ const isDragging = ref(false)
 
 const projectState = useProjectState({ minMachineCut })
 const { sheetWidth, sheetHeight, kerf, pieceList, read: currentState, apply: applyState } = projectState
+const projectHasContent = computed(() => !isDefaultHomeState(currentState()))
 const {
   pieces,
   selectedPieceId,
@@ -95,7 +97,7 @@ function invalidateOptimization() {
 const homeHistory = useHomeHistory({
   capture: currentState,
   apply: applyState,
-  saveNow: saveStateNow,
+  persist: homeStorage.saveState,
   onRestore: invalidateOptimization,
 })
 const { canUndo, canRedo, record: recordHistory, undo: doUndo, redo: doRedo } = homeHistory
@@ -122,12 +124,13 @@ function areaM2(areaMm2: number): string {
 const projectActivity = useProjectActivity({
   capture: currentState,
   apply: applyState,
-  hasPieces: () => pieces.length > 0,
+  hasContent: () => projectHasContent.value,
   snapshotSummary: () => `${pieceSummary.value.totalTypes} ${t('piece_types')} · ${pieceSummary.value.totalQuantity} ${t('pieces_short')} · ${areaM2(pieceSummary.value.totalArea)} ${t('material_area')}`,
   resetAfterRestore: resetAfterSnapshotRestore,
-  saveNow: saveStateNow,
+  persist: homeStorage.saveState,
   translate: t,
   showToast,
+  showError,
 })
 const {
   operationLog,
@@ -144,6 +147,10 @@ const {
   restoreSnapshot: restoreProjectSnapshot,
   deleteSnapshot: deleteProjectSnapshot,
 } = projectActivity
+
+function saveSafetySnapshot(name: string): boolean {
+  return safetySnapshotAllowsMutation(saveAutoProjectSnapshot(name))
+}
 
 function runProjectEdit<T>(name: ProjectActionName, mutate: () => T): T {
   return projectActions.run(name, mutate)
@@ -187,7 +194,7 @@ function addPiece(input: NewPieceInput) {
 }
 
 function importPieces(payload: { rows: readonly NewPieceInput[]; added: number; skipped: number }) {
-  saveAutoProjectSnapshot(t('snapshot.auto_before_import'))
+  if (!saveSafetySnapshot(t('snapshot.auto_before_import'))) return
   runProjectEdit('piece.import', () => pieceList.addMany(payload.rows))
   const message = payload.skipped
     ? t('import_added_skipped').replace('{0}', String(payload.added)).replace('{1}', String(payload.skipped))
@@ -214,7 +221,7 @@ function loadInitialState() {
 }
 
 function removePiece(piece: CutPiece) {
-  saveAutoProjectSnapshot(t('snapshot.auto_before_delete'))
+  if (!saveSafetySnapshot(t('snapshot.auto_before_delete'))) return
   if (!runProjectEdit('piece.remove', () => pieceList.remove(piece))) return
   recordOperation(t('operation.delete_piece'), piece.label.trim() || t('unnamed_piece'))
 }
@@ -225,7 +232,7 @@ function duplicate(id: string | null) {
 
 function clearAll() {
   if (!pieces.length) return
-  saveAutoProjectSnapshot(t('snapshot.auto_before_clear'))
+  if (!saveSafetySnapshot(t('snapshot.auto_before_clear'))) return
   const count = runProjectEdit('piece.clear', () => pieceList.clear())
   lastBulkDiff.value = null
   recordOperation(t('operation.clear'), t('operation.clear_detail').replace('{0}', String(count)))
@@ -322,7 +329,7 @@ function togglePieceRotation(piece: CutPiece) {
 
 function setVisibleRotation(allowRotation: boolean) {
   if (!visibleEditablePieces.value.length) return
-  saveAutoProjectSnapshot(t('snapshot.auto_before_rotation'))
+  if (!saveSafetySnapshot(t('snapshot.auto_before_rotation'))) return
   const change = runProjectEdit('pieces.rotation', () => pieceList.setVisibleRotation(allowRotation))
   if (!change) return
   showToast(allowRotation ? t('rotation_enabled') : t('rotation_disabled'))
@@ -346,7 +353,7 @@ function mutateVisibleDimensions(
   title = t('bulk.transform'),
 ) {
   if (!visibleEditablePieces.value.length) return
-  saveAutoProjectSnapshot(t('snapshot.auto_before_transform'))
+  if (!saveSafetySnapshot(t('snapshot.auto_before_transform'))) return
   const change = runProjectEdit('pieces.transform', () => pieceList.mutateVisibleDimensions(transform))
   if (!change) return
   lastBulkDiff.value = {
@@ -388,7 +395,7 @@ function applyPieceSort() {
 }
 
 function loadExample() {
-  saveAutoProjectSnapshot(t('snapshot.auto_before_import'))
+  if (!saveSafetySnapshot(t('snapshot.auto_before_import'))) return
   const example = [
     { label: t('example.side'), width: 1800, height: 300, quantity: 2, allowRotation: true },
     { label: t('example.shelf'), width: 760, height: 300, quantity: 4, allowRotation: true },
@@ -432,7 +439,7 @@ const paletteCommands = computed<PaletteCommand[]>(() => [
   { id: 'lock-toggle', label: selectedPiece.value?.locked ? t('command.unlock_selected') : t('command.lock_selected'), disabled: !selectedPiece.value, run: () => { if (selectedPiece.value) togglePieceLock(selectedPiece.value) } },
   { id: 'import', label: t('command.open_import'), disabled: showImport.value, run: () => { showImport.value = true } },
   { id: 'share', label: t('command.copy_share'), disabled: !pieces.length, run: copyShareLink },
-  { id: 'snapshot-save', label: t('command.snapshot_save'), disabled: !pieces.length, run: saveProjectSnapshot },
+  { id: 'snapshot-save', label: t('command.snapshot_save'), disabled: !projectHasContent.value, run: saveProjectSnapshot },
   { id: 'snapshot-restore', label: t('command.snapshot_restore_latest'), disabled: !projectSnapshots.value.length, run: () => restoreProjectSnapshot(projectSnapshots.value[0]) },
   { id: 'undo', label: t('hotkey.undo'), shortcut: 'Ctrl+Z', disabled: !canUndo.value, run: () => { doUndo() } },
   { id: 'redo', label: t('hotkey.redo'), shortcut: 'Ctrl+Shift+Z', disabled: !canRedo.value, run: () => { doRedo() } },
@@ -545,7 +552,7 @@ onUnmounted(() => {
           :snapshots="projectSnapshots"
           :operation-log="filteredOperationLog"
           :snapshot-compare="snapshotCompare"
-          :has-pieces="pieces.length > 0"
+          :has-pieces="projectHasContent"
           @save="saveProjectSnapshot"
           @restore="restoreProjectSnapshot"
           @compare="compareProjectSnapshot"

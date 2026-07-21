@@ -48,6 +48,9 @@ describe('box parameter constraints', () => {
     expect(clampBoxParams({ ...defaults, backInset: -10 }).backInset).toBe(0)
     expect(clampBoxParams({ ...defaults, backInset: Number.NaN }).backInset).toBe(0)
     const limits = boxParamLimits(defaults)
+    expect(limits.minBackInset).toBeCloseTo(defaults.t + defaults.kerf)
+    expect(clampBoxParams({ ...defaults, backInset: 0 }).backInset).toBe(0)
+    expect(clampBoxParams({ ...defaults, backInset: 1 }).backInset).toBeCloseTo(limits.minBackInset)
     const safe = clampBoxParams({ ...defaults, backInset: 999 })
     expect(safe.backInset).toBe(limits.maxBackInset)
     // the recessed back must still leave room in front of it
@@ -62,5 +65,14 @@ describe('box parameter constraints', () => {
     expect(safe.backInset).toBe(beveled.maxBackInset)
     // worst-case shelf keeps a positive depth: d - inset - |bevel| > 0
     expect(safe.d - safe.backInset - Math.abs(safe.bevel)).toBeGreaterThan(0)
+  })
+
+  it('allows only flush when there is no structural range for an inset back', () => {
+    const constrained = { ...defaults, bevel: 190 }
+    const limits = boxParamLimits(constrained)
+    expect(limits.minBackInset).toBe(0)
+    expect(limits.maxBackInset).toBe(0)
+    expect(clampBoxParams({ ...constrained, backInset: 1 }).backInset).toBe(0)
+    expect(clampBoxParams({ ...constrained, backInset: 999 }).backInset).toBe(0)
   })
 })

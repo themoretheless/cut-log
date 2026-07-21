@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
 import ver from '../version.json'
@@ -13,5 +13,10 @@ export default defineConfig({
   },
   server: {
     fs: { allow: ['..'] },
+  },
+  test: {
+    typecheck: {
+      include: ['src/**/*.test.ts'],
+    },
   },
 })

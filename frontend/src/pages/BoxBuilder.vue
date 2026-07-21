@@ -24,7 +24,7 @@ const boxLabels = computed(() => ({
 
 const model = useBoxModel(boxLabels)
 const {
-  W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, BackInset, SheetW, SheetH, CutGap, galIdx, paramLimits,
+  W, H, D, T, Kerf, TabH, NTab, NShelves, Bevel, BackInset, SheetW, SheetH, CutGap, galIdx, paramLimits, backInsetStep,
   Wi, Hi, SideOW, TopD, BotD,
   shelfSlotYs, shelfDepthAt,
   cuttingSheets, cutStats, cutScale, tooBigPieces,
@@ -103,7 +103,7 @@ function galDlSvg() {
           <div class="form-row"><label for="box-height">{{ t('box.height') }}</label><NumberField id="box-height" :aria-label="t('box.height')" v-model="H" :min="50" :step="10" /></div>
           <div class="form-row"><label for="box-depth">{{ t('box.depth') }}</label><NumberField id="box-depth" :aria-label="t('box.depth')" v-model="D" :min="50" :step="10" /></div>
           <div class="form-row"><label for="box-bevel">{{ t('box.bevel') }}</label><NumberField id="box-bevel" :aria-label="t('box.bevel')" v-model="Bevel" :min="-paramLimits.maxAbsBevel" :max="paramLimits.maxAbsBevel" :step="5" /></div>
-          <div class="form-row"><label for="box-back-inset">{{ t('box.back_inset') }}</label><NumberField id="box-back-inset" :aria-label="t('box.back_inset')" v-model="BackInset" :min="0" :max="paramLimits.maxBackInset" :step="1" /></div>
+          <div class="form-row"><label for="box-back-inset">{{ t('box.back_inset') }}</label><NumberField id="box-back-inset" :aria-label="t('box.back_inset')" v-model="BackInset" :min="0" :max="paramLimits.maxBackInset" :step="backInsetStep" /></div>
         </section>
         <section class="card">
           <h2>{{ t('box.material') }}</h2>

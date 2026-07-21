@@ -1,11 +1,7 @@
-// FROZEN baseline generator for the box geometry fixtures (scripts/golden.json).
-//
-// This is a verbatim snapshot of the ORIGINAL geometry (taken when it still
-// lived in BoxBuilder.vue, before it moved to frontend/src/box/geometry.ts). It
-// is intentionally NOT kept in sync with geometry.ts: golden.json pins the
-// behaviour, and frontend/src/box/geometry.golden.test.ts asserts geometry.ts
-// still matches it. If you deliberately change the geometry, regenerate the
-// fixtures from geometry.ts (e.g. via a tsx script) rather than from this file.
+// Versioned reference generator for the box geometry fixtures
+// (scripts/golden.json). It intentionally duplicates the production formulas:
+// deliberate geometry changes require semantic mating tests plus an explicit
+// update of this reference and fixture.
 //
 // Run: node scripts/golden.mjs > scripts/golden.json
 
@@ -34,6 +30,10 @@ function tabPositions(L) {
   const pos = []
   for (let i = 0; i < n; i++) pos.push(gap + i * (gap + th))
   return pos
+}
+
+function backWallJointPositions(outerLength) {
+  return tabPositions(outerLength - 2 * T.value).map(pos => T.value + pos)
 }
 
 function depthTabs(fullLen, offset, len) {
@@ -82,7 +82,7 @@ function pathSide() {
     d += ` L${f(x)},0 L${f(x)},${f(tf)} L${f(x + th)},${f(tf)} L${f(x + th)},0`
   }
   d += ` L${f(pw)},0`
-  for (const y of tabPositions(H.value))
+  for (const y of backWallJointPositions(H.value))
     d += ` L${f(pw)},${f(y)} L${f(pw - tf)},${f(y)} L${f(pw - tf)},${f(y + th)} L${f(pw)},${f(y + th)}`
   d += ` L${f(pw)},${f(ph)}`
   for (const x of [...tabPositions(D.value)].reverse()) {
@@ -259,7 +259,7 @@ function sidePts3D(x0) {
     a(ty, 0); a(ty, tf); a(ty + th, tf); a(ty + th, 0)
   }
   a(d, 0)
-  for (const tz of tabPositions(h)) { a(d, tz); a(d - tf, tz); a(d - tf, tz + th); a(d, tz + th) }
+  for (const tz of backWallJointPositions(h)) { a(d, tz); a(d - tf, tz); a(d - tf, tz + th); a(d, tz + th) }
   a(d, h)
   for (const ty of [...tabPositions(d)].reverse()) {
     if (ty < clipTop) continue
