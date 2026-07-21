@@ -252,9 +252,18 @@ defineExpose({ submit: addPiece })
   display: flex;
   gap: 6px;
   align-items: center;
+  min-width: 0;
 }
-.currency-input {
+.price-row > .num-wrap {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+.price-row > .currency-input {
+  flex: 0 0 48px;
   width: 48px;
+  min-width: 48px;
+  max-width: 48px;
   text-align: center;
   padding: 6px 4px;
   border: 1px solid var(--border, #d0d0d0);
