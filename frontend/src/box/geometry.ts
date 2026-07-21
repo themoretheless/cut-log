@@ -41,6 +41,23 @@ export function tabPositions(p: BoxParams, L: number): number[] {
   return pos
 }
 
+/** Tab starts on the back wall, expressed in the mating panel's outer coordinates. */
+function backWallJointPositions(p: BoxParams, outerLength: number): number[] {
+  return tabPositions(p, outerLength - 2 * p.t).map(pos => p.t + pos)
+}
+
+/** Global depth positions shared by shelf side tabs and their side-wall slots. */
+function shelfSideJointPositions(p: BoxParams, offset: number, depth: number): number[] {
+  const th = p.tabH
+  let maxTabEnd = offset + depth
+  if (p.backInset > 0) {
+    const backSlotStart = backD(p) - tf(p)
+    maxTabEnd = Math.min(maxTabEnd, backSlotStart - tf(p))
+  }
+  return tabPositions(p, p.d)
+    .filter(pos => pos >= offset && pos + th <= maxTabEnd)
+}
+
 /** Tab positions of a full edge, restricted to [offset, offset+len] and shifted local. */
 export function depthTabs(p: BoxParams, fullLen: number, offset: number, len: number): number[] {
   const th = p.tabH
@@ -118,7 +135,7 @@ function sideContour(p: BoxParams, cStart: number, cEnd: number): UV[] {
   }
   a(d, 0)
   if (p.backInset === 0)
-    for (const tz of tabPositions(p, h)) { a(d, tz); a(d - t, tz); a(d - t, tz + th); a(d, tz + th) }
+    for (const tz of backWallJointPositions(p, h)) { a(d, tz); a(d - t, tz); a(d - t, tz + th); a(d, tz + th) }
   a(d, h)
   for (const ty of [...tabPositions(p, d)].reverse()) {
     if (ty < cEnd) continue
@@ -133,7 +150,7 @@ function sideContour(p: BoxParams, cStart: number, cEnd: number): UV[] {
 function sideBackSlots(p: BoxParams): UV[][] {
   if (p.backInset <= 0) return []
   const t = tf(p), th = p.tabH, u1 = backD(p)
-  return tabPositions(p, p.h).map((tz): UV[] => [
+  return backWallJointPositions(p, p.h).map((tz): UV[] => [
     [u1 - t, tz], [u1, tz], [u1, tz + th], [u1 - t, tz + th],
   ])
 }
@@ -142,9 +159,8 @@ function sideBackSlots(p: BoxParams): UV[][] {
 function horizBackSlots(p: BoxParams, depth: number): UV[][] {
   if (p.backInset <= 0) return []
   const t = tf(p), th = p.tabH, v1 = depth - p.backInset
-  return tabPositions(p, wi(p)).map((tx): UV[] => {
-    const rx = p.t + tx
-    return [[rx, v1 - t], [rx + th, v1 - t], [rx + th, v1], [rx, v1]]
+  return backWallJointPositions(p, p.w).map((tx): UV[] => {
+    return [[tx, v1 - t], [tx + th, v1 - t], [tx + th, v1], [tx, v1]]
   })
 }
 
@@ -158,15 +174,14 @@ function holeSubpath(s: UV[]): string {
 function horizContour(p: BoxParams, depth: number, off: number): UV[] {
   const out: UV[] = []
   const a = (u: number, v: number) => out.push([u, v])
-  const w = p.w, th = p.tabH, t = p.t, tfv = tf(p), wiv = wi(p)
+  const w = p.w, th = p.tabH, t = p.t, tfv = tf(p)
   const sTabs = depthTabs(p, p.d, off, depth)
   a(t, 0); a(w - t, 0)
   for (const ty of sTabs) { a(w - t, ty); a(w, ty); a(w, ty + th); a(w - t, ty + th) }
   a(w - t, depth)
   if (p.backInset === 0)
-    for (const tx of [...tabPositions(p, wiv)].reverse()) {
-      const rx = t + tx
-      a(rx + th, depth); a(rx + th, depth - tfv); a(rx, depth - tfv); a(rx, depth)
+    for (const tx of [...backWallJointPositions(p, w)].reverse()) {
+      a(tx + th, depth); a(tx + th, depth - tfv); a(tx, depth - tfv); a(tx, depth)
     }
   a(t, depth)
   for (const ty of [...sTabs].reverse()) { a(t, ty + th); a(0, ty + th); a(0, ty); a(t, ty) }
@@ -179,7 +194,7 @@ function shelfContour(p: BoxParams, depth: number, off: number): UV[] {
   const out: UV[] = []
   const a = (u: number, v: number) => out.push([u, v])
   const w = p.w, th = p.tabH, t = p.t, wiv = wi(p)
-  const sTabs = depthTabs(p, p.d, off, depth)
+  const sTabs = shelfSideJointPositions(p, off, depth).map(pos => pos - off)
   a(t, 0); a(w - t, 0)
   for (const ty of sTabs) { a(w - t, ty); a(w, ty); a(w, ty + th); a(w - t, ty + th) }
   a(w - t, depth - t)
@@ -196,15 +211,17 @@ function shelfContour(p: BoxParams, depth: number, off: number): UV[] {
 function backContour(p: BoxParams): UV[] {
   const out: UV[] = []
   const a = (u: number, v: number) => out.push([u, v])
-  const w = p.w, h = p.h, th = p.tabH, t = p.t, wiv = wi(p), hiv = hi(p)
+  const w = p.w, h = p.h, th = p.tabH, t = p.t
+  const xTabs = backWallJointPositions(p, w)
+  const zTabs = backWallJointPositions(p, h)
   a(t, t)
-  for (const tx of tabPositions(p, wiv)) { const rx = t + tx; a(rx, t); a(rx, 0); a(rx + th, 0); a(rx + th, t) }
+  for (const tx of xTabs) { a(tx, t); a(tx, 0); a(tx + th, 0); a(tx + th, t) }
   a(w - t, t)
-  for (const tz of tabPositions(p, hiv)) { const rz = t + tz; a(w - t, rz); a(w, rz); a(w, rz + th); a(w - t, rz + th) }
+  for (const tz of zTabs) { a(w - t, tz); a(w, tz); a(w, tz + th); a(w - t, tz + th) }
   a(w - t, h - t)
-  for (const tx of [...tabPositions(p, wiv)].reverse()) { const rx = t + tx; a(rx + th, h - t); a(rx + th, h); a(rx, h); a(rx, h - t) }
+  for (const tx of [...xTabs].reverse()) { a(tx + th, h - t); a(tx + th, h); a(tx, h); a(tx, h - t) }
   a(t, h - t)
-  for (const tz of [...tabPositions(p, hiv)].reverse()) { const rz = t + tz; a(t, rz + th); a(0, rz + th); a(0, rz); a(t, rz) }
+  for (const tz of [...zTabs].reverse()) { a(t, tz + th); a(0, tz + th); a(0, tz); a(t, tz) }
   return out
 }
 
@@ -214,11 +231,11 @@ export function pathSide(p: BoxParams): string {
   const clipBot = Math.max(0, -p.bevel)
   // Side wall: depth (u) keeps 2-decimal zeros, height (v) prints bare 0.
   let d = contourToPath(sideContour(p, clipTop, clipBot), f, fz)
-  const t = tf(p), th = p.tabH, pw = backD(p)
+  const t = tf(p), th = p.tabH
   for (const sy of shelfSlotYs(p)) {
     const sOff = shelfOffsetAt(p, sy)
-    for (const x of tabPositions(p, p.d)) {
-      if (x < sOff || x + th > pw) continue
+    const sDepth = shelfDepthAt(p, sy)
+    for (const x of shelfSideJointPositions(p, sOff, sDepth)) {
       d += ` M${f(x)},${f(sy)} L${f(x + th)},${f(sy)} L${f(x + th)},${f(sy + t)} L${f(x)},${f(sy + t)} Z`
     }
   }
@@ -277,11 +294,11 @@ export function horizHoles3D(p: BoxParams, z0: number, depth?: number, yOff = 0)
 
 export function sideHoles3D(p: BoxParams, x0: number): Pt3[][] {
   const holes: Pt3[][] = []
-  const t = tf(p), th = p.tabH, bd = backD(p)
+  const t = tf(p), th = p.tabH
   for (const sz of shelfSlotYs(p)) {
     const sOff = shelfOffsetAt(p, sz)
-    for (const ty of tabPositions(p, p.d)) {
-      if (ty < sOff || ty + th > bd) continue
+    const sDepth = shelfDepthAt(p, sz)
+    for (const ty of shelfSideJointPositions(p, sOff, sDepth)) {
       holes.push([
         [x0, ty, sz], [x0, ty + th, sz],
         [x0, ty + th, sz + t], [x0, ty, sz + t],

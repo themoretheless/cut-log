@@ -11,6 +11,7 @@ const clamp = (value: number, min: number, max: number): number => Math.min(max,
 export interface BoxParamLimits {
   maxThickness: number
   maxAbsBevel: number
+  minBackInset: number
   maxBackInset: number
   maxKerf: number
   maxTabSize: number
@@ -36,11 +37,16 @@ export function boxParamLimits(input: BoxParams): BoxParamLimits {
   // The recessed back's through-slots must stay clear of the bevel clip and
   // leave the shelves a usable depth, so the bevel is subtracted first.
   const bevel = clamp(finite(input.bevel, 0), -maxAbsBevel, maxAbsBevel)
-  const maxBackInset = Math.max(0, d - Math.abs(bevel) - (t + kerf) - MIN_TAB_GAP)
+  const structuralMinBackInset = t + kerf
+  const availableBackInset = Math.max(0, d - Math.abs(bevel) - structuralMinBackInset - MIN_TAB_GAP)
+  const hasSafeBackInset = availableBackInset >= structuralMinBackInset
+  const minBackInset = hasSafeBackInset ? structuralMinBackInset : 0
+  const maxBackInset = hasSafeBackInset ? availableBackInset : 0
 
   return {
     maxThickness,
     maxAbsBevel,
+    minBackInset,
     maxBackInset,
     maxKerf,
     maxTabSize,
@@ -59,6 +65,10 @@ export function clampBoxParams(input: BoxParams): BoxParams {
   const kerf = clamp(finite(input.kerf, 0), 0, first.maxKerf)
   const withMaterial = { ...base, t, kerf }
   const limits = boxParamLimits(withMaterial)
+  const requestedBackInset = finite(input.backInset, 0)
+  const backInset = requestedBackInset > 0 && limits.maxBackInset > 0
+    ? clamp(requestedBackInset, limits.minBackInset, limits.maxBackInset)
+    : 0
 
   return {
     ...withMaterial,
@@ -66,6 +76,6 @@ export function clampBoxParams(input: BoxParams): BoxParams {
     nTab: clamp(Math.round(finite(input.nTab, 1)), 1, limits.maxTabs),
     nShelves: clamp(Math.round(finite(input.nShelves, 0)), 0, limits.maxShelves),
     bevel: clamp(finite(input.bevel, 0), -limits.maxAbsBevel, limits.maxAbsBevel),
-    backInset: clamp(finite(input.backInset, 0), 0, limits.maxBackInset),
+    backInset,
   }
 }
