@@ -65,7 +65,12 @@ function onStrategyChanged(event: Event) {
 
 function addPiece() {
   const error = validateNewPiece(
-    { width: newWidth.value, height: newHeight.value, quantity: newQty.value },
+    {
+      width: newWidth.value,
+      height: newHeight.value,
+      quantity: newQty.value,
+      allowRotation: newAllowRotation.value,
+    },
     { sheetWidth: props.sheetWidth, sheetHeight: props.sheetHeight, kerf: props.kerf },
   )
   if (error) {
