@@ -9,6 +9,7 @@ export interface NewPieceForm {
   width: number
   height: number
   quantity: number
+  allowRotation?: boolean
 }
 
 export interface SheetSize {
@@ -30,7 +31,9 @@ export function validateNewPiece(form: NewPieceForm, sheet: SheetSize): PieceVal
   // here too; otherwise a piece the optimizer will reject passes the form.
   const kerf = Number.isFinite(sheet.kerf) ? Math.max(0, sheet.kerf as number) : 0
   const fits = (a: number, b: number) => a + kerf <= sheet.sheetWidth && b + kerf <= sheet.sheetHeight
-  if (!fits(form.width, form.height) && !fits(form.height, form.width)) return 'piece_larger'
+  const fitsAsIs = fits(form.width, form.height)
+  const fitsRotated = form.allowRotation !== false && fits(form.height, form.width)
+  if (!fitsAsIs && !fitsRotated) return 'piece_larger'
   if (!Number.isFinite(form.quantity) || form.quantity <= 0) return 'qty_min'
   if (form.quantity > MAX_PIECE_QUANTITY) return 'qty_limit'
   return null
