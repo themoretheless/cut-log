@@ -64,8 +64,12 @@ pages/components -> composables -> services -> Worker/WASM -> Rust core
 Pure modules may depend on other pure modules and types. They never import Vue,
 components, composables, stores, `window`, localStorage, or Three.js. Services
 never import pages. A page may assemble several narrow modules, but it should
-not reimplement their policy. `frontend/scripts/check-boundaries.mjs` enforces
-these directions in both `npm test` and `npm run build`.
+not reimplement their policy. `frontend/scripts/check-boundaries.mjs` runs in
+both `npm test` and `npm run build` and machine-enforces: the layer import
+directions above (including `helpers/`), bare `vue`/`vue-router`/`three`
+imports in `lib/` and `helpers/`, and the page line budget. Direct `window` or
+`localStorage` access in pure modules is not detectable by the import scanner
+and remains a review rule.
 
 ## 3. SOLID and DRY in this repository
 

@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import NumberField from '@/components/NumberField.vue'
 import type { SelectedPieceStats } from '@/composables/useResultSelection'
 import type { QuickFilterMode, VisiblePieceEntry } from '@/composables/usePieceList'
-import type { PieceBulkDiff, PieceSortMode, PieceSummary } from '@/lib/pieceEditor'
+import { formatAreaM2, type PieceBulkDiff, type PieceSortMode, type PieceSummary } from '@/lib/pieceEditor'
 import { MAX_PIECE_QUANTITY } from '@/lib/optimizerLimits'
 import type { CutPiece, CuttingResult } from '@/services/types'
 import { useL10n } from '@/stores/l10n'
@@ -116,10 +116,6 @@ const preflightChecks = computed(() => [
   { id: 'layout', label: t('preflight.layout'), value: props.result ? `${props.result.totalSheets} ${t('sheets')}` : t('preflight.not_calculated'), status: props.result ? 'ok' : 'idle' },
 ])
 
-function areaM2(areaMm2: number): string {
-  return (areaMm2 / 1_000_000).toFixed(2)
-}
-
 function pieceIndex(piece: CutPiece): number {
   return props.pieceIndexes[piece.id] ?? 0
 }
@@ -152,8 +148,8 @@ function pieceIndex(piece: CutPiece): number {
     </div>
 
     <div class="editor-summary">
-      <span class="metric-pill"><strong>{{ areaM2(pieceSummary.totalArea) }}</strong> {{ t('material_area') }}</span>
-      <span class="metric-pill"><strong>{{ areaM2(pieceSummary.largestPieceArea) }}</strong> {{ t('largest_piece') }}</span>
+      <span class="metric-pill"><strong>{{ formatAreaM2(pieceSummary.totalArea) }}</strong> {{ t('material_area') }}</span>
+      <span class="metric-pill"><strong>{{ formatAreaM2(pieceSummary.largestPieceArea) }}</strong> {{ t('largest_piece') }}</span>
       <span class="metric-pill"><strong>{{ pieceSummary.rotationEnabled }}/{{ pieceSummary.totalTypes }}</strong> {{ t('rotation') }}</span>
     </div>
 
@@ -252,8 +248,8 @@ function pieceIndex(piece: CutPiece): number {
         </div>
       </div>
       <div class="selected-inspector-metrics">
-        <span><strong>{{ areaM2(selectedPieceStats.area) }}</strong> {{ t('piece_area') }}</span>
-        <span><strong>{{ areaM2(selectedPieceStats.totalArea) }}</strong> {{ t('total_piece_area') }}</span>
+        <span><strong>{{ formatAreaM2(selectedPieceStats.area) }}</strong> {{ t('piece_area') }}</span>
+        <span><strong>{{ formatAreaM2(selectedPieceStats.totalArea) }}</strong> {{ t('total_piece_area') }}</span>
         <span><strong>{{ selectedPieceStats.placements.length }}/{{ selectedPiece.quantity }}</strong> {{ t('placed_count') }}</span>
         <span v-if="selectedPieceStats.firstPlacement">
           <strong>{{ t('sheet') }} {{ selectedPieceStats.firstPlacement.sheetIndex + 1 }}</strong>
