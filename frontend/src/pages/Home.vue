@@ -20,6 +20,7 @@ import { useToast } from '@/composables/useToast'
 import { buildShareUrl, readShareFromHash } from '@/lib/shareLink'
 import {
   addDimensionDelta,
+  formatAreaM2,
   roundDimensionsUp,
   swapDimensions,
   type PieceBulkDiff,
@@ -64,12 +65,14 @@ const {
   visibleEditablePieces,
   hasPieceFilter,
   pieceIndexes,
+  toggleSelect,
+  clearSelection,
 } = pieceList
 
 const optimization = useOptimizationSession()
 const { state: optimizationState, result } = optimization
 const resultSelection = useResultSelection({ pieces: () => pieces, result, selectedPieceId })
-const { selectedPiece, stats: selectedPieceStats, toggle: toggleSelect, clear: clearSelection } = resultSelection
+const { selectedPiece, stats: selectedPieceStats } = resultSelection
 const { pricePerSheet, currency, summary: costSummary, isVisible: costingVisible } = useCosting({
   result,
   pricePerSheet: projectState.pricePerSheet,
@@ -117,15 +120,11 @@ function resetAfterSnapshotRestore() {
   homeHistory.reset()
 }
 
-function areaM2(areaMm2: number): string {
-  return (areaMm2 / 1_000_000).toFixed(2)
-}
-
 const projectActivity = useProjectActivity({
   capture: currentState,
   apply: applyState,
   hasContent: () => projectHasContent.value,
-  snapshotSummary: () => `${pieceSummary.value.totalTypes} ${t('piece_types')} · ${pieceSummary.value.totalQuantity} ${t('pieces_short')} · ${areaM2(pieceSummary.value.totalArea)} ${t('material_area')}`,
+  snapshotSummary: () => `${pieceSummary.value.totalTypes} ${t('piece_types')} · ${pieceSummary.value.totalQuantity} ${t('pieces_short')} · ${formatAreaM2(pieceSummary.value.totalArea)} ${t('material_area')}`,
   resetAfterRestore: resetAfterSnapshotRestore,
   persist: homeStorage.saveState,
   translate: t,
@@ -210,14 +209,15 @@ function importPieces(payload: { rows: readonly NewPieceInput[]; added: number; 
 
 function loadInitialState() {
   const shared = readShareFromHash(location.hash)
-  if (shared) {
-    applyState(shared)
-    saveStateNow()
-    history.replaceState(null, '', location.pathname + location.search)
-    showToast(t('link_loaded'))
-    return
-  }
+  // The stored project is loaded first so that a share link never replaces the
+  // user's only copy without an automatic snapshot of it.
   loadState()
+  if (!shared) return
+  if (!saveSafetySnapshot(t('snapshot.auto_before_share'))) return
+  applyState(shared)
+  saveStateNow()
+  history.replaceState(null, '', location.pathname + location.search)
+  showToast(t('link_loaded'))
 }
 
 function removePiece(piece: CutPiece) {
@@ -302,7 +302,7 @@ function deleteSelectedPiece() {
 }
 
 function togglePieceLock(piece: CutPiece) {
-  runProjectEdit('piece.lock', () => { pieceList.toggleLock(piece) })
+  runProjectEdit('piece.lock', () => pieceList.toggleLock(piece))
   showToast(piece.locked ? t('piece_locked') : t('piece_unlocked'))
   recordOperation(piece.locked ? t('operation.lock_piece') : t('operation.unlock_piece'), piece.label.trim() || t('unnamed_piece'))
 }
@@ -337,8 +337,8 @@ function setVisibleRotation(allowRotation: boolean) {
     title: allowRotation ? t('bulk.rotation_on') : t('bulk.rotation_off'),
     changed: change.changed,
     skipped: change.skipped,
-    beforeArea: areaM2(change.beforeArea),
-    afterArea: areaM2(change.afterArea),
+    beforeArea: formatAreaM2(change.beforeArea),
+    afterArea: formatAreaM2(change.afterArea),
     sampleBefore: t('bulk.rotation'),
     sampleAfter: allowRotation ? t('bulk.enabled') : t('bulk.disabled'),
   }
@@ -360,8 +360,8 @@ function mutateVisibleDimensions(
     title,
     changed: change.changed,
     skipped: change.skipped,
-    beforeArea: areaM2(change.beforeArea),
-    afterArea: areaM2(change.afterArea),
+    beforeArea: formatAreaM2(change.beforeArea),
+    afterArea: formatAreaM2(change.afterArea),
     sampleBefore: change.sampleBefore,
     sampleAfter: change.sampleAfter,
   }
@@ -492,8 +492,10 @@ useKeyboardShortcuts([
 ])
 
 onMounted(() => {
-  loadInitialState()
+  // Snapshots must be loaded before loadInitialState so that the share-link
+  // safety snapshot is appended to the stored list instead of replacing it.
   projectActivity.load()
+  loadInitialState()
   homeHistory.reset()
 })
 

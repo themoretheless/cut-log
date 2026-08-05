@@ -3,6 +3,7 @@ import type { CutPiece } from '@/services/types'
 import {
   addDimensionDelta,
   findOversizedPieces,
+  formatAreaM2,
   pieceFitsSheet,
   pieceMatchesQuery,
   roundDimensionsUp,
@@ -24,6 +25,13 @@ function piece(overrides: Partial<CutPiece>): CutPiece {
 }
 
 describe('piece editor helpers', () => {
+  it('formats square millimeters as square meters with two decimals', () => {
+    expect(formatAreaM2(1_000_000)).toBe('1.00')
+    expect(formatAreaM2(12_400)).toBe('0.01')
+    expect(formatAreaM2(0)).toBe('0.00')
+    expect(formatAreaM2(-500_000)).toBe('-0.50')
+  })
+
   it('matches pieces by label, dimensions and quantity', () => {
     const p = piece({ label: 'Shelf A', width: 760, height: 300, quantity: 4 })
 

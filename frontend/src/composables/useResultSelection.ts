@@ -1,4 +1,4 @@
-import { computed, toValue, watch, type MaybeRefOrGetter, type Ref } from 'vue'
+import { computed, toValue, type MaybeRefOrGetter, type Ref } from 'vue'
 import { pieceArea, pieceTotalArea } from '@/lib/pieceEditor'
 import type { CutPiece, CuttingResult } from '@/services/types'
 
@@ -57,25 +57,5 @@ export function useResultSelection(options: ResultSelectionOptions) {
     }
   })
 
-  function reconcile() {
-    if (options.selectedPieceId.value !== null && !selectedPiece.value) {
-      options.selectedPieceId.value = null
-    }
-  }
-
-  function toggle(id: string) {
-    options.selectedPieceId.value = options.selectedPieceId.value === id ? null : id
-  }
-
-  function clear() {
-    options.selectedPieceId.value = null
-  }
-
-  watch(
-    () => toValue(options.pieces).map(piece => piece.id),
-    reconcile,
-    { immediate: true },
-  )
-
-  return { selectedPiece, placements, stats, toggle, clear, reconcile }
+  return { selectedPiece, placements, stats }
 }
