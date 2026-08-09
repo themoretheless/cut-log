@@ -5,6 +5,7 @@ export default createRouter({
   routes: [
     { path: '/', component: () => import('./pages/Home.vue') },
     { path: '/box', component: () => import('./pages/BoxBuilder.vue') },
+    { path: '/skadis', component: () => import('./pages/SkadisBuilder.vue') },
     { path: '/:pathMatch(.*)*', component: () => import('./pages/NotFound.vue') },
   ],
 })
