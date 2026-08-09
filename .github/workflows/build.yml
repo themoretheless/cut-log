@@ -2,6 +2,7 @@ name: Build
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CARGO_HOME: /home/runner/.cargo
   RUST_VERSION: 1.96.0
   WASM_PACK_VERSION: 0.15.0
   WASM_OPT_VERSION: 0.116.1
@@ -65,21 +66,11 @@ jobs:
           fi
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable action
+        uses: themoretheless/.github/.github/actions/setup-rust@bb3377f2f424201379ab4e47e147f164f4014b38 # v1
         with:
-          toolchain: ${{ env.RUST_VERSION }}
+          rust-toolchain: ${{ env.RUST_VERSION }}
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
-
-      - name: Cache Cargo
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ env.RUST_VERSION }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-${{ env.RUST_VERSION }}-
 
       - name: Cache tools
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
