@@ -6,7 +6,10 @@ export interface SkadisSettings {
   slotHeight: number
   pitch: number
   margin: number
-  staggered: boolean
+  /** Horizontal offset applied to every second row, as a percentage of pitch. */
+  rowOffsetPercent: number
+  /** Vertical offset applied to every second column, as a percentage of pitch. */
+  columnOffsetPercent: number
 }
 
 export interface SkadisSlot {
@@ -15,24 +18,33 @@ export interface SkadisSlot {
 }
 
 const fmt = (value: number) => Number(value.toFixed(3)).toString()
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
 export function skadisSlots(settings: SkadisSettings): SkadisSlot[] {
-  const { width, height, slotWidth, slotHeight, pitch, margin, staggered } = settings
-  if (![width, height, slotWidth, slotHeight, pitch, margin].every(Number.isFinite)) return []
+  const { width, height, slotWidth, slotHeight, pitch, margin, rowOffsetPercent, columnOffsetPercent } = settings
+  if (![width, height, slotWidth, slotHeight, pitch, margin, rowOffsetPercent, columnOffsetPercent].every(Number.isFinite)) return []
   if (width <= 0 || height <= 0 || slotWidth <= 0 || slotHeight <= 0 || pitch <= 0 || margin < 0) return []
 
   const slots: SkadisSlot[] = []
+  const occupied = new Set<string>()
   const halfW = slotWidth / 2
   const halfH = slotHeight / 2
   const xMin = Math.max(margin, halfW)
   const xMax = Math.min(width - margin, width - halfW)
   const yMin = Math.max(margin, halfH)
   const yMax = Math.min(height - margin, height - halfH)
+  const secondRowOffset = pitch * clamp(rowOffsetPercent, 0, 100) / 100
+  const secondColumnOffset = pitch * clamp(columnOffsetPercent, 0, 100) / 100
 
   for (let row = 0, y = yMin; y <= yMax + 1e-9; row += 1, y = yMin + row * pitch) {
-    const offset = staggered && row % 2 === 1 ? pitch / 2 : 0
-    for (let x = xMin + offset; x <= xMax + 1e-9; x += pitch) {
-      slots.push({ x, y })
+    const offset = row % 2 === 1 ? secondRowOffset : 0
+    for (let column = 0, x = xMin + offset; x <= xMax + 1e-9; column += 1, x = xMin + offset + column * pitch) {
+      const slotY = y + (column % 2 === 1 ? secondColumnOffset : 0)
+      const key = `${fmt(x)}:${fmt(slotY)}`
+      if (slotY <= yMax + 1e-9 && !occupied.has(key)) {
+        occupied.add(key)
+        slots.push({ x, y: slotY })
+      }
     }
   }
   return slots
