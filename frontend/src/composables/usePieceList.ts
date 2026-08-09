@@ -1,4 +1,4 @@
-import { computed, reactive, ref, toValue, type MaybeRefOrGetter } from 'vue'
+import { computed, reactive, ref, toValue, watch, type MaybeRefOrGetter } from 'vue'
 import { PIECE_COLORS } from '@/lib/palette'
 import {
   findOversizedPieces,
@@ -53,7 +53,6 @@ export function usePieceList(options: PieceListOptions) {
   const quickFilterMode = ref<QuickFilterMode>('all')
   let colorIndex = 0
 
-  const selectedPiece = computed(() => pieces.find(piece => piece.id === selectedPieceId.value) ?? null)
   const pieceSummary = computed(() => summarizePieces(pieces))
   const oversizedPieces = computed(() => findOversizedPieces(
     pieces,
@@ -167,15 +166,28 @@ export function usePieceList(options: PieceListOptions) {
     selectedPieceId.value = null
   }
 
+  // Selection follows the list: a selected id that no longer exists is cleared,
+  // whatever path removed the piece (remove, clear, replace, restore).
+  watch(
+    () => pieces.map(piece => piece.id),
+    ids => {
+      if (selectedPieceId.value !== null && !ids.includes(selectedPieceId.value)) {
+        selectedPieceId.value = null
+      }
+    },
+  )
+
   function clearFilters() {
     pieceQuery.value = ''
     quickFilterMode.value = 'all'
   }
 
+  // Returns whether anything changed (always true), matching the run() commit
+  // contract; read piece.locked for the new state.
   function toggleLock(piece: CutPiece): boolean {
     if (piece.locked) delete piece.locked
     else piece.locked = true
-    return piece.locked === true
+    return true
   }
 
   function updateLabel(piece: CutPiece, label: string): boolean {
@@ -295,7 +307,6 @@ export function usePieceList(options: PieceListOptions) {
   return {
     pieces,
     selectedPieceId,
-    selectedPiece,
     pieceQuery,
     pieceSortMode,
     quickFilterMode,

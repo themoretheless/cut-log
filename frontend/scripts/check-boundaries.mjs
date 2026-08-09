@@ -8,11 +8,23 @@ const sourceExtensions = new Set(['.ts', '.vue'])
 
 const forbiddenTargets = {
   lib: new Set(['box', 'components', 'composables', 'pages', 'services', 'stores']),
+  helpers: new Set(['box', 'components', 'composables', 'pages', 'services', 'stores']),
   services: new Set(['box', 'components', 'composables', 'pages', 'stores']),
   composables: new Set(['box', 'components', 'pages', 'stores']),
   box: new Set(['components', 'composables', 'pages', 'services', 'stores']),
   components: new Set(['pages']),
   stores: new Set(['box', 'components', 'composables', 'pages', 'services']),
+}
+
+// Pure layers must stay framework-free: no Vue reactivity, no router, no Three.js.
+const forbiddenBareModules = {
+  lib: new Set(['vue', 'vue-router', 'three', '@vue']),
+  helpers: new Set(['vue', 'vue-router', 'three', '@vue']),
+}
+
+function bareModuleBase(specifier) {
+  const segments = specifier.split('/')
+  return specifier.startsWith('@') ? segments.slice(0, 2).join('/') : segments[0]
 }
 
 function sourceFiles(directory) {
@@ -50,7 +62,19 @@ for (const file of sourceFiles(srcRoot)) {
   const lineMap = ts.computeLineStarts(contents)
   for (const imported of imports) {
     const target = resolveImport(file, imported.fileName)
-    if (!target || isAllowedException(sourceLayer, target)) continue
+    if (!target) {
+      const deniedBare = forbiddenBareModules[sourceLayer]
+      const base = bareModuleBase(imported.fileName)
+      const scope = imported.fileName.split('/')[0]
+      if (deniedBare && (deniedBare.has(base) || deniedBare.has(scope))) {
+        const line = ts.computeLineAndCharacterOfPosition(lineMap, imported.pos).line + 1
+        violations.push(
+          `${path.relative(srcRoot, file)}:${line} ${sourceLayer} must stay pure (${imported.fileName})`,
+        )
+      }
+      continue
+    }
+    if (isAllowedException(sourceLayer, target)) continue
     const targetLayer = layerOf(target)
     if (!targetLayer || !denied.has(targetLayer)) continue
     const line = ts.computeLineAndCharacterOfPosition(lineMap, imported.pos).line + 1
