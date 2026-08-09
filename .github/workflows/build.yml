@@ -2,6 +2,7 @@ name: Build
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CARGO_HOME: /home/runner/.cargo
   RUST_VERSION: 1.96.0
   WASM_PACK_VERSION: 0.15.0
   WASM_OPT_VERSION: 0.116.1
