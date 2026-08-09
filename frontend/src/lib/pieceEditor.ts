@@ -37,6 +37,10 @@ export function pieceArea(piece: CutPiece): number {
   return piece.width * piece.height
 }
 
+export function formatAreaM2(areaMm2: number): string {
+  return (areaMm2 / 1_000_000).toFixed(2)
+}
+
 export function pieceTotalArea(piece: CutPiece): number {
   return pieceArea(piece) * piece.quantity
 }

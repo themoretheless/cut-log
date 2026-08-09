@@ -1,6 +1,6 @@
 # CutLog improvement catalog
 
-This is the canonical backlog for CutLog. It contains **510 distinct,
+This is the canonical backlog for CutLog. It contains **520 distinct,
 actionable observations**: defects, design debt, improvements, product ideas,
 and work completed through v0.1.54. `ARCHITECTURE.md` explains the module
 boundaries; `README.md` gives the short reading path. Keeping the detailed list
@@ -594,6 +594,23 @@ promises; take them in small, independently testable slices.
 - [ ] **CL-508 · Idea · P2 · M** — Save named editor views containing query, diagnostics filter, sort mode, and visible inspector state.
 - [ ] **CL-509 · Idea · P2 · L** — Compare two layouts with a scrubber or ghost overlay while preserving selected-piece highlighting.
 - [ ] **CL-510 · Improve · P1 · L** — Add a compact append-only local recovery journal that can replay named actions after an abrupt tab or browser crash.
+
+## 22. Multi-role architecture review findings (CL-511..CL-520)
+
+Findings from the 2026-08-05 multi-agent review of the editor refactor
+(PRs #81-#86) that were confirmed against the code but are too large for a
+single slice. Small confirmed fixes landed with this change set.
+
+- [ ] **CL-511 · Debt · P1 · L** — Split `PieceEditorPanel` (23 props, 6 v-models, 30 emits relayed one-to-one from `Home.vue`) into cohesive children (readiness/preflight header, filter toolbar, bulk-transform strip, selected-piece inspector, piece list) and move panel-local UI state (transform/round steps, drag indexes) down into the panel.
+- [ ] **CL-512 · Bug · P0 · M** — Add a persisted-state migration ladder (v1 -> v2 -> current) for `home_state`, `project_snapshots`, and `operation_log`; stash unparseable blobs under a recovery key instead of discarding them (extends CL-128..CL-132: today any version bump silently wipes user data).
+- [ ] **CL-513 · Debt · P1 · M** — Make optimization results reference pieces by `source_id` only and join to live pieces at render time, so metadata edits stay live and geometry edits can mark the result "stale" (banner) instead of destroying it.
+- [ ] **CL-514 · Improve · P2 · M** — Keep one warm optimizer worker (respawn only on cancel/crash) so each calculation stops paying worker startup plus WASM compile; collapse the four serialization hops per round-trip.
+- [ ] **CL-515 · Debt · P1 · M** — Replace the `false`/`null` truthiness veto in `useProjectActions.run` with an explicit `{ changed: boolean }` contract, and normalize `usePieceList` mutator return types to it.
+- [ ] **CL-516 · Debt · P2 · M** — Fold the operation log and pre-destructive auto-snapshots into `PROJECT_ACTION_EFFECTS` (e.g. `log`, `autoSnapshot` flags) so the registry covers all effects instead of hand-wired call sites in `Home.vue`.
+- [ ] **CL-517 · Improve · P1 · M** — Add a `Home.vue` mount test covering the highest-risk wiring: initial load order (load -> activity -> history reset), first-undo no-op, edit-invalidates-result, undo/redo round-trip, and the share-hash path.
+- [ ] **CL-518 · Improve · P1 · M** — Add a contract test that runs the real built WASM through `optimize()` with a small fixture, pinning the snake_case TS<->Rust JSON contract to the binary instead of a hand-written fixture; add a minimal Playwright smoke for enter pieces -> calculate -> export.
+- [ ] **CL-519 · Debt · P2 · S** — Move `selectedStrategy` and `minMachineCut` into `HomeState` (optional, back-compatible) so reload, share links, snapshots, and undo agree on what a project is.
+- [ ] **CL-520 · Debt · P2 · S** — Delete or wire up unused composable surface (`actionTrail`/`lastAction` per-keystroke allocation, `useCosting.reset`, `useProjectState.reset`, `useOptimizationSession.isRunning`), and regenerate the ARCHITECTURE.md module map from the tree so it stops lagging the code.
 
 ## Working rule
 

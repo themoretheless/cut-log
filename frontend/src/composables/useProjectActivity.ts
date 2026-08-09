@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue'
 import type { HomeState } from '@/lib/homeState'
-import { pieceArea } from '@/lib/pieceEditor'
+import { formatAreaM2, pieceArea } from '@/lib/pieceEditor'
 import type { ProjectSnapshot } from '@/lib/projectSnapshots'
 import {
   useProjectSnapshots,
@@ -57,10 +57,6 @@ interface UseProjectActivityOptions {
 
 function stateArea(state: HomeState): number {
   return state.pieces.reduce((sum, piece) => sum + pieceArea(piece) * piece.quantity, 0)
-}
-
-function areaM2(areaMm2: number): string {
-  return (areaMm2 / 1_000_000).toFixed(2)
 }
 
 function validOperationEntry(value: any, createId: () => string): OperationEntry | null {
@@ -167,7 +163,7 @@ export function useProjectActivity(options: UseProjectActivityOptions) {
     return {
       name: snapshot.name,
       piecesDelta: current.pieces.length - snapshot.state.pieces.length,
-      areaDelta: `${areaDelta >= 0 ? '+' : ''}${areaM2(areaDelta)} ${options.translate('material_area')}`,
+      areaDelta: `${areaDelta >= 0 ? '+' : ''}${formatAreaM2(areaDelta)} ${options.translate('material_area')}`,
       added: current.pieces.filter(piece => !snapshotById.has(piece.id)).length,
       removed: snapshot.state.pieces.filter(piece => !currentById.has(piece.id)).length,
       changed,

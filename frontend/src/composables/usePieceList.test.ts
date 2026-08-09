@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { usePieceList } from './usePieceList'
 import { addDimensionDelta } from '@/lib/pieceEditor'
 import { PIECE_COLORS } from '@/lib/palette'
@@ -28,7 +28,7 @@ describe('usePieceList', () => {
     expect(list.pieces.map(piece => piece.label)).toEqual(['First', 'First', 'Second'])
     expect([first.id, duplicate?.copy.id]).toEqual(['copy-1', 'copy-3'])
     expect(duplicate?.copy.color).not.toBe(first.color)
-    expect(list.selectedPiece.value).toBe(duplicate?.copy)
+    expect(list.selectedPieceId.value).toBe(duplicate?.copy.id)
     expect(list.remove(duplicate!.copy)).toBe(true)
     expect(list.selectedPieceId.value).toBeNull()
     expect(list.clear()).toBe(2)
@@ -75,6 +75,27 @@ describe('usePieceList', () => {
     list.remove(list.pieces[1])
     expect(list.move(0, 1)).toBe(true)
     expect(list.add(input('D')).color).toBe(PIECE_COLORS[3])
+  })
+
+  it('clears selection when the selected piece leaves the list by any path', async () => {
+    const list = usePieceList({ sheetWidth: 2440, sheetHeight: 1220, minMachineCut: 30 })
+    const piece = list.add(input('Solo'))
+    list.toggleSelect(piece.id)
+    expect(list.selectedPieceId.value).toBe(piece.id)
+
+    list.replace([])
+    await nextTick()
+    expect(list.selectedPieceId.value).toBeNull()
+  })
+
+  it('reports a change for every lock toggle so run() always commits it', () => {
+    const list = usePieceList({ sheetWidth: 2440, sheetHeight: 1220, minMachineCut: 30 })
+    const piece = list.add(input('Lockable'))
+
+    expect(list.toggleLock(piece)).toBe(true)
+    expect(piece.locked).toBe(true)
+    expect(list.toggleLock(piece)).toBe(true)
+    expect(piece.locked).toBeUndefined()
   })
 
   it('repairs duplicate ids when applying external project state', () => {

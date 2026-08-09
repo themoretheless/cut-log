@@ -44,4 +44,11 @@ describe('validateNewPiece', () => {
     // a piece that still fits with kerf is allowed
     expect(validateNewPiece({ width: 1000, height: 2000, quantity: 1 }, { ...sheet, kerf: 3 })).toBeNull()
   })
+
+  it('rejects a piece that only fits rotated when rotation is disabled', () => {
+    expect(validateNewPiece({ width: 2000, height: 100, quantity: 1, allowRotation: false }, sheet)).toBe('piece_larger')
+    expect(validateNewPiece({ width: 2000, height: 100, quantity: 1, allowRotation: true }, sheet)).toBeNull()
+    expect(validateNewPiece({ width: 2000, height: 100, quantity: 1 }, sheet)).toBeNull()
+    expect(validateNewPiece({ width: 400, height: 300, quantity: 1, allowRotation: false }, sheet)).toBeNull()
+  })
 })

@@ -16,16 +16,16 @@ export const PROJECT_ACTION_EFFECTS = {
   'sheet.width': { invalidateLayout: true, persist: true, history: true },
   'sheet.height': { invalidateLayout: true, persist: true, history: true },
   'sheet.kerf': { invalidateLayout: true, persist: true, history: true },
-  'cost.price': { invalidateLayout: false, persist: true, history: false },
-  'cost.currency': { invalidateLayout: false, persist: true, history: false },
+  'cost.price': { invalidateLayout: false, persist: true, history: true },
+  'cost.currency': { invalidateLayout: false, persist: true, history: true },
   'strategy.select': { invalidateLayout: true, persist: false, history: false },
   'piece.add': { invalidateLayout: true, persist: true, history: true },
   'piece.import': { invalidateLayout: true, persist: true, history: true },
   'piece.remove': { invalidateLayout: true, persist: true, history: true },
   'piece.duplicate': { invalidateLayout: true, persist: true, history: true },
   'piece.clear': { invalidateLayout: true, persist: true, history: true },
-  'piece.lock': { invalidateLayout: true, persist: true, history: true },
-  'piece.label': { invalidateLayout: true, persist: true, history: true },
+  'piece.lock': { invalidateLayout: false, persist: true, history: true },
+  'piece.label': { invalidateLayout: false, persist: true, history: true },
   'piece.width': { invalidateLayout: true, persist: true, history: true },
   'piece.height': { invalidateLayout: true, persist: true, history: true },
   'piece.quantity': { invalidateLayout: true, persist: true, history: true },
@@ -82,6 +82,12 @@ export function useProjectActions(options: UseProjectActionsOptions) {
     actionTrail.value = [event, ...actionTrail.value].slice(0, options.trailLimit ?? 50)
   }
 
+  /**
+   * Commit contract: a mutation vetoes its side effects by returning exactly
+   * `false` or `null` ("nothing changed"). Every other value commits, so
+   * mutations must not use `false`/`null` to carry ordinary data, and no-op
+   * paths must return one of the two sentinels (see usePieceList mutators).
+   */
   function run<T>(name: ProjectActionName, mutate: () => T): T {
     const result = mutate()
     if (result !== false && result !== null) commit(name)

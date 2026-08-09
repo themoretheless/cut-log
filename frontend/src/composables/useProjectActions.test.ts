@@ -27,7 +27,7 @@ describe('useProjectActions', () => {
     })
   })
 
-  it('supports metadata-only actions without invalidating layout or recording history', () => {
+  it('supports metadata actions that persist and record history without invalidating layout', () => {
     const invalidateLayout = vi.fn()
     const scheduleSave = vi.fn()
     const recordHistory = vi.fn()
@@ -37,7 +37,7 @@ describe('useProjectActions', () => {
 
     expect(invalidateLayout).not.toHaveBeenCalled()
     expect(scheduleSave).toHaveBeenCalledOnce()
-    expect(recordHistory).not.toHaveBeenCalled()
+    expect(recordHistory).toHaveBeenCalledWith('cost.currency')
     expect(actions.lastAction.value?.impact).toBe('metadata')
   })
 
@@ -81,8 +81,11 @@ describe('useProjectActions', () => {
     expect(PROJECT_ACTION_EFFECTS['cost.price']).toEqual({
       invalidateLayout: false,
       persist: true,
-      history: false,
+      history: true,
     })
+    // Metadata edits must never discard a computed layout.
+    expect(PROJECT_ACTION_EFFECTS['piece.label'].invalidateLayout).toBe(false)
+    expect(PROJECT_ACTION_EFFECTS['piece.lock'].invalidateLayout).toBe(false)
     expect(PROJECT_ACTION_EFFECTS['strategy.select']).toEqual({
       invalidateLayout: true,
       persist: false,

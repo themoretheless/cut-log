@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { effectScope, nextTick, reactive, ref } from 'vue'
+import { effectScope, reactive, ref } from 'vue'
 import { useResultSelection } from './useResultSelection'
 import { CuttingStrategy, type CutPiece, type CuttingResult } from '@/services/types'
 
@@ -49,17 +49,15 @@ describe('useResultSelection', () => {
     scope.stop()
   })
 
-  it('clears a stale id after project replacement and owns toggling', async () => {
+  it('projects nothing without mutating the selection it reads', () => {
     const pieces = reactive([piece('first')])
-    const selectedPieceId = ref<string | null>(null)
+    const selectedPieceId = ref<string | null>('missing')
     const scope = effectScope()
     const selection = scope.run(() => useResultSelection({ pieces, result: null, selectedPieceId }))!
 
-    selection.toggle('first')
-    expect(selectedPieceId.value).toBe('first')
-    pieces.splice(0, 1, piece('replacement'))
-    await nextTick()
-    expect(selectedPieceId.value).toBeNull()
+    expect(selection.selectedPiece.value).toBeNull()
+    expect(selection.stats.value).toBeNull()
+    expect(selectedPieceId.value).toBe('missing')
     scope.stop()
   })
 })
