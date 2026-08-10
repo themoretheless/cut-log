@@ -9,11 +9,12 @@ const standard: SkadisSettings = {
   slotHeight: 15,
   pitch: 40,
   margin: 20,
-  staggered: true,
+  rowOffsetPercent: 50,
+  columnOffsetPercent: 0,
 }
 
 describe('SKADIS geometry', () => {
-  it('builds a staggered 40 mm grid inside the margin', () => {
+  it('builds the standard 50% staggered grid inside the margin', () => {
     const slots = skadisSlots(standard)
     expect(slots.slice(0, 10)).toEqual([
       { x: 20, y: 20 }, { x: 60, y: 20 }, { x: 100, y: 20 }, { x: 140, y: 20 },
@@ -21,6 +22,36 @@ describe('SKADIS geometry', () => {
       { x: 340, y: 20 }, { x: 40, y: 60 },
     ])
     expect(slots).toHaveLength(119)
+  })
+
+  it.each([
+    [0, 20],
+    [25, 30],
+    [50, 40],
+    [100, 60],
+  ])('offsets every second row by %s%% of the pitch', (rowOffsetPercent, expectedX) => {
+    const secondRow = skadisSlots({ ...standard, rowOffsetPercent }).find(slot => slot.y === 60)
+    expect(secondRow?.x).toBe(expectedX)
+  })
+
+  it.each([
+    [0, 20],
+    [25, 30],
+    [50, 40],
+    [100, 60],
+  ])('offsets every second column vertically by %s%% of the pitch', (columnOffsetPercent, expectedY) => {
+    const firstRow = skadisSlots({ ...standard, rowOffsetPercent: 0, columnOffsetPercent })
+    expect(firstRow.find(slot => slot.x === 60)?.y).toBe(expectedY)
+  })
+
+  it('clamps both offset percentages to the 0-100% range', () => {
+    const below = skadisSlots({ ...standard, rowOffsetPercent: -10, columnOffsetPercent: -10 })
+    const above = skadisSlots({ ...standard, rowOffsetPercent: 110, columnOffsetPercent: 110 })
+    expect(below.find(slot => slot.y === 60)?.x).toBe(20)
+    expect(below.find(slot => slot.x === 60)?.y).toBe(20)
+    expect(above.find(slot => slot.y === 60)?.x).toBe(60)
+    expect(above.find(slot => slot.x === 60)?.y).toBe(60)
+    expect(new Set(above.map(slot => `${slot.x}:${slot.y}`)).size).toBe(above.length)
   })
 
   it('exports millimeter SVG with rounded 5 by 15 mm slots', () => {

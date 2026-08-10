@@ -15,11 +15,12 @@ const settings = reactive<SkadisSettings>({
   slotHeight: 15,
   pitch: 40,
   margin: 20,
-  staggered: true,
+  rowOffsetPercent: 50,
+  columnOffsetPercent: 0,
 })
 
 const slots = computed(() => skadisSlots(settings))
-const isStandardGrid = computed(() => settings.slotWidth === 5 && settings.slotHeight === 15 && settings.pitch === 40 && settings.staggered)
+const isStandardGrid = computed(() => settings.slotWidth === 5 && settings.slotHeight === 15 && settings.pitch === 40 && settings.rowOffsetPercent === 50 && settings.columnOffsetPercent === 0)
 const boardArea = computed(() => (settings.width * settings.height / 1_000_000).toFixed(3))
 const previewPadding = computed(() => Math.max(settings.width, settings.height) * 0.025)
 
@@ -68,10 +69,8 @@ function downloadDxf() {
           <div class="form-row"><label for="skadis-slot-height">{{ t('skadis.slot_height') }}</label><NumberField id="skadis-slot-height" :aria-label="t('skadis.slot_height')" v-model="settings.slotHeight" :min="1" :max="40" :step="0.1" /></div>
           <div class="form-row"><label for="skadis-pitch">{{ t('skadis.pitch') }}</label><NumberField id="skadis-pitch" :aria-label="t('skadis.pitch')" v-model="settings.pitch" :min="10" :max="100" :step="1" /></div>
           <div class="form-row"><label for="skadis-margin">{{ t('skadis.margin') }}</label><NumberField id="skadis-margin" :aria-label="t('skadis.margin')" v-model="settings.margin" :min="0" :max="200" :step="1" /></div>
-          <label class="check-row">
-            <input v-model="settings.staggered" type="checkbox" />
-            <span>{{ t('skadis.staggered') }}</span>
-          </label>
+          <div class="form-row"><label for="skadis-row-offset">{{ t('skadis.row_offset') }}</label><NumberField id="skadis-row-offset" :aria-label="t('skadis.row_offset')" v-model="settings.rowOffsetPercent" :min="0" :max="100" :step="1" /></div>
+          <div class="form-row"><label for="skadis-column-offset">{{ t('skadis.column_offset') }}</label><NumberField id="skadis-column-offset" :aria-label="t('skadis.column_offset')" v-model="settings.columnOffsetPercent" :min="0" :max="100" :step="1" /></div>
           <p :class="['compatibility', isStandardGrid ? 'is-compatible' : 'is-custom']">
             <span aria-hidden="true">{{ isStandardGrid ? '✓' : '!' }}</span>
             {{ isStandardGrid ? t('skadis.compatible') : t('skadis.custom_warning') }}
