@@ -24,6 +24,16 @@ describe('SKADIS geometry', () => {
     expect(slots).toHaveLength(119)
   })
 
+  it('centres the grid when the pitch does not divide the available span', () => {
+    const slots = skadisSlots({ ...standard, width: 740, height: 740 })
+    const ys = slots.map(slot => slot.y)
+    const xs = slots.map(slot => slot.x)
+    expect(Math.min(...ys)).toBe(30)
+    expect(740 - Math.max(...ys)).toBe(30)
+    expect(Math.min(...xs)).toBe(20)
+    expect(740 - Math.max(...xs)).toBe(20)
+  })
+
   it.each([
     [0, 20],
     [25, 30],
