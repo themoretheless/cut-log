@@ -76,6 +76,110 @@ export function skadisSlots(settings: SkadisSettings): SkadisSlot[] {
   return slots
 }
 
+export interface SkadisSeam {
+  /**
+   * Distance between the closest facing slots of two boards butted side by
+   * side, measured inside one row: the rows are staggered, so the grid
+   * bounding box would span two phases and describe a pair of slots that do
+   * not actually face each other.
+   */
+  horizontal: number
+  /** Distance between the outermost row centrelines across a horizontal joint. */
+  vertical: number
+  /** Geometry of the row and column the measurements were taken on. */
+  rowY: number
+  rowLeft: number
+  rowRight: number
+  columnTop: number
+  columnBottom: number
+}
+
+/**
+ * Slot spacing across the joint between two butted boards. It equals the pitch
+ * exactly when the hole grid continues onto the next board without a step.
+ */
+export function skadisSeam(settings: SkadisSettings): SkadisSeam | null {
+  const slots = skadisSlots(settings)
+  if (!slots.length) return null
+
+  const rows = new Map<number, { left: number; right: number }>()
+  for (const slot of slots) {
+    const row = rows.get(slot.y)
+    if (!row) rows.set(slot.y, { left: slot.x, right: slot.x })
+    else {
+      if (slot.x < row.left) row.left = slot.x
+      if (slot.x > row.right) row.right = slot.x
+    }
+  }
+
+  let rowY = 0
+  let rowLeft = 0
+  let rowRight = 0
+  let horizontal = Infinity
+  for (const [y, { left, right }] of rows) {
+    const gap = settings.width - right + left
+    if (gap < horizontal) {
+      horizontal = gap
+      rowY = y
+      rowLeft = left
+      rowRight = right
+    }
+  }
+
+  const ys = slots.map(slot => slot.y)
+  const columnTop = Math.min(...ys)
+  const columnBottom = Math.max(...ys)
+
+  return {
+    horizontal,
+    vertical: settings.height - columnBottom + columnTop,
+    rowY,
+    rowLeft,
+    rowRight,
+    columnTop,
+    columnBottom,
+  }
+}
+
+/** True when the grid continues across both joints at the nominal pitch. */
+export function skadisSeamIsUniform(settings: SkadisSettings): boolean {
+  const seam = skadisSeam(settings)
+  if (!seam) return false
+  return Math.abs(seam.horizontal - settings.pitch) < 1e-6 && Math.abs(seam.vertical - settings.pitch) < 1e-6
+}
+
+/**
+ * Largest board no bigger than the current one whose holes are evenly spaced
+ * both inside the board and across the joint to the next one. The two axes are
+ * independent, and the layout repeats every pitch, so a whole pitch of search
+ * per axis is enough to find the answer or prove there is none.
+ */
+export function snapToUniformSeam(settings: SkadisSettings): { width: number; height: number } {
+  const { pitch } = settings
+  if (!Number.isFinite(pitch) || pitch <= 0) return { width: settings.width, height: settings.height }
+  const steps = Math.ceil(pitch)
+
+  const bestWidth = (() => {
+    for (let candidate = Math.floor(settings.width); candidate > settings.width - steps - 1; candidate -= 1) {
+      if (candidate <= 0) break
+      const seam = skadisSeam({ ...settings, width: candidate })
+      if (seam && Math.abs(seam.horizontal - pitch) < 1e-6) return candidate
+    }
+    return settings.width
+  })()
+
+  const bestHeight = (() => {
+    for (let candidate = Math.floor(settings.height); candidate > settings.height - steps - 1; candidate -= 1) {
+      if (candidate <= 0) break
+      const seam = skadisSeam({ ...settings, height: candidate })
+      if (seam && Math.abs(seam.vertical - pitch) < 1e-6) return candidate
+    }
+    return settings.height
+  })()
+
+  return { width: bestWidth, height: bestHeight }
+}
+
 export function skadisSvg(settings: SkadisSettings): string {
   const { width, height, cornerRadius, slotWidth, slotHeight } = settings
   const radius = Math.max(0, Math.min(cornerRadius, width / 2, height / 2))

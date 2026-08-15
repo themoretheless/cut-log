@@ -4,17 +4,16 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
-    "jsx": "preserve",
-    "importHelpers": true,
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "esModuleInterop": true,
+    "verbatimModuleSyntax": true,
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
     "paths": { "@/*": ["./src/*"] }
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "env.d.ts"],
+  "include": ["src/**/*.ts", "src/**/*.svelte", "env.d.ts"],
   "exclude": ["src/**/*.test.ts"]
 }

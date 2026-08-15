@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { ru, en } from './l10n'
+import { ru, en } from './l10n.svelte'
 
 // The `t()` lookup falls back to ru when an en key is missing, and falls back to
 // the raw key string when neither locale has it, so both kinds of gap are
@@ -31,15 +31,15 @@ function walk(dir: string): string[] {
   for (const name of readdirSync(dir)) {
     const full = `${dir}/${name}`
     if (statSync(full).isDirectory()) out.push(...walk(full))
-    else if (/\.(ts|vue)$/.test(name) && !name.endsWith('.test.ts')) out.push(full)
+    else if (/\.(ts|svelte)$/.test(name) && !name.endsWith('.test.ts')) out.push(full)
   }
   return out
 }
 
-// Match standalone t('...') / t("...") calls (not foo.t(), not truncate(); the
-// lookbehind rejects a preceding word char or dot). Dynamic t(`...${x}`) calls
-// are skipped: they can't be resolved statically.
-const CALL = /(?<![\w.])t\(\s*(['"])([^'"]+)\1\s*\)/g
+// Match t('...') and l10n.t('...') calls (not foo.t(), not truncate(); the
+// lookbehind rejects any other preceding word char or dot). Dynamic
+// t(`...${x}`) calls are skipped: they can't be resolved statically.
+const CALL = /(?<![\w.])(?:l10n\.)?t\(\s*(['"])([^'"]+)\1\s*\)/g
 const KEY_LIKE = /^[\w.]+$/
 
 function usedKeys(): Set<string> {

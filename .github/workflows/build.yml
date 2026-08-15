@@ -138,10 +138,10 @@ jobs:
       - name: Typecheck and test frontend
         working-directory: frontend
         run: |
-          npx vue-tsc --noEmit
+          npm run check
           npm test -- --typecheck.enabled
 
-      - name: Build Vue
+      - name: Build frontend
         working-directory: frontend
         run: npx vite build
         env:

@@ -51,11 +51,11 @@ components:
    `optimizer.worker.ts` -> `rustService.ts` for one calculation.
 4. Read `crates/core/src/models.rs` and `optimizer.rs`; the WASM and CLI crates
    are thin adapters.
-5. Read `useProjectState.ts`, then the focused Home composables for commands,
+5. Read `useProjectState.svelte.ts`, then the focused Home composables for commands,
    costing, selection, import, history, snapshots, piece-list actions,
-   shortcuts, and exports; open `pages/Home.vue` only to see composition.
+   shortcuts, and exports; open `pages/Home.svelte` only to see composition.
 6. For the box, follow `box/constraints.ts` -> `geometry.ts` ->
-   `useBoxModel.ts` -> `box/three/*` -> `pages/BoxBuilder.vue`.
+   `useBoxModel.svelte.ts` -> `box/three/*` -> `pages/BoxBuilder.svelte`.
 
 [ARCHITECTURE.md](ARCHITECTURE.md) expands this into layer rules, SOLID/DRY
 ownership, diagrams, the seven completed iterations, and the next small
@@ -73,7 +73,7 @@ pages/components -> composables -> services -> Worker/WASM -> Rust core
 frontend/src/
   lib/             pure validation, state, history, piece ops, exports, display math
   services/        optimizer adaptation, Worker ownership, lazy WASM loading
-  composables/     Vue-owned editor state and effects with narrow interfaces
+  composables/     runes-owned editor state and effects with narrow interfaces
   components/      reusable presentation controls and SheetCard
   box/             pure constraints/geometry, reactive model, owned Three.js scenes
   pages/           product composition and remaining cross-feature orchestration
@@ -84,7 +84,7 @@ crates/
   ui/              Rust SVG renderer
 ```
 
-Pure modules do not import Vue or browser effects. Pages depend inward on
+Pure modules do not import Svelte or browser effects. Pages depend inward on
 composables, services, pure modules, and contracts. Shared policy has one owner:
 quantity limits, palette, sheet display math, box constraints, geometry, and
 downloads are not reimplemented in pages.
@@ -175,7 +175,7 @@ failures. The WASM API rejects unsupported strategy values and inputs above
 cargo test --workspace
 cd frontend
 npm test -- --typecheck.enabled
-npx vue-tsc --noEmit
+npm run check
 npm run build
 ```
 

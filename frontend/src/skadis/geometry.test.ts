@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { skadisDxf, skadisSlots, skadisSvg, type SkadisSettings } from './geometry'
+import { skadisDxf, skadisSeam, skadisSeamIsUniform, skadisSlots, skadisSvg, snapToUniformSeam, type SkadisSettings } from './geometry'
 
 const standard: SkadisSettings = {
   width: 360,
@@ -76,5 +76,69 @@ describe('SKADIS geometry', () => {
     expect(dxf).toContain('$INSUNITS\n70\n4')
     expect(dxf).toContain('SECTION\n2\nENTITIES')
     expect(dxf.endsWith('0\nEOF\n')).toBe(true)
+  })
+
+  it('reports a seam equal to the pitch when the grid continues across boards', () => {
+    const seam = skadisSeam(standard)!
+    expect(seam.horizontal).toBe(40)
+    expect(seam.vertical).toBe(40)
+    expect(skadisSeamIsUniform(standard)).toBe(true)
+  })
+
+  it('measures the seam inside one row, not across the staggered bounding box', () => {
+    // The rows are offset by half a pitch, so the outermost slots of the grid
+    // sit in different rows and never face each other across a joint.
+    const seam = skadisSeam(standard)!
+    const row = skadisSlots(standard).filter(slot => slot.y === seam.rowY).map(slot => slot.x)
+    expect(Math.min(...row)).toBe(seam.rowLeft)
+    expect(Math.max(...row)).toBe(seam.rowRight)
+    expect(seam.horizontal).toBe(standard.width - seam.rowRight + seam.rowLeft)
+  })
+
+  it('detects a board size that breaks the pattern at the joint', () => {
+    const wide = { ...standard, width: 380 }
+    expect(skadisSeam(wide)!.horizontal).toBe(60)
+    expect(skadisSeam(wide)!.vertical).toBe(40)
+    expect(skadisSeamIsUniform(wide)).toBe(false)
+
+    const tall = { ...standard, height: 590 }
+    expect(skadisSeam(tall)!.vertical).toBe(70)
+    expect(skadisSeamIsUniform(tall)).toBe(false)
+  })
+
+  it('snaps down to the nearest size with a uniform seam on both axes', () => {
+    const snapped = snapToUniformSeam({ ...standard, width: 380, height: 590 })
+    expect(snapped).toEqual({ width: 360, height: 560 })
+    expect(skadisSeamIsUniform({ ...standard, ...snapped })).toBe(true)
+  })
+
+  it('leaves an already uniform board untouched', () => {
+    expect(snapToUniformSeam(standard)).toEqual({ width: 360, height: 560 })
+  })
+
+  it('never snaps upwards', () => {
+    for (const width of [361, 375, 399, 400]) {
+      const snapped = snapToUniformSeam({ ...standard, width })
+      expect(snapped.width).toBeLessThanOrEqual(width)
+      expect(skadisSeamIsUniform({ ...standard, width: snapped.width })).toBe(true)
+    }
+  })
+
+  it('leaves the board alone when no size can make the seam uniform', () => {
+    // The seam is the sum of the two edge margins, so it can never be smaller
+    // than 2 * margin. With a margin wider than half the pitch no board size
+    // helps, and the snap must report that by changing nothing.
+    const roomy = { ...standard, margin: 30, width: 400, height: 600 }
+    expect(skadisSeam(roomy)!.horizontal).toBeGreaterThanOrEqual(2 * roomy.margin)
+    expect(skadisSeamIsUniform(roomy)).toBe(false)
+    expect(snapToUniformSeam(roomy)).toEqual({ width: 400, height: 600 })
+  })
+
+  it('snaps with a narrow margin that leaves the pattern room to line up', () => {
+    const narrow = { ...standard, margin: 10, width: 383, height: 604 }
+    const snapped = snapToUniformSeam(narrow)
+    expect(skadisSeamIsUniform({ ...narrow, ...snapped })).toBe(true)
+    expect(snapped.width).toBeLessThanOrEqual(383)
+    expect(snapped.height).toBeLessThanOrEqual(604)
   })
 })

@@ -46,7 +46,8 @@ export function startOptimization(input: OptimizerWorkerRequest): OptimizationTa
         finish()
         reject(new Error(event.message || 'Optimizer worker failed'))
       }
-      // Vue can leave nested reactive wrappers even after a shallow spread.
+      // Svelte $state proxies are not structured-cloneable, and a shallow
+      // spread can still leave nested proxies behind.
       // The worker protocol is JSON-shaped, so serialize once to guarantee a
       // cloneable snapshot and a strict boundary between UI and calculation.
       const snapshot = JSON.parse(JSON.stringify(input)) as OptimizerWorkerRequest

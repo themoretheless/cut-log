@@ -16,7 +16,7 @@ distributed system.
 
 ```mermaid
 flowchart LR
-  UI["Pages and components"] --> FX["Vue composables"]
+  UI["Pages and components"] --> FX["Runes composables"]
   UI --> PURE["Pure TypeScript modules"]
   FX --> PURE
   FX --> SVC["Optimizer service"]
@@ -32,9 +32,9 @@ flowchart LR
 
 There are two product flows:
 
-- **Cutting Optimizer:** Vue editor -> validated state -> cancellable Worker ->
+- **Cutting Optimizer:** Svelte editor -> validated state -> cancellable Worker ->
   WASM adapter -> fallible Rust core -> typed result -> accessible sheet cards.
-- **Box Builder:** Vue controls -> normalized constraints -> one geometry source
+- **Box Builder:** Svelte controls -> normalized constraints -> one geometry source
   -> SVG and Three.js renderers, each with explicit resource ownership.
 
 Nothing leaves the browser. Project persistence uses local browser storage;
@@ -45,10 +45,10 @@ input when opened.
 
 | Layer | Current paths | Owns | Must not own |
 |---|---|---|---|
-| Contracts | `frontend/src/services/types.ts` | Cross-layer data shapes | Vue refs, DOM, storage |
-| Pure domain/presentation logic | `frontend/src/lib/*`, `box/constraints.ts`, `box/geometry.ts` | Parsing, validation, limits, transforms, serialization, geometry, presentational calculations | Vue, browser effects, translations, Worker lifecycle |
+| Contracts | `frontend/src/services/types.ts` | Cross-layer data shapes | Reactive state, DOM, storage |
+| Pure domain/presentation logic | `frontend/src/lib/*`, `box/constraints.ts`, `box/geometry.ts` | Parsing, validation, limits, transforms, serialization, geometry, presentational calculations | Svelte, browser effects, translations, Worker lifecycle |
 | Services | `frontend/src/services/*` | Worker protocol, WASM loading, JS/Rust adaptation | UI state, toasts, localStorage |
-| Reactive effects | `frontend/src/composables/*`, `box/useBoxModel.ts`, `box/three/*` | Timers, storage, listeners, reactive orchestration, WebGL lifecycle | Unrelated product concerns |
+| Reactive effects | `frontend/src/composables/*.svelte.ts`, `stores/l10n.svelte.ts`, `box/useBoxModel.svelte.ts`, `box/three/*` | Timers, storage, listeners, reactive orchestration, WebGL lifecycle | Unrelated product concerns |
 | Presentation | `frontend/src/components/*`, `pages/*` | Labels, controls, layout, events, focus | Algorithms, persistence formats, resource allocation rules |
 | Rust core | `crates/core` | Packing models, algorithms, capacity invariant | Browser and CLI concerns |
 | Rust adapters | `crates/wasm`, `crates/cli`, `crates/ui` | Boundary conversion and output surfaces | Duplicate optimizer rules |
@@ -61,13 +61,13 @@ pages/components -> composables -> services -> Worker/WASM -> Rust core
         +----------------+------------> pure TypeScript/types
 ```
 
-Pure modules may depend on other pure modules and types. They never import Vue,
-components, composables, stores, `window`, localStorage, or Three.js. Services
-never import pages. A page may assemble several narrow modules, but it should
-not reimplement their policy. `frontend/scripts/check-boundaries.mjs` runs in
-both `npm test` and `npm run build` and machine-enforces: the layer import
-directions above (including `helpers/`), bare `vue`/`vue-router`/`three`
-imports in `lib/` and `helpers/`, and the page line budget. Direct `window` or
+Pure modules may depend on other pure modules and types. They never import
+Svelte, components, composables, stores, `window`, localStorage, or Three.js.
+Services never import pages. A page may assemble several narrow modules, but it
+should not reimplement their policy. `frontend/scripts/check-boundaries.mjs`
+runs in both `npm test` and `npm run build` and machine-enforces: the layer
+import directions above (including `helpers/`), bare `svelte`/`three`
+imports in `lib/` and `helpers/`, and the `pages/Home.svelte` line budget. Direct `window` or
 `localStorage` access in pure modules is not detectable by the import scanner
 and remains a review rule.
 
@@ -79,35 +79,42 @@ These principles are review rules, not reasons to add abstraction by default.
 
 - `optimizerLimits.ts` owns quantity-budget policy.
 - `optimizerWorker.ts` owns one calculation lifecycle.
-- `useHomeStorage.ts` owns storage timing and errors.
-- `useHomeHistory.ts` owns undo/redo timing and restore guards.
-- `useProjectSnapshots.ts` owns named-snapshot persistence.
-- `usePieceList.ts` owns piece CRUD, filters, transforms, and ordering.
+- `useHomeStorage.svelte.ts` owns storage timing and errors.
+- `useHomeHistory.svelte.ts` owns undo/redo timing and restore guards.
+- `useProjectSnapshots.svelte.ts` owns named-snapshot persistence.
+- `usePieceList.svelte.ts` owns piece CRUD, filters, transforms, and ordering.
 - `pieceIdentity.ts` owns opaque, unique source identity at trust boundaries.
-- `useProjectState.ts` owns project refs and detached read/apply/reset snapshots.
-- `useProjectActions.ts` owns named mutation effects: invalidation, persistence,
-  and history recording.
-- `useOptimizationSession.ts` owns Worker lifetime and the explicit
+- `useProjectState.svelte.ts` owns project state and detached read/apply/reset
+  snapshots.
+- `useProjectActions.svelte.ts` owns named mutation effects: invalidation,
+  persistence, and history recording.
+- `useOptimizationSession.svelte.ts` owns Worker lifetime and the explicit
   idle/running/success/error/cancelled state machine.
-- `useProjectActivity.ts` owns the operation trail plus snapshot comparison and
-  restore orchestration.
-- `useCommandPalette.ts` owns command search, enabled navigation, and execution.
-- `useCosting.ts` owns cost inputs and result-derived material totals.
-- `useResultSelection.ts` owns stable-ID selection and placement reconciliation.
-- `usePieceImport.ts` owns import preview, validation, capacity, and one commit.
-- `useKeyboardShortcuts.ts` owns shortcut matching and listener lifetime.
-- `useHomeExports.ts` owns optimizer download and print effects.
-- `useToast.ts` owns transient feedback lifecycle.
+- `useProjectActivity.svelte.ts` owns the operation trail plus snapshot
+  comparison and restore orchestration.
+- `useCommandPalette.svelte.ts` owns command search, enabled navigation, and
+  execution.
+- `useCosting.svelte.ts` owns cost inputs and result-derived material totals.
+- `useResultSelection.svelte.ts` owns stable-ID selection and placement
+  reconciliation.
+- `usePieceImport.svelte.ts` owns import preview, validation, capacity, and one
+  commit.
+- `useKeyboardShortcuts.svelte.ts` owns shortcut matching and listener lifetime.
+- `useHomeExports.svelte.ts` owns optimizer download and print effects.
+- `useToast.svelte.ts` owns transient feedback lifecycle.
+- `stores/l10n.svelte.ts` owns the active language and translation lookup.
+- `router.svelte.ts` owns the current path, `navigate()`, and lazy route lookup.
 - `sheetPresentation.ts` owns SVG display calculations.
-- `SheetCard.vue` owns rendering and selection events for one sheet.
-- `ProjectInputPanel.vue`, `ProjectActivityPanel.vue`, `PieceEditorPanel.vue`,
-  and `OptimizationWorkspace.vue` own cohesive Home presentation regions.
-- `RouteErrorBoundary.vue` owns route render recovery without clearing browser
-  project storage.
+- `SheetCard.svelte` owns rendering and selection events for one sheet.
+- `ProjectInputPanel.svelte`, `ProjectActivityPanel.svelte`,
+  `PieceEditorPanel.svelte`, and `OptimizationWorkspace.svelte` own cohesive
+  Home presentation regions.
+- `App.svelte` owns route render recovery without clearing browser project
+  storage.
 - `constraints.ts` owns legal box parameter relationships.
 - Three.js scene modules own and dispose every GPU resource they create.
 
-`Home.vue` is now a 710-line composition surface, down from 1,683 lines. Input,
+`Home.svelte` is now a 710-line composition surface, down from 1,683 lines. Input,
 activity, piece editing, and optimization rendering are cohesive components;
 project activity and Worker state have dedicated effect owners. Named project
 actions use a complete side-effect registry, and the dependency check enforces
@@ -130,7 +137,9 @@ the practical enforcement mechanism.
 
 ### Interface Segregation
 
-Composables expose narrow capabilities: history returns undo/redo actions,
+Composables are runes modules that return objects with getter properties, so
+call sites read plain values. They expose narrow capabilities: history returns
+undo/redo actions,
 snapshots return persistence actions, and exports return explicit commands.
 Components receive only the data and callbacks they render. Avoid a giant
 “editor context” whose consumers depend on unrelated state.
@@ -167,7 +176,7 @@ This order avoids starting with either large page:
 2. **Safety rules:** `lib/optimizerLimits.ts`, `lib/validatePiece.ts`, then
    their adjacent tests. These are the trust boundary before expansion.
 3. **Project state:** `lib/homeState.ts`, `shareLink.ts`, `history.ts`, and
-   `projectSnapshots.ts`, then `composables/useProjectState.ts` for reactive
+   `projectSnapshots.ts`, then `composables/useProjectState.svelte.ts` for reactive
    ownership. The format modules remain framework-free.
 4. **Editor behavior:** read the small command, costing, result-selection, and
    import composables beside their tests, then `pieceOps.ts`, `pieceEditor.ts`,
@@ -177,10 +186,11 @@ This order avoids starting with either large page:
 6. **Rust path:** `crates/core/src/models.rs`, `optimizer.rs`, then the thin
    `crates/wasm/src/lib.rs` and `crates/cli/src/main.rs` adapters.
 7. **Result presentation:** `lib/sheetPresentation.ts` and
-   `components/SheetCard.vue`. Only after that open `pages/Home.vue` to see how
-   the parts are composed.
-8. **Box path:** `box/constraints.ts` -> `geometry.ts` -> `useBoxModel.ts` ->
-   the two `box/three` scene modules -> `pages/BoxBuilder.vue`.
+   `components/SheetCard.svelte`. Only after that open `pages/Home.svelte` to
+   see how the parts are composed.
+8. **Box path:** `box/constraints.ts` -> `geometry.ts` ->
+   `useBoxModel.svelte.ts` -> the two `box/three` scene modules ->
+   `pages/BoxBuilder.svelte`.
 
 A useful study loop is: read a test, read its small implementation, change one
 case, run that test, then inspect the caller. Large pages become integration
@@ -205,30 +215,36 @@ frontend/src/
     optimizerWorker.ts        cancellable UI-side Worker owner
     optimizer.worker.ts       Worker endpoint
     rustService.ts            lazy WASM adapter
-  composables/
-    useHomeStorage.ts         debounced persistence and failure callback
-    useHomeHistory.ts         coalesced undo/redo and guarded restore
-    useProjectSnapshots.ts    named-snapshot storage and CRUD
-    usePieceList.ts           piece state, filtering, bulk edits, ordering
-    useProjectState.ts        project refs and detached read/apply/reset
-    useCommandPalette.ts      command filtering, navigation, execution
-    useCosting.ts             cost state and derived result summary
-    useResultSelection.ts     ID selection and placement reconciliation
-    usePieceImport.ts         preview, validation, capacity, atomic commit
-    useKeyboardShortcuts.ts   exact shortcut matching and listener lifetime
-    useHomeExports.ts         CSV/SVG/DXF downloads and print orchestration
-    useToast.ts               transient status/error lifecycle
+  composables/                 runes modules exposing getter-based interfaces
+    useHomeStorage.svelte.ts      debounced persistence and failure callback
+    useHomeHistory.svelte.ts      coalesced undo/redo and guarded restore
+    useProjectSnapshots.svelte.ts named-snapshot storage and CRUD
+    usePieceList.svelte.ts        piece state, filtering, bulk edits, ordering
+    useProjectState.svelte.ts     project state and detached read/apply/reset
+    useCommandPalette.svelte.ts   command filtering, navigation, execution
+    useCosting.svelte.ts          cost state and derived result summary
+    useResultSelection.svelte.ts  ID selection and placement reconciliation
+    usePieceImport.svelte.ts      preview, validation, capacity, atomic commit
+    useKeyboardShortcuts.svelte.ts exact shortcut matching and listener lifetime
+    useHomeExports.svelte.ts      CSV/SVG/DXF downloads and print orchestration
+    useToast.svelte.ts            transient status/error lifecycle
+  stores/
+    l10n.svelte.ts            active language and translation lookup
   components/
-    NumberField.vue           bounded accessible numeric control
-    SheetCard.vue             one accessible result-sheet view
+    NumberField.svelte        bounded accessible numeric control
+    SheetCard.svelte          one accessible result-sheet view
   box/
     constraints.ts            legal parameter relationships
     geometry.ts               paths, panel geometry, layout source of truth
-    useBoxModel.ts            reactive composition and labels
+    useBoxModel.svelte.ts     reactive composition and labels
     three/                    assembly/gallery lifecycle and disposal
   pages/
-    Home.vue                  optimizer and cross-feature composition
-    BoxBuilder.vue            box composition and presentation
+    Home.svelte               optimizer and cross-feature composition
+    BoxBuilder.svelte         box composition and presentation
+    SkadisBuilder.svelte      SKADIS board composition and presentation
+    NotFound.svelte           unmatched-path fallback
+  router.svelte.ts            path state, navigate(), lazy route lookup
+  App.svelte                  shell, navigation, and route error fallback
 
 crates/
   core/                       fallible optimizer and data models
@@ -266,7 +282,7 @@ Required invariants:
 
 - At most 1,000 copies of one piece and 2,000 expanded pieces per request.
 - Every boundary fails explicitly before excessive expansion.
-- Worker payloads are plain data, never Vue proxies.
+- Worker payloads are plain data, never reactive `$state` proxies.
 - A stale or cancelled run cannot replace a newer result.
 - Placed pieces must eventually be checked for bounds and overlap (`CL-031`,
   `CL-032`).

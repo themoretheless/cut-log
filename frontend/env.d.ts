@@ -1,7 +1,3 @@
 /// <reference types="vite/client" />
+/// <reference types="svelte" />
 declare const __PKG_VERSION__: string
-declare module '*.vue' {
-  import type { DefineComponent } from 'vue'
-  const component: DefineComponent<{}, {}, any>
-  export default component
-}

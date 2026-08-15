@@ -47,10 +47,10 @@ CutLog — локальный браузерный набор инструмен
    `optimizer.worker.ts` -> `rustService.ts` — один запуск расчета.
 4. `crates/core/src/models.rs` и `optimizer.rs` — чистое ядро; WASM и CLI лишь
    адаптеры.
-5. `lib/sheetPresentation.ts` и `components/SheetCard.vue` — представление
-   результата; после них проще читать `pages/Home.vue`.
-6. Коробка: `box/constraints.ts` -> `geometry.ts` -> `useBoxModel.ts` ->
-   `box/three/*` -> `pages/BoxBuilder.vue`.
+5. `lib/sheetPresentation.ts` и `components/SheetCard.svelte` — представление
+   результата; после них проще читать `pages/Home.svelte`.
+6. Коробка: `box/constraints.ts` -> `geometry.ts` -> `useBoxModel.svelte.ts` ->
+   `box/three/*` -> `pages/BoxBuilder.svelte`.
 
 В [ARCHITECTURE.md](ARCHITECTURE.md) есть правила слоев, SOLID/DRY-карта,
 диаграммы, три выполненные итерации и порядок следующих небольших рефакторингов.
@@ -63,10 +63,10 @@ pages/components -> composables -> services -> Worker/WASM -> Rust core
         +----------------+------------> pure TypeScript/types
 ```
 
-Чистые модули не импортируют Vue и браузерные эффекты. Страницы собирают
+Чистые модули не импортируют Svelte и браузерные эффекты. Страницы собирают
 компоненты и composables, но не должны повторять в себе правила валидации,
 хранения, геометрии и экспорта. Главный оставшийся долг — оркестрация в
-`Home.vue`; она будет выноситься целыми ответственностями, а не механическими
+`Home.svelte`; она будет выноситься целыми ответственностями, а не механическими
 кусочками строк.
 
 ## Ревью из 500 пунктов
@@ -125,7 +125,7 @@ echo '{
 cargo test --workspace
 cd frontend
 npm test
-npx vue-tsc --noEmit
+npm run check
 npm run build
 ```
 

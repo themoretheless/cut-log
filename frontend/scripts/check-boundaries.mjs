@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 
 const srcRoot = fileURLToPath(new URL('../src/', import.meta.url))
-const sourceExtensions = new Set(['.ts', '.vue'])
+const sourceExtensions = new Set(['.ts', '.svelte'])
 
 const forbiddenTargets = {
   lib: new Set(['box', 'components', 'composables', 'pages', 'services', 'stores']),
@@ -16,10 +16,10 @@ const forbiddenTargets = {
   stores: new Set(['box', 'components', 'composables', 'pages', 'services']),
 }
 
-// Pure layers must stay framework-free: no Vue reactivity, no router, no Three.js.
+// Pure layers must stay framework-free: no Svelte reactivity, no Three.js.
 const forbiddenBareModules = {
-  lib: new Set(['vue', 'vue-router', 'three', '@vue']),
-  helpers: new Set(['vue', 'vue-router', 'three', '@vue']),
+  lib: new Set(['svelte', 'three']),
+  helpers: new Set(['svelte', 'three']),
 }
 
 function bareModuleBase(specifier) {
@@ -85,7 +85,7 @@ for (const file of sourceFiles(srcRoot)) {
 }
 
 const lineBudgets = new Map([
-  ['pages/Home.vue', 800],
+  ['pages/Home.svelte', 800],
 ])
 for (const [relative, limit] of lineBudgets) {
   const contents = fs.readFileSync(path.join(srcRoot, relative), 'utf8')
