@@ -86,12 +86,29 @@ export interface SkadisSeam {
   horizontal: number
   /** Distance between the outermost row centrelines across a horizontal joint. */
   vertical: number
-  /** Geometry of the row and column the measurements were taken on. */
+  /** Geometry of the row and column the measurements are drawn on. */
   rowY: number
   rowLeft: number
   rowRight: number
+  /** Column to hang the vertical measurement on, stepped in from the edge. */
+  columnX: number
   columnTop: number
   columnBottom: number
+}
+
+/**
+ * Rows and columns carrying an annotation are stepped this far in from the
+ * edge, so the line does not sit on the outermost holes where the margin
+ * dimensions already are. Smaller grids fall back to whatever fits.
+ */
+export const ANNOTATION_INDENT = 2
+
+/**
+ * Picks the middle entry. Joint measurements hang here rather than near a
+ * corner, where the two joints and their annotations would pile up.
+ */
+function middle<T>(values: T[]): T {
+  return values[Math.floor((values.length - 1) / 2)]
 }
 
 /**
@@ -102,46 +119,42 @@ export function skadisSeam(settings: SkadisSettings): SkadisSeam | null {
   const slots = skadisSlots(settings)
   if (!slots.length) return null
 
-  const rows = new Map<number, { left: number; right: number }>()
+  const rows = new Map<number, number[]>()
   for (const slot of slots) {
     const row = rows.get(slot.y)
-    if (!row) rows.set(slot.y, { left: slot.x, right: slot.x })
-    else {
-      if (slot.x < row.left) row.left = slot.x
-      if (slot.x > row.right) row.right = slot.x
-    }
+    if (row) row.push(slot.x)
+    else rows.set(slot.y, [slot.x])
   }
 
-  let rowY = 0
-  let rowLeft = 0
-  let rowRight = 0
-  let horizontal = Infinity
-  for (const [y, { left, right }] of rows) {
-    const gap = settings.width - right + left
-    if (gap < horizontal) {
-      horizontal = gap
-      rowY = y
-      rowLeft = left
-      rowRight = right
-    }
-  }
+  const measured = [...rows.entries()]
+    .map(([y, xs]) => {
+      const sorted = [...xs].sort((a, b) => a - b)
+      return { y, xs: sorted, gap: settings.width - sorted[sorted.length - 1] + sorted[0] }
+    })
+    .sort((a, b) => a.y - b.y)
 
-  const ys = slots.map(slot => slot.y)
-  const columnTop = Math.min(...ys)
-  const columnBottom = Math.max(...ys)
+  const horizontal = Math.min(...measured.map(row => row.gap))
+  // Every other row carries the closest facing pair, so there is a choice of
+  // rows to draw on: hang it halfway down the board, clear of the corner where
+  // the horizontal and vertical joints meet.
+  const drawn = middle(measured.filter(row => Math.abs(row.gap - horizontal) < 1e-6))
+
+  const ys = measured.map(row => row.y)
+  const columnTop = ys[0]
+  const columnBottom = ys[ys.length - 1]
 
   return {
     horizontal,
     vertical: settings.height - columnBottom + columnTop,
-    rowY,
-    rowLeft,
-    rowRight,
+    rowY: drawn.y,
+    rowLeft: drawn.xs[0],
+    rowRight: drawn.xs[drawn.xs.length - 1],
+    columnX: middle(drawn.xs),
     columnTop,
     columnBottom,
   }
 }
 
-/** True when the grid continues across both joints at the nominal pitch. */
 export function skadisSeamIsUniform(settings: SkadisSettings): boolean {
   const seam = skadisSeam(settings)
   if (!seam) return false

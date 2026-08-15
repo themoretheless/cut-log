@@ -6,6 +6,8 @@ CutLog is a local-first browser workspace for flat-sheet fabrication:
   optional rotation, and multiple guillotine heuristics.
 - **Box Builder** creates a parametric finger-joint box, previews the assembly
   and individual panels in 3D, and exports laser-ready SVG paths.
+- **SKADIS Board** generates a parametric pegboard compatible with the IKEA
+  SKADIS accessory grid and exports it as SVG or DXF.
 
 The interface is available in English and Russian. Geometry, optimization, and
 project storage stay in the browser; no project data is uploaded.
@@ -38,6 +40,20 @@ project storage stay in the browser; no project data is uploaded.
 - Live Three.js assembly and piece gallery with owned GPU cleanup and a
   hidden-tab rendering pause.
 - Per-piece and full-layout SVG export.
+
+### SKADIS Board
+
+- Parametric slot grid from board size, slot size, pitch, edge margin, and the
+  row and column stagger, with a check against the standard SKADIS geometry.
+- A drawing-style preview with edge margins and pitch measured to the slot
+  centrelines, and a zoomable, pannable viewport whose annotation keeps a
+  constant on-screen size.
+- A 3x3 tiling view that shows the assembled size and the slot spacing across
+  the joint between neighbouring boards, flagging a board size that breaks the
+  pattern.
+- A snap that shrinks the board to the nearest size whose holes stay evenly
+  spaced both inside the board and across the joint.
+- Millimetre SVG and DXF output for laser and CNC.
 
 ## Start here
 

@@ -2,7 +2,7 @@
   import NumberField from '../components/NumberField.svelte'
   import { downloadFile } from '../lib/downloadFile'
   import { useL10n } from '../stores/l10n.svelte'
-  import { skadisDxf, skadisSeam, skadisSeamIsUniform, skadisSlots, skadisSvg, snapToUniformSeam, type SkadisSettings } from '../skadis/geometry'
+  import { ANNOTATION_INDENT, skadisDxf, skadisSeam, skadisSeamIsUniform, skadisSlots, skadisSvg, snapToUniformSeam, type SkadisSettings } from '../skadis/geometry'
 
   const l10n = useL10n()
 
@@ -30,7 +30,50 @@
 
   /** Drawing unit scaled to the board, so annotations stay readable at any size. */
   const unit = $derived(Math.max(settings.width, settings.height) / 100)
-  const previewPadding = $derived(showDimensions ? unit * 11 : Math.max(settings.width, settings.height) * 0.025)
+
+  /**
+   * Screen pixels per drawing unit, read from the live transform. It changes
+   * with the zoom, the board size and the size of the preview pane, so the
+   * annotation cannot be sized from the drawing alone.
+   */
+  let pixelsPerUnit = $state(1)
+  let paneWidth = $state(0)
+  let paneHeight = $state(0)
+
+  /**
+   * Annotation glyph size expressed in drawing units but pinned to a constant
+   * size on screen: labels stay legible at every zoom level and on every pane
+   * width, instead of shrinking to a few pixels when zoomed in. Positions still
+   * follow the drawing, only the glyphs hold their size.
+   */
+  const ANNOTATION_PX = 7
+  const glyph = $derived(ANNOTATION_PX / pixelsPerUnit)
+
+  /**
+   * Gutter reserved around the drawing for the annotation, in screen pixels.
+   * The annotation itself is screen-sized, so a gutter measured in drawing
+   * units would clip the labels whenever the board is large or the pane small.
+   */
+  const ANNOTATION_GUTTER_PX = 78
+  const BARE_GUTTER_PX = 10
+
+  /**
+   * Gutter converted to drawing units. Solving it directly instead of scaling
+   * a drawing-unit guess avoids a feedback loop: the gutter would change the
+   * fitted scale, which would change the gutter. Reserving a fixed number of
+   * screen pixels simply takes them off the viewport before fitting.
+   */
+  const previewPadding = $derived.by(() => {
+    const box = showTiled ? tiledBounds : { left: 0, top: 0, right: settings.width, bottom: settings.height }
+    const boxWidth = box.right - box.left
+    const boxHeight = box.bottom - box.top
+    const gutter = showDimensions ? ANNOTATION_GUTTER_PX : BARE_GUTTER_PX
+    const fallback = Math.max(settings.width, settings.height) * (showDimensions ? 0.11 : 0.025)
+    if (!paneWidth || !paneHeight || boxWidth <= 0 || boxHeight <= 0) return fallback
+    const scale = Math.min((paneWidth - 2 * gutter) / boxWidth, (paneHeight - 2 * gutter) / boxHeight)
+    if (!(scale > 0)) return fallback
+    return gutter / scale
+  })
 
   /**
    * Bounding box of the slot centres. Dimensions follow the drawing convention of
@@ -100,10 +143,17 @@
     ]
   })
 
+  /** Row the inside annotations sit on, stepped in from the edge where the
+   * margin dimensions already are. Small grids fall back to the first row. */
+  const annotationRow = $derived.by(() => {
+    const rows = [...new Set(slots.map(slot => slot.y))].sort((a, b) => a - b)
+    return rows.length ? rows[Math.min(ANNOTATION_INDENT, rows.length - 1)] : null
+  })
+
   /**
-   * Centre-to-centre spacing: between the first pair of slots in the top row
-   * (drawn on the row centreline) and between the first two rows (drawn on a
-   * dimension track to the right of the board).
+   * Centre-to-centre spacing: between the first pair of slots in the annotation
+   * row (drawn on that row centreline) and between the first two rows (drawn on
+   * a dimension track to the right of the board).
    */
   const pitchDimensions = $derived.by<Dimension[]>(() => {
     const b = gridBounds
@@ -112,8 +162,9 @@
     const list = slots
     const dims: Dimension[] = []
 
-    const topRow = list.filter(slot => slot.y === b.top).map(slot => slot.x).sort((a, c) => a - c)
-    if (topRow.length >= 2) dims.push(horizontalDim(topRow[0], topRow[1], b.top, u * 1.3, u))
+    const row = annotationRow ?? b.top
+    const rowSlots = list.filter(slot => slot.y === row).map(slot => slot.x).sort((a, c) => a - c)
+    if (rowSlots.length >= 2) dims.push(horizontalDim(rowSlots[0], rowSlots[1], row, u * 1.3, u))
 
     const rows = [...new Set(list.map(slot => slot.y))].sort((a, c) => a - c)
     if (rows.length >= 2) dims.push(verticalDim(rows[0], rows[1], settings.width + u * 4, -u * 1.4, u))
@@ -216,7 +267,7 @@
     // is the same slot shifted by the board size.
     return [
       horizontalDim(-settings.width + s.rowRight, s.rowLeft, s.rowY, u * 1.3, u),
-      verticalDim(-settings.height + s.columnBottom, s.columnTop, s.rowLeft, -u * 1.4, u),
+      verticalDim(-settings.height + s.columnBottom, s.columnTop, s.columnX, -u * 1.4, u),
     ]
   })
 
@@ -227,8 +278,8 @@
     return [
       { x1: -settings.width + s.rowRight, y1: s.rowY, x2: -settings.width + s.rowRight, y2: s.rowY - u * 2.2 },
       { x1: s.rowLeft, y1: s.rowY, x2: s.rowLeft, y2: s.rowY - u * 2.2 },
-      { x1: s.rowLeft, y1: -settings.height + s.columnBottom, x2: s.rowLeft - u * 2.2, y2: -settings.height + s.columnBottom },
-      { x1: s.rowLeft, y1: s.columnTop, x2: s.rowLeft - u * 2.2, y2: s.columnTop },
+      { x1: s.columnX, y1: -settings.height + s.columnBottom, x2: s.columnX - u * 2.2, y2: -settings.height + s.columnBottom },
+      { x1: s.columnX, y1: s.columnTop, x2: s.columnX - u * 2.2, y2: s.columnTop },
     ]
   })
 
@@ -258,22 +309,6 @@
 
   const isFitted = $derived(zoom === 1 && panX === 0 && panY === 0)
 
-  /**
-   * Screen pixels per drawing unit, read from the live transform. It changes
-   * with the zoom, the board size and the size of the preview pane, so the
-   * annotation cannot be sized from the drawing alone.
-   */
-  let pixelsPerUnit = $state(1)
-
-  /**
-   * Annotation glyph size expressed in drawing units but pinned to a constant
-   * size on screen: labels stay legible at every zoom level and on every pane
-   * width, instead of shrinking to a few pixels when zoomed in. Positions still
-   * follow the drawing, only the glyphs hold their size.
-   */
-  const ANNOTATION_PX = 7
-  const glyph = $derived(ANNOTATION_PX / pixelsPerUnit)
-
   const view = $derived.by(() => {
     const b = baseView
     const w = b.w / zoom
@@ -292,6 +327,10 @@
     const sync = () => {
       const scale = el.getScreenCTM()?.a
       if (scale && Number.isFinite(scale) && scale > 0) pixelsPerUnit = scale
+      if (el.clientWidth > 0 && el.clientHeight > 0) {
+        paneWidth = el.clientWidth
+        paneHeight = el.clientHeight
+      }
     }
     sync()
     const observer = new ResizeObserver(sync)
@@ -598,7 +637,7 @@
               </g>
             {/each}
 
-            {#if showTiled}
+            {#if showTiled && showDimensions}
               <g class="dim-layer dim-layer-total">
                 {#each tiledExtensions as line, index (`total-ext-${index}`)}
                   <line
@@ -657,7 +696,9 @@
               </g>
             {/if}
 
-            {#if showDimensions && gridBounds}
+            <!-- Single-board details need the outside gutter, which the tiled view
+                 gives to the neighbouring boards, so they are shown alone. -->
+            {#if showDimensions && !showTiled && gridBounds}
               <g class="dim-layer">
                 <rect
                   class="dim-margin-box"
@@ -744,23 +785,29 @@
 .preview-card { min-height: 560px; }
 .slot-count { color: var(--accent); font-size: .8rem; font-weight: 600; }
 .board-preview { height: min(62vh, 610px); min-height: 390px; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--svg-bg); }
-.board-preview svg { width: 100%; height: 100%; padding: 20px; }
+.board-preview svg { width: 100%; height: 100%; }
 .board-shadow { fill: rgba(0,0,0,.28); }
 .board-shape { fill: var(--piece-bg); stroke: var(--heading); stroke-width: 1.5; }
 .board-slot { fill: var(--bg); stroke: var(--border-input); stroke-width: .35; }
-.head-actions { display: flex; align-items: center; gap: 14px; }
+/* The head carries the title, two toggles, the slot count and the zoom
+   controls, which stops fitting on one line well before the mobile
+   breakpoint, so both rows are allowed to wrap. */
+.card-head { flex-wrap: wrap; gap: 8px 14px; }
+.head-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; }
 .head-actions .check-row { margin-top: 0; font-size: .78rem; color: var(--muted); white-space: nowrap; }
 .head-actions .check-row input { width: 14px; height: 14px; }
 /* The markers live in <defs> outside the dimension groups, so --dim has to be
    declared on the svg itself: a custom property set on .dim-layer would not
    reach them, and fill: var(--dim) would fall back to black. */
 .board-preview svg { --dim: #e8842a; }
-.dim-layer { --dim: #e8842a; }
-.dim-layer-total { opacity: .5; }
+/* The whole annotation sits at half opacity: it has to stay readable over the
+   slots without competing with the geometry it measures. Every layer shares
+   the value, so the total-size dimensions no longer need their own. */
+.dim-layer { --dim: #e8842a; opacity: .5; }
 /* The seam spacing stays full strength: it is the number that decides whether
    the hole grid continues onto the next board. */
 .dim-layer-seam.mismatch { --dim: var(--alert-warn-tx); }
-.zoom-controls { display: flex; align-items: center; gap: 4px; margin-top: 12px; }
+.zoom-controls { display: flex; align-items: center; gap: 4px; }
 .zoom-level { min-width: 3.4em; text-align: center; color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
 .board-preview svg { touch-action: none; }
 .board-preview svg.zoomed { cursor: grab; }

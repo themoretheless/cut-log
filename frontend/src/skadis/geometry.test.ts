@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { skadisDxf, skadisSeam, skadisSeamIsUniform, skadisSlots, skadisSvg, snapToUniformSeam, type SkadisSettings } from './geometry'
+import { ANNOTATION_INDENT, skadisDxf, skadisSeam, skadisSeamIsUniform, skadisSlots, skadisSvg, snapToUniformSeam, type SkadisSettings } from './geometry'
 
 const standard: SkadisSettings = {
   width: 360,
@@ -140,5 +140,31 @@ describe('SKADIS geometry', () => {
     expect(skadisSeamIsUniform({ ...narrow, ...snapped })).toBe(true)
     expect(snapped.width).toBeLessThanOrEqual(383)
     expect(snapped.height).toBeLessThanOrEqual(604)
+  })
+
+  it('hangs the seam measurement clear of both edges, not near a corner', () => {
+    const seam = skadisSeam(standard)!
+    const rows = [...new Set(skadisSlots(standard).map(slot => slot.y))].sort((a, b) => a - b)
+    // Only the line's position moves; the measured value stays the same.
+    expect(seam.horizontal).toBe(40)
+    expect(seam.rowY).toBeGreaterThan(rows[0])
+    expect(seam.rowY).toBeLessThan(rows[rows.length - 1])
+
+    const rowSlots = skadisSlots(standard).filter(slot => slot.y === seam.rowY).map(slot => slot.x).sort((a, b) => a - b)
+    expect(seam.columnX).toBeGreaterThan(rowSlots[0])
+    expect(seam.columnX).toBeLessThan(rowSlots[rowSlots.length - 1])
+  })
+
+  it('keeps the annotation indent available for single-board dimensions', () => {
+    // The page hangs the pitch dimension this far in from the edge row.
+    expect(ANNOTATION_INDENT).toBeGreaterThan(0)
+  })
+
+  it('falls back to what fits when the grid is too small to indent', () => {
+    const tiny = { ...standard, width: 100, height: 100 }
+    const seam = skadisSeam(tiny)!
+    const rowSlots = skadisSlots(tiny).filter(slot => slot.y === seam.rowY).map(slot => slot.x)
+    expect(rowSlots).toContain(seam.columnX)
+    expect(Number.isFinite(seam.horizontal)).toBe(true)
   })
 })
