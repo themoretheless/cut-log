@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { navigate } from '@/router.svelte'
+  import { navigate, routeHref } from '@/router.svelte'
   import { useL10n } from '@/stores/l10n.svelte'
 
   const l10n = useL10n()
@@ -17,7 +17,7 @@
     <div class="empty-icon">404</div>
     <p>{t('notfound.title')}</p>
     <p style="color: var(--muted); font-size: 0.85rem">{t('notfound.text')}</p>
-    <a href="/" class="btn btn-primary" style="margin-top: 16px" onclick={goHome}>
+    <a href={routeHref('/')} class="btn btn-primary" style="margin-top: 16px" onclick={goHome}>
       {t('nav.cutting')}
     </a>
   </div>

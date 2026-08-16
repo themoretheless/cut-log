@@ -29,9 +29,18 @@ window.addEventListener('popstate', () => {
   state.path = currentPath()
 })
 
+/**
+ * URL for a route under the deployment base. Links must carry it themselves:
+ * a middle click or a modified click never reaches the click handler, so a
+ * bare route path would leave the base out and land on a 404.
+ */
+export function routeHref(to: string): string {
+  return BASE + (to === '/' ? '/' : to)
+}
+
 export function navigate(to: string) {
   if (to === state.path) return
-  history.pushState(null, '', BASE + (to === '/' ? '/' : to))
+  history.pushState(null, '', routeHref(to))
   state.path = currentPath()
 }
 

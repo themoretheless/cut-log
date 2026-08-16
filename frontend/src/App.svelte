@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { Component } from 'svelte'
-  import { routerPath, matchRoute, navigate } from './router.svelte'
+  import { untrack, type Component } from 'svelte'
+  import { routerPath, matchRoute, navigate, routeHref } from './router.svelte'
   import { useL10n } from './stores/l10n.svelte'
 
   const l10n = useL10n()
@@ -36,11 +36,16 @@
     return () => { cancelled = true }
   })
 
+  // Mount only: the body writes and reads isDark, so tracking it would make
+  // every theme toggle re-read the stored theme and restart the star interval
+  // on top of the work toggleTheme already did.
   $effect(() => {
-    const saved = localStorage.getItem('theme')
-    isDark = saved !== 'light'
-    applyTheme()
-    if (isDark) startStars()
+    untrack(() => {
+      const saved = localStorage.getItem('theme')
+      isDark = saved !== 'light'
+      applyTheme()
+      if (isDark) startStars()
+    })
     return () => stopStars()
   })
 
@@ -96,20 +101,20 @@
 
 <nav class="page-nav">
   <div class="page-nav-links">
-    <a href="/" class="page-nav-link" class:active={path === '/'} onclick={e => link(e, '/')}>
+    <a href={routeHref('/')} class="page-nav-link" class:active={path === '/'} onclick={e => link(e, '/')}>
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
         <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
       </svg>
       {t('nav.cutting')}
     </a>
-    <a href="/box" class="page-nav-link" class:active={path === '/box'} onclick={e => link(e, '/box')}>
+    <a href={routeHref('/box')} class="page-nav-link" class:active={path === '/box'} onclick={e => link(e, '/box')}>
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
       </svg>
       {t('nav.box')}
     </a>
-    <a href="/skadis" class="page-nav-link" class:active={path === '/skadis'} onclick={e => link(e, '/skadis')}>
+    <a href={routeHref('/skadis')} class="page-nav-link" class:active={path === '/skadis'} onclick={e => link(e, '/skadis')}>
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <rect x="3" y="2" width="18" height="20" rx="2"/>
         <path d="M8 6v2M16 6v2M12 10v2M8 14v2M16 14v2"/>

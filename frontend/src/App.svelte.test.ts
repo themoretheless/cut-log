@@ -19,6 +19,9 @@ vi.mock('@/router.svelte', () => ({
   routerPath: () => '/',
   navigate: () => undefined,
   matchRoute: () => ({ path: '/', load: () => load() }),
+  // Stands in for a deployment under a base path, which is where a link that
+  // built its own href would send the reader to a 404.
+  routeHref: (to: string) => `/cut-log${to === '/' ? '/' : to}`,
 }))
 
 afterEach(() => {
@@ -83,4 +86,40 @@ describe('route error fallback', () => {
   // never finishes mounting, so it registers no effect to clean up and there is
   // no unmount to observe.
   it.skip('runs the failed route unmount hook exactly once', () => undefined)
+})
+
+describe('navigation links', () => {
+  it('point at the deployment base, so a modified click opens the right page', async () => {
+    load.mockResolvedValue({ default: RestoredRoute })
+    const { container } = render(App)
+    await settle()
+
+    const hrefs = Array.from(container.querySelectorAll('.page-nav-link')).map(a => a.getAttribute('href'))
+    expect(hrefs).toEqual(['/cut-log/', '/cut-log/box', '/cut-log/skadis'])
+  })
+})
+
+describe('theme setup', () => {
+  it('reads the stored theme once, so toggling does not restart the star loop', async () => {
+    load.mockResolvedValue({ default: RestoredRoute })
+    const getItem = vi.spyOn(Storage.prototype, 'getItem')
+    const setInterval = vi.spyOn(window, 'setInterval')
+
+    const { container } = render(App)
+    await settle()
+
+    const themeReadsOnMount = getItem.mock.calls.filter(([key]) => key === 'theme').length
+    const intervalsOnMount = setInterval.mock.calls.length
+
+    const toggle = container.querySelector('.theme-toggle') as HTMLButtonElement
+    await fireEvent.click(toggle)
+    await settle()
+    await fireEvent.click(toggle)
+    await settle()
+
+    // The mount effect must not run again: only toggleTheme drives the change.
+    expect(getItem.mock.calls.filter(([key]) => key === 'theme').length).toBe(themeReadsOnMount)
+    // Back on the dark theme, exactly one further interval was started.
+    expect(setInterval.mock.calls.length).toBe(intervalsOnMount + 1)
+  })
 })
