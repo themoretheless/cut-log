@@ -35,7 +35,7 @@ export function usePieceGallery(model: BoxModel) {
   // instead of every frame.
   function applyPieceOpacity() {
     if (!pGroup) return
-    const activeIdx = model.galIdx
+    const activeIdx = model.activeGalIdx
     pGroup.children.forEach((sub, i) => {
       const isActive = i === activeIdx
       sub.traverse(child => {
@@ -251,7 +251,7 @@ export function usePieceGallery(model: BoxModel) {
   function positionRing(angle: number) {
     if (!pGroup) return
     pGroup.userData.ringAngle = angle
-    const activeIdx = model.galIdx
+    const activeIdx = model.activeGalIdx
     pGroup.children.forEach((sub, i) => {
       const sa = (sub.userData.angle || 0) + angle
       sub.position.set(Math.sin(sa) * RING_RADIUS, -Math.cos(sa) * RING_RADIUS, ringLift(sa))
@@ -286,11 +286,11 @@ export function usePieceGallery(model: BoxModel) {
 
     if (!animate) {
       rebuildAllPieces()
-      positionRing(pieceAngle(model.galIdx))
+      positionRing(pieceAngle(model.activeGalIdx))
       setupPieceCam()
       applyPieceOpacity()
     } else {
-      const target = pieceAngle(model.galIdx)
+      const target = pieceAngle(model.activeGalIdx)
       const from = pGroup.userData.ringAngle ?? 0
       let delta = target - from
       while (delta > Math.PI) delta -= Math.PI * 2

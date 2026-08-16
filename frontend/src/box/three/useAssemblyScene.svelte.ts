@@ -204,7 +204,7 @@ export function useAssemblyScene(model: BoxModel, labelSource: BoxLabels | (() =
     const bh = model.backHoles3D(backY)
     const th = model.horizHoles3D(h, model.TopD, Math.max(Bevel, 0))
     const bth = model.horizHoles3D(0, model.BotD, Math.max(-Bevel, 0))
-    const sel = model.galPieces[model.galIdx]?.id ?? null
+    const sel = model.galPieces[model.activeGalIdx]?.id ?? null
     type TaggedPanel = PanelData & { gid: string; axis: number; sign: number }
     const panels: TaggedPanel[] = [
       { c: model.sidePts3D(0), n: [1, 0, 0], t: thick, col: '#2980b9', ec: '#1a5276', h: lh.length > 0 ? lh : undefined, gid: 'side', axis: 0, sign: -1 },

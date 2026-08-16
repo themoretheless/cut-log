@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // Runes need the client build of Svelte, which Vitest only resolves for a
 // browser-like environment; the model itself touches no DOM.
+import { tick } from 'svelte'
 import { describe, it, expect, afterEach } from 'vitest'
 import { useBoxModel } from './useBoxModel.svelte'
 
@@ -70,11 +71,12 @@ describe('useBoxModel', () => {
     m.Bevel = 40
     m.NShelves = 3
     m.galIdx = m.galPieces.length - 1 // select the last piece (a shelf)
-    expect(m.galIdx).toBeGreaterThan(3)
+    expect(m.activeGalIdx).toBeGreaterThan(3)
     m.Bevel = 0
     m.NShelves = 0 // gallery shrinks back to [side, tb, back]
     expect(m.galPieces.length).toBe(3)
-    expect(m.galIdx).toBe(2) // clamped to the new last index, not left dangling
+    expect(m.activeGalIdx).toBe(2) // clamped to the new last index, not left dangling
+    expect(m.galPieces[m.activeGalIdx]).toBeDefined()
   })
 
   it('computes cutting layout and stats reactively', () => {
@@ -193,5 +195,27 @@ describe('useBoxModel', () => {
     expect(new Set(pieces.map(piece => piece.id)).size).toBe(pieces.length)
     expect(m.pieceData('top').oh).toBe(m.TopD)
     expect(m.pieceData('back').oh).toBe(m.H)
+  })
+
+  it('does not tie the chosen index to the gallery contents', async () => {
+    // The page watches galIdx to animate the ring. If reading it depended on
+    // galPieces, every parameter change would look like a selection change and
+    // rebuild both Three.js scenes a second time.
+    const m = createModel()
+    m.NShelves = 3
+    m.galIdx = 1
+
+    const seen: number[] = []
+    const stop = $effect.root(() => {
+      $effect(() => { seen.push(m.galIdx) })
+    })
+    await tick()
+
+    m.W = m.W + 40
+    m.NShelves = 1
+    await tick()
+    stop()
+
+    expect(seen).toEqual([1])
   })
 })

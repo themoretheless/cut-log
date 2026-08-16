@@ -83,7 +83,7 @@
 
   // ── Download helpers ───────────────────────────────────────────────────────
   function galDlSvg() {
-    const p = model.galPieces[model.galIdx]
+    const p = model.galPieces[model.activeGalIdx]
     if (!p) return
     downloadFile(`${p.id}.svg`, wrapCutSvg(p.d, p.pw, p.ph, p.xOff), 'image/svg+xml')
   }
@@ -163,15 +163,15 @@
           <button class="piece3d-nav piece3d-reset" onclick={() => gallery.resetView()} title="Reset view">&#x21ba;</button>
         </div>
         <div class="gallery-3d-bar">
-          <span class="gallery-sel-title">{model.galPieces[model.galIdx]?.title} <small>({model.galPieces[model.galIdx]?.count} {t('box.pcs')}, {model.galPieces[model.galIdx]?.pw.toFixed(0)}&times;{model.galPieces[model.galIdx]?.ph.toFixed(0)} mm)</small></span>
+          <span class="gallery-sel-title">{model.galPieces[model.activeGalIdx]?.title} <small>({model.galPieces[model.activeGalIdx]?.count} {t('box.pcs')}, {model.galPieces[model.activeGalIdx]?.pw.toFixed(0)}&times;{model.galPieces[model.activeGalIdx]?.ph.toFixed(0)} mm)</small></span>
           <button class="btn-dl" onclick={galDlSvg}>&#x2193; SVG</button>
         </div>
         <div class="gallery-thumbs">
           {#each model.galPieces as p, i (p.id)}
             <button
               type="button"
-              class={['gallery-thumb', i === model.galIdx && 'active'].filter(Boolean).join(' ')}
-              aria-pressed={i === model.galIdx}
+              class={['gallery-thumb', i === model.activeGalIdx && 'active'].filter(Boolean).join(' ')}
+              aria-pressed={i === model.activeGalIdx}
               aria-label={`${p.title}, ${p.count} ${t('box.pcs')}`}
               onclick={() => { model.galIdx = i }}
             >

@@ -266,13 +266,15 @@ export function useBoxModel(labelSource: BoxLabels | (() => BoxLabels)) {
     set SheetH(v: number) { p.SheetH = v },
     get CutGap() { return p.CutGap },
     set CutGap(v: number) { p.CutGap = v },
-    // Kept in range against the current gallery: galPieces shrinks when the
-    // bevel toggles or the shelf count drops, and a stale galIdx would
-    // otherwise crash the gallery template (galPieces[galIdx].title on an
-    // out-of-range index). The Vue version clamped in a watch; here the
-    // getter clamps on read.
-    get galIdx() { return Math.max(0, Math.min(p.galIdx, galPieces.length - 1)) },
+    // The selection as chosen. Reading it must not depend on galPieces:
+    // watchers of the selection would then also fire on every parameter
+    // change, rebuilding both Three.js scenes a second time.
+    get galIdx() { return p.galIdx },
     set galIdx(v: number) { p.galIdx = v },
+    // The selection to render with. galPieces shrinks when the bevel toggles
+    // or the shelf count drops, and a stale index would otherwise index past
+    // the end of the gallery.
+    get activeGalIdx() { return Math.max(0, Math.min(p.galIdx, galPieces.length - 1)) },
     get paramLimits() { return paramLimits },
     get backInsetStep() { return backInsetStep },
     // derived dimensions
