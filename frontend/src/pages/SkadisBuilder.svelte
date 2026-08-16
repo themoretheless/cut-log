@@ -344,6 +344,18 @@
     panY = 0
   }
 
+  /**
+   * Keeps the visible window inside the fitted view, so the board cannot be
+   * dragged off screen leaving an empty pane with no way back but the reset.
+   */
+  function clampPan() {
+    const b = baseView
+    const limitX = Math.max(0, (b.w - b.w / zoom) / 2)
+    const limitY = Math.max(0, (b.h - b.h / zoom) / 2)
+    panX = Math.min(limitX, Math.max(-limitX, panX))
+    panY = Math.min(limitY, Math.max(-limitY, panY))
+  }
+
   /** Screen point to user units, so zooming can keep the cursor anchored. */
   function toUserSpace(clientX: number, clientY: number) {
     if (!svgEl) return null
@@ -376,6 +388,7 @@
     panX = x + w / 2 - (b.x + b.w / 2)
     panY = y + h / 2 - (b.y + b.h / 2)
     if (next === MIN_ZOOM) { panX = 0; panY = 0 }
+    else clampPan()
   }
 
   function onWheel(event: WheelEvent) {
@@ -443,6 +456,7 @@
     const scale = svgEl.getScreenCTM()?.a ?? 1
     panX -= (event.clientX - lastClient.x) / scale
     panY -= (event.clientY - lastClient.y) / scale
+    clampPan()
     lastClient = { x: event.clientX, y: event.clientY }
   }
 
@@ -450,6 +464,9 @@
     activePointers.delete(event.pointerId)
     svgEl?.releasePointerCapture(event.pointerId)
     if (activePointers.size < 2) pinchDistance = 0
+    // Dropping from three fingers to two leaves a distance measured between a
+    // pair that no longer exists, which would jump the zoom on the next move.
+    else pinchDistance = pinchState().distance
     if (event.pointerId === pointerId) {
       panning = false
       pointerId = null
@@ -472,10 +489,12 @@
       case '+': case '=': zoomBy(1.4); break
       case '-': case '_': zoomBy(1 / 1.4); break
       case '0': resetView(); break
-      case 'ArrowLeft': if (zoom > MIN_ZOOM) panX -= view.w * panStep; break
-      case 'ArrowRight': if (zoom > MIN_ZOOM) panX += view.w * panStep; break
-      case 'ArrowUp': if (zoom > MIN_ZOOM) panY -= view.h * panStep; break
-      case 'ArrowDown': if (zoom > MIN_ZOOM) panY += view.h * panStep; break
+      // While fitted there is nothing to pan, and swallowing the key would
+      // stop the page from scrolling for no action.
+      case 'ArrowLeft': if (zoom === MIN_ZOOM) return; panX -= view.w * panStep; clampPan(); break
+      case 'ArrowRight': if (zoom === MIN_ZOOM) return; panX += view.w * panStep; clampPan(); break
+      case 'ArrowUp': if (zoom === MIN_ZOOM) return; panY -= view.h * panStep; clampPan(); break
+      case 'ArrowDown': if (zoom === MIN_ZOOM) return; panY += view.h * panStep; clampPan(); break
       default: return
     }
     event.preventDefault()
@@ -804,8 +823,8 @@
    slots without competing with the geometry it measures. Every layer shares
    the value, so the total-size dimensions no longer need their own. */
 .dim-layer { --dim: #e8842a; opacity: .5; }
-/* The seam spacing stays full strength: it is the number that decides whether
-   the hole grid continues onto the next board. */
+/* A seam that breaks the pattern is the one number worth interrupting for, so
+   it swaps to the warning colour while keeping the shared half opacity. */
 .dim-layer-seam.mismatch { --dim: var(--alert-warn-tx); }
 .zoom-controls { display: flex; align-items: center; gap: 4px; }
 .zoom-level { min-width: 3.4em; text-align: center; color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
