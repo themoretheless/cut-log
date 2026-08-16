@@ -667,7 +667,7 @@
               </g>
 
               <!-- Slot spacing across the joint, in the same drawing style. -->
-              <g class="dim-layer dim-layer-seam" class:mismatch={!!seamSpacing && (seamSpacing.horizontal !== settings.pitch || seamSpacing.vertical !== settings.pitch)}>
+              <g class="dim-layer dim-layer-seam" class:mismatch={!seamIsUniform}>
                 {#each seamExtensions as line, index (`seam-ext-${index}`)}
                   <line
                     class="dim-extension"

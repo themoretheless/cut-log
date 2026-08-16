@@ -78,11 +78,32 @@ describe('SKADIS geometry', () => {
     expect(dxf.endsWith('0\nEOF\n')).toBe(true)
   })
 
-  it('reports a seam equal to the pitch when the grid continues across boards', () => {
+  it('reports each axis against the spacing that axis actually uses', () => {
     const seam = skadisSeam(standard)!
+    // Rows are staggered, so a column only holds every other row: down a
+    // column the holes really are two pitches apart, inside the board and
+    // across the joint alike.
     expect(seam.horizontal).toBe(40)
-    expect(seam.vertical).toBe(40)
+    expect(seam.horizontalStep).toBe(40)
+    expect(seam.vertical).toBe(80)
+    expect(seam.verticalStep).toBe(80)
     expect(skadisSeamIsUniform(standard)).toBe(true)
+  })
+
+  it('measures a column of a vertically staggered grid, not the bounding box', () => {
+    // Offsetting columns splits the rows into two interleaved lattices, so the
+    // outermost slots of the grid sit in different columns and never face each
+    // other across a horizontal joint.
+    const staggered = { ...standard, height: 580, rowOffsetPercent: 0, columnOffsetPercent: 50 }
+    const seam = skadisSeam(staggered)!
+    const column = skadisSlots(staggered).filter(slot => slot.x === seam.columnX).map(slot => slot.y)
+
+    expect(seam.vertical).toBe(60)
+    expect(seam.verticalStep).toBe(40)
+    expect(skadisSeamIsUniform(staggered)).toBe(false)
+    expect(Math.min(...column)).toBe(seam.columnTop)
+    expect(Math.max(...column)).toBe(seam.columnBottom)
+    expect(seam.vertical).toBe(staggered.height - seam.columnBottom + seam.columnTop)
   })
 
   it('measures the seam inside one row, not across the staggered bounding box', () => {
@@ -98,11 +119,12 @@ describe('SKADIS geometry', () => {
   it('detects a board size that breaks the pattern at the joint', () => {
     const wide = { ...standard, width: 380 }
     expect(skadisSeam(wide)!.horizontal).toBe(60)
-    expect(skadisSeam(wide)!.vertical).toBe(40)
+    expect(skadisSeam(wide)!.horizontalStep).toBe(40)
     expect(skadisSeamIsUniform(wide)).toBe(false)
 
     const tall = { ...standard, height: 590 }
-    expect(skadisSeam(tall)!.vertical).toBe(70)
+    expect(skadisSeam(tall)!.vertical).toBe(110)
+    expect(skadisSeam(tall)!.verticalStep).toBe(80)
     expect(skadisSeamIsUniform(tall)).toBe(false)
   })
 
@@ -155,16 +177,25 @@ describe('SKADIS geometry', () => {
     expect(seam.columnX).toBeLessThan(rowSlots[rowSlots.length - 1])
   })
 
-  it('keeps the annotation indent available for single-board dimensions', () => {
-    // The page hangs the pitch dimension this far in from the edge row.
-    expect(ANNOTATION_INDENT).toBeGreaterThan(0)
+  it('indents the single-board pitch dimension off the edge row', () => {
+    const rows = [...new Set(skadisSlots(standard).map(slot => slot.y))].sort((a, b) => a - b)
+    // The page hangs the pitch dimension on this row; it must exist and must
+    // not be the edge row the margin dimensions already occupy.
+    const annotationRow = rows[Math.min(ANNOTATION_INDENT, rows.length - 1)]
+    expect(annotationRow).toBeGreaterThan(rows[0])
+    expect(rows).toContain(annotationRow)
   })
 
-  it('falls back to what fits when the grid is too small to indent', () => {
+  it('keeps both drawn endpoints on real slots of a tiny grid', () => {
     const tiny = { ...standard, width: 100, height: 100 }
     const seam = skadisSeam(tiny)!
-    const rowSlots = skadisSlots(tiny).filter(slot => slot.y === seam.rowY).map(slot => slot.x)
-    expect(rowSlots).toContain(seam.columnX)
-    expect(Number.isFinite(seam.horizontal)).toBe(true)
+    const slots = skadisSlots(tiny)
+    const row = slots.filter(slot => slot.y === seam.rowY).map(slot => slot.x)
+    const column = slots.filter(slot => slot.x === seam.columnX).map(slot => slot.y)
+
+    expect(row).toContain(seam.rowLeft)
+    expect(row).toContain(seam.rowRight)
+    expect(column).toContain(seam.columnTop)
+    expect(column).toContain(seam.columnBottom)
   })
 })
