@@ -85,9 +85,11 @@ export function skadisSvg(settings: SkadisSettings): string {
     .join('\n')
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${fmt(width)}mm" height="${fmt(height)}mm" viewBox="0 0 ${fmt(width)} ${fmt(height)}">
-  <g fill="none" stroke="#ff0000" stroke-width="0.1">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="${fmt(width)}mm" height="${fmt(height)}mm" viewBox="0 0 ${fmt(width)} ${fmt(height)}">
+  <g id="board-contour" inkscape:groupmode="layer" inkscape:label="Board contour" fill="none" stroke="#ff0000" stroke-width="0.1">
     <rect x="0" y="0" width="${fmt(width)}" height="${fmt(height)}" rx="${fmt(radius)}" />
+  </g>
+  <g id="slots" inkscape:groupmode="layer" inkscape:label="Slots" fill="none" stroke="#ff0000" stroke-width="0.1">
 ${slots}
   </g>
 </svg>`
