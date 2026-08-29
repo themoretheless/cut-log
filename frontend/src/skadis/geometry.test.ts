@@ -71,6 +71,20 @@ describe('SKADIS geometry', () => {
     expect(svg).toContain('x="17.5" y="12.5" width="5" height="15" rx="2.5"')
   })
 
+  it('exports the board contour and slots as separate named SVG layers', () => {
+    const svg = skadisSvg(standard)
+    const contourLayer = svg.match(/<g id="board-contour"[\s\S]*?<\/g>/)?.[0]
+    const slotsLayer = svg.match(/<g id="slots"[\s\S]*?<\/g>/)?.[0]
+
+    expect(svg).toContain('xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"')
+    expect(contourLayer).toContain('inkscape:groupmode="layer"')
+    expect(contourLayer).toContain('<rect x="0" y="0" width="360" height="560"')
+    expect(contourLayer).not.toContain('x="17.5" y="12.5"')
+    expect(slotsLayer).toContain('inkscape:groupmode="layer"')
+    expect(slotsLayer).toContain('x="17.5" y="12.5" width="5" height="15"')
+    expect(slotsLayer).not.toContain('<rect x="0" y="0" width="360" height="560"')
+  })
+
   it('exports an ASCII DXF using millimeters', () => {
     const dxf = skadisDxf(standard)
     expect(dxf).toContain('$INSUNITS\n70\n4')
