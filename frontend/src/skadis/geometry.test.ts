@@ -71,18 +71,18 @@ describe('SKADIS geometry', () => {
     expect(svg).toContain('x="17.5" y="12.5" width="5" height="15" rx="2.5"')
   })
 
-  it('exports the board contour and slots as separate named SVG layers', () => {
+  it('exports every slot and the board contour as separate ordered top-level objects', () => {
     const svg = skadisSvg(standard)
-    const contourLayer = svg.match(/<g id="board-contour"[\s\S]*?<\/g>/)?.[0]
-    const slotsLayer = svg.match(/<g id="slots"[\s\S]*?<\/g>/)?.[0]
+    const slotObjects = [...svg.matchAll(/<rect [^>]*id="slot-(\d+)"[^>]*\/>/g)]
+    const contourIndex = svg.indexOf('id="board-contour"')
+    const lastSlotIndex = svg.lastIndexOf(`id="slot-${String(slotObjects.length).padStart(3, '0')}"`)
 
-    expect(svg).toContain('xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"')
-    expect(contourLayer).toContain('inkscape:groupmode="layer"')
-    expect(contourLayer).toContain('<rect x="0" y="0" width="360" height="560"')
-    expect(contourLayer).not.toContain('x="17.5" y="12.5"')
-    expect(slotsLayer).toContain('inkscape:groupmode="layer"')
-    expect(slotsLayer).toContain('x="17.5" y="12.5" width="5" height="15"')
-    expect(slotsLayer).not.toContain('<rect x="0" y="0" width="360" height="560"')
+    expect(svg).not.toContain('<g')
+    expect(slotObjects).toHaveLength(skadisSlots(standard).length)
+    expect(slotObjects[0][0]).toContain('id="slot-001" data-cut-order="1"')
+    expect(new Set(slotObjects.map(match => match[1])).size).toBe(slotObjects.length)
+    expect(svg).toContain(`id="board-contour" data-cut-order="${slotObjects.length + 1}"`)
+    expect(contourIndex).toBeGreaterThan(lastSlotIndex)
   })
 
   it('exports an ASCII DXF using millimeters', () => {
