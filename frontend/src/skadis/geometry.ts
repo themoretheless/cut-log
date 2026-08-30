@@ -80,18 +80,16 @@ export function skadisSvg(settings: SkadisSettings): string {
   const { width, height, cornerRadius, slotWidth, slotHeight } = settings
   const radius = Math.max(0, Math.min(cornerRadius, width / 2, height / 2))
   const slotRadius = Math.min(slotWidth, slotHeight) / 2
-  const slots = skadisSlots(settings)
-    .map(({ x, y }) => `    <rect x="${fmt(x - slotWidth / 2)}" y="${fmt(y - slotHeight / 2)}" width="${fmt(slotWidth)}" height="${fmt(slotHeight)}" rx="${fmt(slotRadius)}" />`)
+  const slotPositions = skadisSlots(settings)
+  const idWidth = Math.max(3, String(slotPositions.length).length)
+  const slots = slotPositions
+    .map(({ x, y }, index) => `  <rect x="${fmt(x - slotWidth / 2)}" y="${fmt(y - slotHeight / 2)}" width="${fmt(slotWidth)}" height="${fmt(slotHeight)}" rx="${fmt(slotRadius)}" id="slot-${String(index + 1).padStart(idWidth, '0')}" data-cut-order="${index + 1}" fill="none" stroke="#ff0000" stroke-width="0.1" />`)
     .join('\n')
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="${fmt(width)}mm" height="${fmt(height)}mm" viewBox="0 0 ${fmt(width)} ${fmt(height)}">
-  <g id="board-contour" inkscape:groupmode="layer" inkscape:label="Board contour" fill="none" stroke="#ff0000" stroke-width="0.1">
-    <rect x="0" y="0" width="${fmt(width)}" height="${fmt(height)}" rx="${fmt(radius)}" />
-  </g>
-  <g id="slots" inkscape:groupmode="layer" inkscape:label="Slots" fill="none" stroke="#ff0000" stroke-width="0.1">
+<svg xmlns="http://www.w3.org/2000/svg" width="${fmt(width)}mm" height="${fmt(height)}mm" viewBox="0 0 ${fmt(width)} ${fmt(height)}">
 ${slots}
-  </g>
+  <rect x="0" y="0" width="${fmt(width)}" height="${fmt(height)}" rx="${fmt(radius)}" id="board-contour" data-cut-order="${slotPositions.length + 1}" fill="none" stroke="#ff0000" stroke-width="0.1" />
 </svg>`
 }
 
