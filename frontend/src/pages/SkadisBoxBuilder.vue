@@ -1,46 +1,72 @@
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import NumberField from '@/components/NumberField.vue'
 import { downloadFile } from '@/lib/downloadFile'
 import { useL10n } from '@/stores/l10n'
-import { pointsToPath, skadisBox, skadisBoxDxf, skadisBoxLayout, skadisBoxSvg, type SkadisBoxSettings } from '@/skadis/box'
+import { skadisBox, skadisBoxStl, skadisBoxVariants, type SkadisBoxSettings, type SkadisBoxVariant } from '@/skadis/box'
+import { useSkadisScene } from '@/skadis/three/useSkadisScene'
 
 const { t } = useL10n()
 
 const settings = reactive<SkadisBoxSettings>({
-  slotSpan: 2,
-  height: 80,
-  depth: 60,
-  thickness: 4,
-  kerf: 0.1,
-  tabSize: 10,
+  ...skadisBoxVariants.tray as Required<Pick<SkadisBoxSettings, 'width' | 'height' | 'depth' | 'frontHeight' | 'dividers'>>,
+  wall: 2,
+  floor: 2,
+  hookWidth: 4.4,
+  hookEveryColumn: false,
   hookRows: 1,
   hookTop: 3,
   neckHeight: 8,
   lipRise: 5,
   lipDepth: 4,
-  clearance: 0.5,
+  clearance: 0.4,
   boardThickness: 5,
   slotWidth: 5,
   slotHeight: 15,
   pitch: 40,
 })
 
+const variants = Object.keys(skadisBoxVariants) as SkadisBoxVariant[]
+const activeVariant = computed<SkadisBoxVariant | null>(() =>
+  variants.find(id => Object.entries(skadisBoxVariants[id]).every(([key, value]) => settings[key as keyof SkadisBoxSettings] === value)) ?? null,
+)
+
+function applyVariant(id: SkadisBoxVariant) {
+  Object.assign(settings, skadisBoxVariants[id])
+  resetView.value = true
+}
+
 const model = computed(() => skadisBox(settings))
-const layout = computed(() => skadisBoxLayout(model.value))
-const padding = computed(() => Math.max(layout.value.width, layout.value.height, 1) * 0.04)
-const labelSize = computed(() => Math.max(layout.value.width, layout.value.height, 1) / 42)
+const volumeCm3 = computed(() => (model.value.volume / 1000).toFixed(1))
+const partCount = computed(() => model.value.parts.length)
+
+const viewer = ref<HTMLElement | null>(null)
+const scene = useSkadisScene()
+const resetView = ref(true)
+
+onMounted(() => {
+  if (viewer.value) scene.init(viewer.value)
+  scene.update(model.value, settings, true)
+  resetView.value = false
+})
+
+watch(model, next => {
+  scene.update(next, settings, resetView.value)
+  resetView.value = false
+})
+
+onBeforeUnmount(() => scene.dispose())
+
+function resetCamera() {
+  scene.update(model.value, settings, true)
+}
 
 function fileStem() {
-  return `skadis-box-${model.value.outerWidth}x${settings.height}x${settings.depth}`.replace(/[^a-z0-9.-]+/gi, '-')
+  return `skadis-box-${settings.width}x${settings.height}x${settings.depth}`.replace(/[^a-z0-9.-]+/gi, '-')
 }
 
-function downloadSvg() {
-  downloadFile(`${fileStem()}.svg`, skadisBoxSvg(settings), 'image/svg+xml')
-}
-
-function downloadDxf() {
-  downloadFile(`${fileStem()}.dxf`, skadisBoxDxf(settings), 'application/dxf')
+function downloadStl() {
+  downloadFile(`${fileStem()}.stl`, skadisBoxStl(settings), 'model/stl')
 }
 </script>
 
@@ -54,22 +80,38 @@ function downloadDxf() {
     <div class="main-layout">
       <aside class="panel panel-input">
         <section class="card">
+          <h2>{{ t('skadisbox.variants') }}</h2>
+          <div class="variant-grid">
+            <button
+              v-for="id in variants"
+              :key="id"
+              type="button"
+              :class="['variant-button', { active: activeVariant === id }]"
+              :aria-pressed="activeVariant === id"
+              @click="applyVariant(id)"
+            >{{ t(`skadisbox.variant.${id}`) }}</button>
+          </div>
+        </section>
+
+        <section class="card">
           <h2>{{ t('skadisbox.box') }}</h2>
-          <div class="form-row"><label for="sb-span">{{ t('skadisbox.slot_span') }}</label><NumberField id="sb-span" :aria-label="t('skadisbox.slot_span')" v-model="settings.slotSpan" :min="1" :max="12" :step="1" /></div>
-          <p class="derived">{{ t('skadisbox.outer_width') }}: <strong>{{ model.outerWidth }} mm</strong></p>
-          <div class="form-row"><label for="sb-height">{{ t('skadisbox.height') }}</label><NumberField id="sb-height" :aria-label="t('skadisbox.height')" v-model="settings.height" :min="20" :max="600" :step="5" /></div>
-          <div class="form-row"><label for="sb-depth">{{ t('skadisbox.depth') }}</label><NumberField id="sb-depth" :aria-label="t('skadisbox.depth')" v-model="settings.depth" :min="20" :max="400" :step="5" /></div>
+          <div class="form-row"><label for="sb-width">{{ t('skadisbox.width') }}</label><NumberField id="sb-width" :aria-label="t('skadisbox.width')" v-model="settings.width" :min="10" :max="400" :step="1" /></div>
+          <div class="form-row"><label for="sb-height">{{ t('skadisbox.height') }}</label><NumberField id="sb-height" :aria-label="t('skadisbox.height')" v-model="settings.height" :min="10" :max="300" :step="5" /></div>
+          <div class="form-row"><label for="sb-depth">{{ t('skadisbox.depth') }}</label><NumberField id="sb-depth" :aria-label="t('skadisbox.depth')" v-model="settings.depth" :min="10" :max="200" :step="5" /></div>
+          <div class="form-row"><label for="sb-front">{{ t('skadisbox.front_height') }}</label><NumberField id="sb-front" :aria-label="t('skadisbox.front_height')" v-model="settings.frontHeight" :min="0" :max="300" :step="5" /></div>
+          <div class="form-row"><label for="sb-dividers">{{ t('skadisbox.dividers') }}</label><NumberField id="sb-dividers" :aria-label="t('skadisbox.dividers')" v-model="settings.dividers" :min="0" :max="12" :step="1" /></div>
         </section>
 
         <section class="card">
           <h2>{{ t('skadisbox.material') }}</h2>
-          <div class="form-row"><label for="sb-thickness">{{ t('skadisbox.thickness') }}</label><NumberField id="sb-thickness" :aria-label="t('skadisbox.thickness')" v-model="settings.thickness" :min="1" :max="12" :step="0.1" /></div>
-          <div class="form-row"><label for="sb-kerf">{{ t('skadisbox.kerf') }}</label><NumberField id="sb-kerf" :aria-label="t('skadisbox.kerf')" v-model="settings.kerf" :min="0" :max="1" :step="0.05" /></div>
-          <div class="form-row"><label for="sb-tab">{{ t('skadisbox.tab_size') }}</label><NumberField id="sb-tab" :aria-label="t('skadisbox.tab_size')" v-model="settings.tabSize" :min="3" :max="60" :step="1" /></div>
+          <div class="form-row"><label for="sb-wall">{{ t('skadisbox.wall') }}</label><NumberField id="sb-wall" :aria-label="t('skadisbox.wall')" v-model="settings.wall" :min="0.8" :max="10" :step="0.2" /></div>
+          <div class="form-row"><label for="sb-floor">{{ t('skadisbox.floor') }}</label><NumberField id="sb-floor" :aria-label="t('skadisbox.floor')" v-model="settings.floor" :min="0.8" :max="10" :step="0.2" /></div>
         </section>
 
         <section class="card">
           <h2>{{ t('skadisbox.hooks') }}</h2>
+          <div class="form-row"><label for="sb-hook-width">{{ t('skadisbox.hook_width') }}</label><NumberField id="sb-hook-width" :aria-label="t('skadisbox.hook_width')" v-model="settings.hookWidth" :min="1" :max="10" :step="0.1" /></div>
+          <label class="check-row"><input type="checkbox" v-model="settings.hookEveryColumn"> {{ t('skadisbox.hook_every_column') }}</label>
           <div class="form-row"><label for="sb-hook-rows">{{ t('skadisbox.hook_rows') }}</label><NumberField id="sb-hook-rows" :aria-label="t('skadisbox.hook_rows')" v-model="settings.hookRows" :min="1" :max="4" :step="1" /></div>
           <div class="form-row"><label for="sb-hook-top">{{ t('skadisbox.hook_top') }}</label><NumberField id="sb-hook-top" :aria-label="t('skadisbox.hook_top')" v-model="settings.hookTop" :min="0" :max="60" :step="1" /></div>
           <div class="form-row"><label for="sb-neck">{{ t('skadisbox.neck_height') }}</label><NumberField id="sb-neck" :aria-label="t('skadisbox.neck_height')" v-model="settings.neckHeight" :min="2" :max="30" :step="0.5" /></div>
@@ -92,32 +134,22 @@ function downloadDxf() {
         <section class="card preview-card">
           <div class="card-head">
             <h2>{{ t('skadisbox.preview') }}</h2>
-            <span class="panel-count">{{ model.panels.length }} × {{ t('pieces_short') }}</span>
+            <div class="head-actions">
+              <button type="button" class="btn-dl" @click="resetCamera">{{ t('skadisbox.reset_view') }}</button>
+              <span class="part-count">{{ partCount }} × {{ t('pieces_short') }}</span>
+            </div>
           </div>
 
           <ul v-if="model.warnings.length" class="warnings" role="alert">
             <li v-for="warning in model.warnings" :key="warning">{{ t(`skadisbox.warn.${warning}`) }}</li>
           </ul>
 
-          <div class="layout-preview">
-            <svg
-              v-if="layout.placed.length"
-              :viewBox="`${-padding} ${-padding} ${layout.width + padding * 2} ${layout.height + padding * 2}`"
-              role="img"
-              :aria-label="t('skadisbox.preview_label')"
-            >
-              <g v-for="panel in layout.placed" :key="panel.id" :transform="`translate(${panel.x} ${panel.y})`">
-                <path class="panel-shape" :d="pointsToPath(panel.points)" />
-                <text class="panel-label" :x="panel.width / 2" :y="panel.height / 2" :font-size="labelSize">{{ t(`skadisbox.panel.${panel.id}`) }}</text>
-                <text class="panel-size" :x="panel.width / 2" :y="panel.height / 2 + labelSize * 1.3" :font-size="labelSize * 0.75">{{ panel.width }} × {{ panel.height }}</text>
-              </g>
-            </svg>
-          </div>
+          <div ref="viewer" class="viewer" role="img" :aria-label="t('skadisbox.preview_label')"></div>
 
           <div class="box-stats">
-            <div><span>{{ t('skadisbox.size') }}</span><strong>{{ model.outerWidth }} × {{ settings.height }} × {{ settings.depth }} mm</strong></div>
-            <div><span>{{ t('skadisbox.hook_spacing') }}</span><strong>{{ model.hookSpacing }} mm</strong></div>
-            <div><span>{{ t('skadisbox.sheet') }}</span><strong>{{ layout.width }} × {{ layout.height }} mm</strong></div>
+            <div><span>{{ t('skadisbox.size') }}</span><strong>{{ settings.width }} × {{ settings.height }} × {{ model.totalDepth }} mm</strong></div>
+            <div><span>{{ t('skadisbox.hook_columns') }}</span><strong>{{ model.hookColumns.length }} × {{ model.hookRows.length }}</strong></div>
+            <div><span>{{ t('skadisbox.volume') }}</span><strong>{{ volumeCm3 }} cm³</strong></div>
           </div>
         </section>
 
@@ -127,8 +159,7 @@ function downloadDxf() {
             <p>{{ t('skadisbox.export_hint') }}</p>
           </div>
           <div class="export-actions">
-            <button type="button" class="btn-primary" :disabled="!layout.placed.length" @click="downloadSvg">↓ SVG</button>
-            <button type="button" class="btn-dl export-dxf" :disabled="!layout.placed.length" @click="downloadDxf">↓ DXF</button>
+            <button type="button" class="btn-primary" :disabled="!partCount" @click="downloadStl">↓ STL</button>
           </div>
         </section>
       </main>
@@ -137,17 +168,19 @@ function downloadDxf() {
 </template>
 
 <style scoped>
-.derived { margin: -4px 0 10px; color: var(--muted); font-size: .78rem; }
-.derived strong { color: var(--text); }
+.variant-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.variant-button { padding: 7px 4px; border: 1px solid var(--border-input); border-radius: 6px; background: var(--input-bg); color: var(--text); cursor: pointer; font-size: .75rem; }
+.variant-button:hover { border-color: var(--accent); }
+.variant-button.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.check-row { display: flex; align-items: center; gap: 9px; margin: 4px 0 12px; color: var(--text); font-size: .84rem; cursor: pointer; }
+.check-row input { accent-color: var(--accent); width: 16px; height: 16px; }
 .hint { margin-top: 10px; color: var(--muted); font-size: .76rem; line-height: 1.4; }
 .preview-card { min-height: 520px; }
-.panel-count { color: var(--accent); font-size: .8rem; font-weight: 600; }
+.head-actions { display: flex; align-items: center; gap: 12px; }
+.part-count { color: var(--accent); font-size: .8rem; font-weight: 600; }
 .warnings { margin: 0 0 12px; padding: 10px 12px 10px 28px; border-radius: 6px; color: var(--alert-warn-tx); background: var(--alert-warn-bg); border: 1px solid var(--alert-warn-bd); font-size: .8rem; line-height: 1.45; }
-.layout-preview { height: min(58vh, 560px); min-height: 340px; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--svg-bg); }
-.layout-preview svg { width: 100%; height: 100%; padding: 16px; }
-.panel-shape { fill: var(--piece-bg); stroke: var(--heading); stroke-width: .6; stroke-linejoin: miter; }
-.panel-label, .panel-size { fill: var(--text); text-anchor: middle; dominant-baseline: middle; font-weight: 600; pointer-events: none; }
-.panel-size { fill: var(--muted); font-weight: 500; }
+.viewer { height: min(58vh, 560px); min-height: 340px; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: #1e1e2e; }
+.viewer :deep(canvas) { display: block; width: 100% !important; height: 100% !important; }
 .box-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
 .box-stats div { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border-radius: 7px; background: var(--input-bg); }
 .box-stats span { color: var(--muted); font-size: .72rem; }
@@ -156,11 +189,10 @@ function downloadDxf() {
 .export-card h2 { margin-bottom: 5px; }
 .export-card p { color: var(--muted); font-size: .8rem; line-height: 1.45; }
 .export-actions { display: flex; gap: 8px; flex-shrink: 0; }
-.export-dxf { padding: 8px 16px; font-size: .82rem; }
 @media (max-width: 620px) {
   .box-stats { grid-template-columns: 1fr; }
   .export-card { align-items: stretch; flex-direction: column; }
   .export-actions > button { flex: 1; }
-  .layout-preview { min-height: 300px; height: 50vh; }
+  .viewer { min-height: 300px; height: 50vh; }
 }
 </style>

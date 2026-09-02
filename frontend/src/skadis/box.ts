@@ -1,40 +1,41 @@
 /**
- * Hanging SKÅDIS box: an open-top finger-joint box whose side walls extend
- * backwards into hooks that drop into the pegboard slots. Pure geometry only;
- * labels and colours stay in the page. All dimensions are millimetres.
+ * 3D-printable SKÅDIS box: a solid open-top container with hooks grown out of
+ * its back wall that drop into the pegboard slots. Pure geometry only; labels
+ * and colours stay in the page. All dimensions are millimetres.
  *
- * Panel scheme (five panels): the two sides are the outer panels and carry
- * female notches on their front, back and bottom edges plus the hooks on the
- * back edge. Front and back walls sit between the sides on top of the bottom
- * panel; the bottom panel sits between all four walls. Every joint is a
- * tab (male, +thickness) on one panel and a notch (female, -thickness) on the
- * mating one at identical positions.
+ * Axes: x across the width, y from the front face (0) towards the pegboard
+ * (depth), z up from the print bed. The model is a set of axis-aligned
+ * cuboids that touch but never overlap, so the STL is a clean union.
  */
 
 export interface SkadisBoxSettings {
-  /** Number of slot pitches between the two side walls (hook centre to hook centre). */
-  slotSpan: number
-  /** Outer box height. */
+  /** Outer width, height and depth of the box body (hooks stick out beyond the depth). */
+  width: number
   height: number
-  /** Outer box depth, from the pegboard face to the front wall. */
   depth: number
-  /** Material thickness. Must be narrower than the slot width to pass through it. */
-  thickness: number
-  /** Laser kerf; tabs grow and notches shrink by it. */
-  kerf: number
-  /** Nominal finger-joint tab length. */
-  tabSize: number
-  /** Hooks per side wall, stacked vertically every two grid rows. */
+  /** Wall thickness. */
+  wall: number
+  /** Floor thickness. */
+  floor: number
+  /** Front wall height above the floor; 0 removes the front wall (open shelf). */
+  frontHeight: number
+  /** Vertical dividers across the width. */
+  dividers: number
+  /** Hook bar width across the slot; must be narrower than the slot. */
+  hookWidth: number
+  /** Put a hook on every slot column, not only the outermost two. */
+  hookEveryColumn: boolean
+  /** Hook rows stacked down the back wall, every two grid rows. */
   hookRows: number
-  /** Distance from the side wall top to the top of the first hook lip. */
+  /** Distance from the box top to the top of the first hook lip. */
   hookTop: number
-  /** Vertical height of the hook neck that rests inside the slot. */
+  /** Vertical height of the neck that rests inside the slot. */
   neckHeight: number
   /** How far the lip rises above the neck behind the board. */
   lipRise: number
   /** Thickness of the lip along the depth axis. */
   lipDepth: number
-  /** Extra play between the neck and the board (both faces). */
+  /** Play between the neck and the board faces. */
   clearance: number
   /** Pegboard grid, matching the SKÅDIS board generator. */
   boardThickness: number
@@ -43,264 +44,184 @@ export interface SkadisBoxSettings {
   pitch: number
 }
 
-export type Pt = [number, number]
+export type Vec3 = [number, number, number]
 
-export type SkadisBoxPanelId = 'left' | 'right' | 'front' | 'back' | 'bottom'
+export type SkadisBoxPartId = 'floor' | 'left' | 'right' | 'back' | 'front' | 'divider' | 'neck' | 'lip'
 
-export interface SkadisBoxPanel {
-  id: SkadisBoxPanelId
-  /** Bounding-box size of the contour, including protruding tabs and hooks. */
-  width: number
-  height: number
-  /** Closed contour in panel-local coordinates; the bounding box starts at (0,0). */
-  points: Pt[]
+export interface Cuboid {
+  id: SkadisBoxPartId
+  min: Vec3
+  max: Vec3
 }
 
 export type SkadisBoxWarning =
-  | 'thickness_vs_slot'
+  | 'hook_vs_slot_width'
   | 'hook_vs_slot_height'
   | 'hooks_vs_height'
+  | 'single_hook_column'
+  | 'dividers_vs_width'
   | 'too_small'
 
 export interface SkadisBoxModel {
-  outerWidth: number
-  hookSpacing: number
-  hookRowSpacing: number
-  panels: SkadisBoxPanel[]
+  parts: Cuboid[]
   warnings: SkadisBoxWarning[]
+  /** Slot columns used by the hooks, as x centres. */
+  hookColumns: number[]
+  /** Hook neck rows, as [zBottom, zTop] pairs. */
+  hookRows: Array<[number, number]>
+  /** Total depth including the hooks. */
+  totalDepth: number
+  /** Material volume in cubic millimetres. */
+  volume: number
 }
 
 const EPS = 1e-9
-export const fmt = (value: number) => Number(value.toFixed(3)).toString()
-
-export const outerWidth = (s: SkadisBoxSettings) => s.slotSpan * s.pitch + s.thickness
-
-/** Evenly spaced tab starts along an edge of length `length`. */
-export function fingerPositions(length: number, tabSize: number): number[] {
-  if (!(length > 0) || !(tabSize > 0)) return []
-  const count = Math.max(1, Math.floor(length / (2 * tabSize)))
-  const gap = (length - count * tabSize) / (count + 1)
-  if (gap < 0) return []
-  return Array.from({ length: count }, (_, index) => gap + index * (gap + tabSize))
-}
-
-interface EdgeFeature {
-  /** Start along the edge, before kerf compensation. */
-  at: number
-  length: number
-  /** Positive protrudes outwards (male), negative cuts inwards (female). */
-  depth: number
-  /** Optional custom outline replacing the plain rectangle, as offsets [along, out]. */
-  outline?: Pt[]
-}
-
-/**
- * Walk one straight edge from `start` to `end` and insert rectangular features
- * along it. `outward` is the unit normal pointing away from the panel interior.
- * Male features are widened by the kerf and female ones narrowed by it, so the
- * cut parts mate without play after the laser removes material.
- */
-function walkEdge(start: Pt, end: Pt, outward: Pt, features: EdgeFeature[], kerf: number): Pt[] {
-  const dx = end[0] - start[0]
-  const dy = end[1] - start[1]
-  const length = Math.hypot(dx, dy)
-  const dir: Pt = [dx / length, dy / length]
-  const at = (along: number, out: number): Pt => [
-    start[0] + dir[0] * along + outward[0] * out,
-    start[1] + dir[1] * along + outward[1] * out,
-  ]
-
-  const points: Pt[] = [start]
-  const sorted = features.filter(f => Math.abs(f.depth) > EPS).sort((a, b) => a.at - b.at)
-  for (const feature of sorted) {
-    if (feature.outline) {
-      for (const [along, out] of feature.outline) points.push(at(feature.at + along, out))
-      continue
-    }
-    const grow = feature.depth > 0 ? kerf / 2 : -kerf / 2
-    const a = Math.max(0, feature.at - grow)
-    const b = Math.min(length, feature.at + feature.length + grow)
-    if (b - a <= EPS) continue
-    points.push(at(a, 0), at(a, feature.depth), at(b, feature.depth), at(b, 0))
-  }
-  return points
-}
-
-function normalize(points: Pt[]): { points: Pt[]; width: number; height: number } {
-  const xs = points.map(p => p[0])
-  const ys = points.map(p => p[1])
-  const minX = Math.min(...xs)
-  const minY = Math.min(...ys)
-  const round = (v: number) => Number(v.toFixed(4))
-  return {
-    points: points.map(([x, y]) => [round(x - minX), round(y - minY)] as Pt),
-    width: round(Math.max(...xs) - minX),
-    height: round(Math.max(...ys) - minY),
-  }
-}
-
-/** Hook necks measured from the side-wall top, as [top, bottom] of the neck. */
-export function hookNecks(s: SkadisBoxSettings): Array<[number, number]> {
-  const spacing = hookRowSpacing(s)
-  return Array.from({ length: Math.max(0, Math.floor(s.hookRows)) }, (_, row) => {
-    const top = s.hookTop + s.lipRise + row * spacing
-    return [top, top + s.neckHeight] as [number, number]
-  })
-}
+const round = (v: number) => Number(v.toFixed(4))
 
 /** Hook rows must land on slots in the same columns; the standard 50 % stagger repeats every second row. */
 export const hookRowSpacing = (s: SkadisBoxSettings) => s.pitch * 2
 
-/** Hook outline on the back edge of a side wall, as [along, out] offsets from the neck top. */
-function hookOutline(s: SkadisBoxSettings): Pt[] {
-  const neck = s.boardThickness + s.clearance * 2
-  const reach = neck + s.lipDepth
-  return [
-    [0, 0],
-    [0, neck],
-    [-s.lipRise, neck],
-    [-s.lipRise, reach],
-    [s.neckHeight, reach],
-    [s.neckHeight, 0],
-  ]
+/** X centres of the hook columns: symmetric about the middle, whole pitches apart. */
+export function hookColumns(s: SkadisBoxSettings): number[] {
+  const usable = s.width - s.hookWidth
+  if (usable < -EPS) return []
+  const span = Math.max(0, Math.floor(usable / s.pitch + EPS))
+  if (span === 0) return [s.width / 2]
+  const first = s.width / 2 - span * s.pitch / 2
+  if (s.hookEveryColumn) return Array.from({ length: span + 1 }, (_, index) => first + index * s.pitch)
+  return [first, first + span * s.pitch]
+}
+
+/** Hook necks measured from the print bed, as [zBottom, zTop]; rows that would cut into the floor are dropped. */
+export function hookRows(s: SkadisBoxSettings): Array<[number, number]> {
+  const rows: Array<[number, number]> = []
+  for (let row = 0; row < Math.max(0, Math.floor(s.hookRows)); row += 1) {
+    const top = s.height - s.hookTop - s.lipRise - row * hookRowSpacing(s)
+    const bottom = top - s.neckHeight
+    if (bottom < s.floor - EPS) break
+    rows.push([bottom, top])
+  }
+  return rows
 }
 
 function validate(s: SkadisBoxSettings): SkadisBoxWarning[] {
   const warnings: SkadisBoxWarning[] = []
-  if (s.thickness + s.clearance > s.slotWidth + EPS) warnings.push('thickness_vs_slot')
+  if (s.hookWidth + s.clearance > s.slotWidth + EPS) warnings.push('hook_vs_slot_width')
   if (s.neckHeight + s.lipRise > s.slotHeight + EPS) warnings.push('hook_vs_slot_height')
-  const necks = hookNecks(s)
-  const lastNeck = necks[necks.length - 1]
-  if (lastNeck && lastNeck[1] > s.height - s.thickness + EPS) warnings.push('hooks_vs_height')
-  if (s.height <= 2 * s.thickness || s.depth <= 2 * s.thickness || outerWidth(s) <= 2 * s.thickness) warnings.push('too_small')
+  if (hookRows(s).length < Math.floor(s.hookRows)) warnings.push('hooks_vs_height')
+  if (hookColumns(s).length === 1) warnings.push('single_hook_column')
+  const innerW = s.width - 2 * s.wall
+  if (s.dividers > 0 && innerW / (Math.floor(s.dividers) + 1) < 2 * s.wall) warnings.push('dividers_vs_width')
+  if (s.width <= 2 * s.wall || s.depth <= 2 * s.wall || s.height <= s.floor) warnings.push('too_small')
   return warnings
 }
 
-function isFinitePositive(values: number[]) {
-  return values.every(v => Number.isFinite(v) && v > 0)
-}
+const box = (id: SkadisBoxPartId, min: Vec3, max: Vec3): Cuboid =>
+  ({ id, min: min.map(round) as Vec3, max: max.map(round) as Vec3 })
 
 export function skadisBox(s: SkadisBoxSettings): SkadisBoxModel {
-  const width = outerWidth(s)
-  const empty: SkadisBoxModel = { outerWidth: width, hookSpacing: s.slotSpan * s.pitch, hookRowSpacing: hookRowSpacing(s), panels: [], warnings: ['too_small'] }
-  if (!isFinitePositive([s.slotSpan, s.height, s.depth, s.thickness, s.tabSize, s.neckHeight, s.lipDepth, s.boardThickness, s.slotWidth, s.slotHeight, s.pitch])) return empty
-  if (![s.kerf, s.hookRows, s.hookTop, s.lipRise, s.clearance].every(v => Number.isFinite(v) && v >= 0)) return empty
+  const empty: SkadisBoxModel = { parts: [], warnings: ['too_small'], hookColumns: [], hookRows: [], totalDepth: s.depth, volume: 0 }
+  const positive = [s.width, s.height, s.depth, s.wall, s.floor, s.hookWidth, s.neckHeight, s.lipDepth, s.boardThickness, s.slotWidth, s.slotHeight, s.pitch]
+  const nonNegative = [s.frontHeight, s.dividers, s.hookRows, s.hookTop, s.lipRise, s.clearance]
+  if (!positive.every(v => Number.isFinite(v) && v > 0) || !nonNegative.every(v => Number.isFinite(v) && v >= 0)) return empty
 
   const warnings = validate(s)
   if (warnings.includes('too_small')) return { ...empty, warnings }
 
-  const t = s.thickness
-  const H = s.height
-  const D = s.depth
-  const innerW = width - 2 * t
-  const innerD = D - 2 * t
-  const wallH = H - t
-
-  // Joint positions shared by mating edges.
-  const wallTabs = fingerPositions(wallH, s.tabSize)        // front/back <-> sides, along height
-  const bottomSideTabs = fingerPositions(innerD, s.tabSize) // bottom <-> sides, along depth
-  const bottomWallTabs = fingerPositions(innerW, s.tabSize) // bottom <-> front/back, along width
-
-  // Hooks that would run past the bottom joint are dropped; the warning tells the user why.
-  const necks = hookNecks(s).filter(([, bottom]) => bottom <= wallH + EPS)
-  const overlapsHook = (start: number, length: number) =>
-    necks.some(([top, bottom]) => start < bottom + s.kerf && start + length > top - s.lipRise - s.kerf)
-
-  const feature = (at: number, depth: number): EdgeFeature => ({ at, length: s.tabSize, depth })
-
-  // Side wall, local x: 0 front -> D back, y: 0 top -> H bottom. Clockwise walk.
-  const sideBack: EdgeFeature[] = [
-    ...wallTabs.filter(pos => !overlapsHook(pos, s.tabSize)).map(pos => feature(pos, -t)),
-    ...necks.map(([top]) => ({ at: top, length: s.neckHeight, depth: 1, outline: hookOutline(s) })),
+  const { width: W, height: H, depth: D, wall: t, floor: f } = s
+  const frontH = Math.min(Math.max(0, s.frontHeight), H - f)
+  const parts: Cuboid[] = [
+    box('floor', [0, 0, 0], [W, D, f]),
+    box('left', [0, 0, f], [t, D, H]),
+    box('right', [W - t, 0, f], [W, D, H]),
+    box('back', [t, D - t, f], [W - t, D, H]),
   ]
-  const sidePoints = [
-    ...walkEdge([0, 0], [D, 0], [0, -1], [], s.kerf),
-    ...walkEdge([D, 0], [D, H], [1, 0], sideBack, s.kerf),
-    ...walkEdge([D, H], [0, H], [0, 1], bottomSideTabs.map(pos => feature(D - t - pos - s.tabSize, -t)), s.kerf),
-    ...walkEdge([0, H], [0, 0], [-1, 0], wallTabs.map(pos => feature(H - pos - s.tabSize, -t)), s.kerf),
-  ]
+  if (frontH > EPS) parts.push(box('front', [t, 0, f], [W - t, t, f + frontH]))
 
-  // Front/back wall, local x: 0..innerW, y: 0 top -> wallH bottom.
-  const wallPoints = [
-    ...walkEdge([0, 0], [innerW, 0], [0, -1], [], s.kerf),
-    ...walkEdge([innerW, 0], [innerW, wallH], [1, 0], wallTabs.map(pos => feature(pos, t)), s.kerf),
-    ...walkEdge([innerW, wallH], [0, wallH], [0, 1], bottomWallTabs.map(pos => feature(innerW - pos - s.tabSize, -t)), s.kerf),
-    ...walkEdge([0, wallH], [0, 0], [-1, 0], wallTabs.map(pos => feature(wallH - pos - s.tabSize, t)), s.kerf),
-  ]
-
-  // Bottom, local x: 0..innerW, y: 0 front -> innerD back.
-  const bottomPoints = [
-    ...walkEdge([0, 0], [innerW, 0], [0, -1], bottomWallTabs.map(pos => feature(pos, t)), s.kerf),
-    ...walkEdge([innerW, 0], [innerW, innerD], [1, 0], bottomSideTabs.map(pos => feature(pos, t)), s.kerf),
-    ...walkEdge([innerW, innerD], [0, innerD], [0, 1], bottomWallTabs.map(pos => feature(innerW - pos - s.tabSize, t)), s.kerf),
-    ...walkEdge([0, innerD], [0, 0], [-1, 0], bottomSideTabs.map(pos => feature(innerD - pos - s.tabSize, t)), s.kerf),
-  ]
-
-  const side = normalize(sidePoints)
-  const mirroredSide = normalize(sidePoints.map(([x, y]) => [-x, y] as Pt))
-  const wall = normalize(wallPoints)
-  const bottom = normalize(bottomPoints)
-
-  return {
-    outerWidth: width,
-    hookSpacing: s.slotSpan * s.pitch,
-    hookRowSpacing: hookRowSpacing(s),
-    warnings,
-    panels: [
-      { id: 'left', ...side },
-      { id: 'right', ...mirroredSide },
-      { id: 'front', ...wall },
-      { id: 'back', ...wall },
-      { id: 'bottom', ...bottom },
-    ],
+  const dividerCount = Math.max(0, Math.floor(s.dividers))
+  const innerW = W - 2 * t
+  for (let index = 0; index < dividerCount; index += 1) {
+    const x = t + innerW * (index + 1) / (dividerCount + 1)
+    parts.push(box('divider', [x - t / 2, t, f], [x + t / 2, D - t, H]))
   }
-}
 
-// ── Sheet layout and export ─────────────────────────────────────────────────
-export interface PlacedPanel extends SkadisBoxPanel { x: number; y: number }
-
-/** Lay the panels out left to right in two rows: sides on top, walls and bottom below. */
-export function skadisBoxLayout(model: SkadisBoxModel, gap = 6): { width: number; height: number; placed: PlacedPanel[] } {
-  const rows: SkadisBoxPanelId[][] = [['left', 'right'], ['front', 'back', 'bottom']]
-  const placed: PlacedPanel[] = []
-  let y = 0
-  let width = 0
-  for (const ids of rows) {
-    let x = 0
-    let rowHeight = 0
-    for (const id of ids) {
-      const panel = model.panels.find(p => p.id === id)
-      if (!panel) continue
-      placed.push({ ...panel, x, y })
-      x += panel.width + gap
-      rowHeight = Math.max(rowHeight, panel.height)
+  const neckLength = s.boardThickness + 2 * s.clearance
+  const columns = hookColumns(s)
+  const rows = hookRows(s)
+  for (const x of columns) {
+    for (const [zBottom, zTop] of rows) {
+      parts.push(box('neck', [x - s.hookWidth / 2, D, zBottom], [x + s.hookWidth / 2, D + neckLength, zTop]))
+      parts.push(box('lip', [x - s.hookWidth / 2, D + neckLength, zBottom], [x + s.hookWidth / 2, D + neckLength + s.lipDepth, zTop + s.lipRise]))
     }
-    width = Math.max(width, x - gap)
-    y += rowHeight + gap
   }
-  return { width: Math.max(0, width), height: Math.max(0, y - gap), placed }
+
+  const volume = parts.reduce((sum, p) => sum + (p.max[0] - p.min[0]) * (p.max[1] - p.min[1]) * (p.max[2] - p.min[2]), 0)
+  return {
+    parts,
+    warnings,
+    hookColumns: columns.map(round),
+    hookRows: rows.map(([a, b]) => [round(a), round(b)] as [number, number]),
+    totalDepth: round(D + neckLength + s.lipDepth),
+    volume: round(volume),
+  }
 }
 
-export const pointsToPath = (points: Pt[]) =>
-  points.map(([x, y], index) => `${index === 0 ? 'M' : 'L'}${fmt(x)},${fmt(y)}`).join(' ') + ' Z'
+// ── Mesh and STL ────────────────────────────────────────────────────────────
 
-export function skadisBoxSvg(settings: SkadisBoxSettings): string {
-  const layout = skadisBoxLayout(skadisBox(settings))
-  const paths = layout.placed
-    .map((panel, index) => `  <path id="${panel.id}" data-cut-order="${index + 1}" transform="translate(${fmt(panel.x)} ${fmt(panel.y)})" d="${pointsToPath(panel.points)}" fill="none" stroke="#ff0000" stroke-width="0.1" stroke-linejoin="miter" />`)
-    .join('\n')
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${fmt(layout.width)}mm" height="${fmt(layout.height)}mm" viewBox="0 0 ${fmt(layout.width)} ${fmt(layout.height)}">
-${paths}
-</svg>`
+/** Twelve outward-facing triangles per cuboid, flat vertex list of 36 xyz triples per box. */
+export function cuboidTriangles(c: Cuboid): number[] {
+  const [x0, y0, z0] = c.min
+  const [x1, y1, z1] = c.max
+  const q = (a: Vec3, b: Vec3, d: Vec3, e: Vec3) => [...a, ...b, ...d, ...a, ...d, ...e]
+  return [
+    ...q([x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [x1, y0, z0]), // bottom (z0), normal -z
+    ...q([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]), // top, +z
+    ...q([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]), // front (y0), -y
+    ...q([x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]), // back (y1), +y
+    ...q([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]), // left (x0), -x
+    ...q([x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]), // right (x1), +x
+  ]
 }
 
-export function skadisBoxDxf(settings: SkadisBoxSettings): string {
-  const layout = skadisBoxLayout(skadisBox(settings))
-  let entities = ''
-  for (const panel of layout.placed) {
-    entities += `0\nLWPOLYLINE\n8\nCUT\n90\n${panel.points.length}\n70\n1\n`
-    for (const [x, y] of panel.points) entities += `10\n${fmt(panel.x + x)}\n20\n${fmt(panel.y + y)}\n`
+export function skadisBoxTriangles(model: SkadisBoxModel): Float32Array {
+  return new Float32Array(model.parts.flatMap(cuboidTriangles))
+}
+
+/** Binary STL, millimetres, with a per-triangle normal computed from the winding. */
+export function skadisBoxStl(settings: SkadisBoxSettings): ArrayBuffer {
+  const tris = skadisBoxTriangles(skadisBox(settings))
+  const count = tris.length / 9
+  const buffer = new ArrayBuffer(84 + count * 50)
+  const view = new DataView(buffer)
+  const header = 'CutLog SKADIS box'
+  for (let i = 0; i < header.length; i += 1) view.setUint8(i, header.charCodeAt(i))
+  view.setUint32(80, count, true)
+  let offset = 84
+  for (let i = 0; i < count; i += 1) {
+    const b = i * 9
+    const ax = tris[b + 3] - tris[b], ay = tris[b + 4] - tris[b + 1], az = tris[b + 5] - tris[b + 2]
+    const bx = tris[b + 6] - tris[b], by = tris[b + 7] - tris[b + 1], bz = tris[b + 8] - tris[b + 2]
+    const nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx
+    const len = Math.hypot(nx, ny, nz) || 1
+    view.setFloat32(offset, nx / len, true)
+    view.setFloat32(offset + 4, ny / len, true)
+    view.setFloat32(offset + 8, nz / len, true)
+    for (let k = 0; k < 9; k += 1) view.setFloat32(offset + 12 + k * 4, tris[b + k], true)
+    view.setUint16(offset + 48, 0, true)
+    offset += 50
   }
-  return `0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n${entities}0\nENDSEC\n0\nEOF\n`
+  return buffer
+}
+
+// ── Variants ────────────────────────────────────────────────────────────────
+export type SkadisBoxVariant = 'tray' | 'cup' | 'shelf' | 'bin' | 'organizer' | 'wide'
+
+/** Body-shape overrides per variant; hook and board settings are left untouched. */
+export const skadisBoxVariants: Record<SkadisBoxVariant, Partial<SkadisBoxSettings>> = {
+  tray: { width: 86, height: 60, depth: 60, frontHeight: 60, dividers: 0 },
+  cup: { width: 46, height: 100, depth: 46, frontHeight: 100, dividers: 0 },
+  shelf: { width: 126, height: 40, depth: 80, frontHeight: 0, dividers: 0 },
+  bin: { width: 86, height: 80, depth: 70, frontHeight: 35, dividers: 0 },
+  organizer: { width: 126, height: 50, depth: 60, frontHeight: 50, dividers: 2 },
+  wide: { width: 206, height: 45, depth: 50, frontHeight: 45, dividers: 4 },
 }
