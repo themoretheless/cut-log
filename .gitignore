@@ -8,6 +8,8 @@ frontend/dist/
 frontend/wasm/
 frontend/public/cutter_wasm_bg.wasm
 frontend/.vite/
+scripts/bench/ui-frameworks/dist/
+scripts/bench/ui-frameworks/results/*.json
 
 # WASM build artifacts
 crates/wasm/pkg/

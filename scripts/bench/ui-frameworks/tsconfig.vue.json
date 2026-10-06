@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "../../../frontend/env.d.ts",
+    "src/shared/**/*.ts",
+    "src/vue-layout/**/*.ts",
+    "src/vue-layout/**/*.vue",
+    "src/vue-skadis/**/*.ts",
+    "src/vue-skadis/**/*.vue"
+  ]
+}
