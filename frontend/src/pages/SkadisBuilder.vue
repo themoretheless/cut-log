@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import NumberField from '@/components/NumberField.vue'
 import { downloadFile } from '@/lib/downloadFile'
 import { useL10n } from '@/stores/l10n'
@@ -19,10 +19,140 @@ const settings = reactive<SkadisSettings>({
   columnOffsetPercent: 0,
 })
 
+const showDimensions = ref(true)
+
 const slots = computed(() => skadisSlots(settings))
 const isStandardGrid = computed(() => settings.slotWidth === 5 && settings.slotHeight === 15 && settings.pitch === 40 && settings.rowOffsetPercent === 50 && settings.columnOffsetPercent === 0)
 const boardArea = computed(() => (settings.width * settings.height / 1_000_000).toFixed(3))
-const previewPadding = computed(() => Math.max(settings.width, settings.height) * 0.025)
+
+/** Drawing unit scaled to the board, so annotations stay readable at any size. */
+const unit = computed(() => Math.max(settings.width, settings.height) / 100)
+const previewPadding = computed(() => (showDimensions.value ? unit.value * 11 : Math.max(settings.width, settings.height) * 0.025))
+
+/**
+ * Bounding box of the slot centres. Dimensions follow the drawing convention of
+ * measuring hole positions to their centrelines, so the shown margins and pitch
+ * match the entered values exactly.
+ */
+const gridBounds = computed(() => {
+  const list = slots.value
+  if (!list.length) return null
+  const xs = list.map(slot => slot.x)
+  const ys = list.map(slot => slot.y)
+  return { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) }
+})
+
+interface Dimension {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  label: string
+  labelX: number
+  labelY: number
+  rotate: boolean
+  /** Arrows are moved outside the extension lines when the span is too short to fit them. */
+  outside: boolean
+}
+
+const round = (value: number) => Number(value.toFixed(2)).toString()
+
+function horizontalDim(x1: number, x2: number, y: number, above: number, unitValue: number): Dimension {
+  const outside = x2 - x1 < unitValue * 3.4
+  return { x1, y1: y, x2, y2: y, label: round(x2 - x1), labelX: (x1 + x2) / 2, labelY: y - above, rotate: false, outside }
+}
+
+function verticalDim(y1: number, y2: number, x: number, left: number, unitValue: number): Dimension {
+  const outside = y2 - y1 < unitValue * 3.4
+  return { x1: x, y1, x2: x, y2, label: round(y2 - y1), labelX: x - left, labelY: (y1 + y2) / 2, rotate: true, outside }
+}
+
+/** Actual edge margins, from the board outline to the nearest slot centreline. */
+const marginDimensions = computed<Dimension[]>(() => {
+  const b = gridBounds.value
+  if (!b) return []
+  const u = unit.value
+  return [
+    horizontalDim(0, b.left, -u * 4, u * 1.4, u),
+    horizontalDim(b.right, settings.width, -u * 4, u * 1.4, u),
+    verticalDim(0, b.top, -u * 4, u * 1.4, u),
+    verticalDim(b.bottom, settings.height, -u * 4, u * 1.4, u),
+  ].filter(dim => Math.abs(dim.x2 - dim.x1) + Math.abs(dim.y2 - dim.y1) > 1e-6)
+})
+
+/** Extension lines tying each margin dimension back to the feature it measures. */
+const marginExtensions = computed(() => {
+  const b = gridBounds.value
+  if (!b) return []
+  const u = unit.value
+  return [
+    { x1: 0, y1: 0, x2: 0, y2: -u * 4.8 },
+    { x1: b.left, y1: b.top, x2: b.left, y2: -u * 4.8 },
+    { x1: b.right, y1: b.top, x2: b.right, y2: -u * 4.8 },
+    { x1: settings.width, y1: 0, x2: settings.width, y2: -u * 4.8 },
+    { x1: 0, y1: 0, x2: -u * 4.8, y2: 0 },
+    { x1: b.left, y1: b.top, x2: -u * 4.8, y2: b.top },
+    { x1: b.left, y1: b.bottom, x2: -u * 4.8, y2: b.bottom },
+    { x1: 0, y1: settings.height, x2: -u * 4.8, y2: settings.height },
+  ]
+})
+
+/**
+ * Centre-to-centre spacing: between the first pair of slots in the top row
+ * (drawn on the row centreline) and between the first two rows (drawn on a
+ * dimension track to the right of the board).
+ */
+const pitchDimensions = computed<Dimension[]>(() => {
+  const b = gridBounds.value
+  if (!b) return []
+  const u = unit.value
+  const list = slots.value
+  const dims: Dimension[] = []
+
+  const topRow = list.filter(slot => slot.y === b.top).map(slot => slot.x).sort((a, c) => a - c)
+  if (topRow.length >= 2) dims.push(horizontalDim(topRow[0], topRow[1], b.top, u * 1.3, u))
+
+  const rows = [...new Set(list.map(slot => slot.y))].sort((a, c) => a - c)
+  if (rows.length >= 2) dims.push(verticalDim(rows[0], rows[1], settings.width + u * 4, -u * 1.4, u))
+
+  return dims
+})
+
+/** Extension lines from the first two rows out to the right-hand pitch dimension. */
+const pitchExtensions = computed(() => {
+  const list = slots.value
+  if (!list.length) return []
+  const u = unit.value
+  const rows = [...new Set(list.map(slot => slot.y))].sort((a, c) => a - c)
+  if (rows.length < 2) return []
+  return rows.slice(0, 2).map(y => ({
+    x1: Math.max(...list.filter(slot => slot.y === y).map(slot => slot.x)),
+    y1: y,
+    x2: settings.width + u * 4.8,
+    y2: y,
+  }))
+})
+
+const allDimensions = computed(() => [...marginDimensions.value, ...pitchDimensions.value])
+const allExtensions = computed(() => [...marginExtensions.value, ...pitchExtensions.value])
+
+/** Dimension line segments; short spans get a pair of stubs with arrows pointing inwards. */
+function dimLines(dim: Dimension) {
+  const stub = unit.value * 2.4
+  if (!dim.outside) {
+    return [{ x1: dim.x1, y1: dim.y1, x2: dim.x2, y2: dim.y2, start: true }]
+  }
+  if (dim.rotate) {
+    return [
+      { x1: dim.x1, y1: dim.y1 - stub, x2: dim.x1, y2: dim.y1, start: false },
+      { x1: dim.x2, y1: dim.y2 + stub, x2: dim.x2, y2: dim.y2, start: false },
+    ]
+  }
+  return [
+    { x1: dim.x1 - stub, y1: dim.y1, x2: dim.x1, y2: dim.y1, start: false },
+    { x1: dim.x2 + stub, y1: dim.y2, x2: dim.x2, y2: dim.y2, start: false },
+  ]
+}
 
 function applyPreset(width: number, height: number) {
   settings.width = width
@@ -82,7 +212,10 @@ function downloadDxf() {
         <section class="card preview-card">
           <div class="card-head">
             <h2>{{ t('skadis.preview') }}</h2>
-            <span class="slot-count">{{ slots.length }} {{ t('skadis.slots') }}</span>
+            <div class="head-actions">
+              <label class="check-row"><input type="checkbox" v-model="showDimensions"> {{ t('skadis.dimensions') }}</label>
+              <span class="slot-count">{{ slots.length }} {{ t('skadis.slots') }}</span>
+            </div>
           </div>
           <div class="board-preview">
             <svg
@@ -102,6 +235,54 @@ function downloadDxf() {
                 :height="settings.slotHeight"
                 :rx="Math.min(settings.slotWidth, settings.slotHeight) / 2"
               />
+
+              <g v-if="showDimensions && gridBounds" class="dim-layer">
+                <defs>
+                  <marker id="dim-arrow" :markerWidth="unit * 1.6" :markerHeight="unit * 1.1" :refX="unit * 1.5" :refY="unit * 0.55" orient="auto" markerUnits="userSpaceOnUse">
+                    <path class="dim-arrowhead" :d="`M0,0 L${unit * 1.6},${unit * 0.55} L0,${unit * 1.1} z`" />
+                  </marker>
+                  <marker id="dim-arrow-start" :markerWidth="unit * 1.6" :markerHeight="unit * 1.1" :refX="unit * 0.1" :refY="unit * 0.55" orient="auto" markerUnits="userSpaceOnUse">
+                    <path class="dim-arrowhead" :d="`M${unit * 1.6},0 L0,${unit * 0.55} L${unit * 1.6},${unit * 1.1} z`" />
+                  </marker>
+                </defs>
+
+                <rect
+                  class="dim-margin-box"
+                  :x="gridBounds.left"
+                  :y="gridBounds.top"
+                  :width="gridBounds.right - gridBounds.left"
+                  :height="gridBounds.bottom - gridBounds.top"
+                  :stroke-width="unit * 0.28"
+                  :stroke-dasharray="`${unit * 1.4} ${unit}`"
+                />
+
+                <line
+                  v-for="(line, index) in allExtensions"
+                  :key="`ext-${index}`"
+                  class="dim-extension"
+                  :x1="line.x1" :y1="line.y1" :x2="line.x2" :y2="line.y2"
+                  :stroke-width="unit * 0.18"
+                />
+
+                <g v-for="(dim, index) in allDimensions" :key="`dim-${index}`">
+                  <line
+                    v-for="(line, part) in dimLines(dim)"
+                    :key="part"
+                    class="dim-line"
+                    :x1="line.x1" :y1="line.y1" :x2="line.x2" :y2="line.y2"
+                    :stroke-width="unit * 0.22"
+                    :marker-start="line.start ? 'url(#dim-arrow-start)' : undefined"
+                    marker-end="url(#dim-arrow)"
+                  />
+                  <text
+                    class="dim-label"
+                    :x="dim.labelX"
+                    :y="dim.labelY"
+                    :font-size="unit * 2.6"
+                    :transform="dim.rotate ? `rotate(-90 ${dim.labelX} ${dim.labelY})` : undefined"
+                  >{{ dim.label }}</text>
+                </g>
+              </g>
             </svg>
           </div>
           <div class="board-stats">
@@ -145,6 +326,15 @@ function downloadDxf() {
 .board-shadow { fill: rgba(0,0,0,.28); }
 .board-shape { fill: var(--piece-bg); stroke: var(--heading); stroke-width: 1.5; }
 .board-slot { fill: var(--bg); stroke: var(--border-input); stroke-width: .35; }
+.head-actions { display: flex; align-items: center; gap: 14px; }
+.head-actions .check-row { margin-top: 0; font-size: .78rem; color: var(--muted); white-space: nowrap; }
+.head-actions .check-row input { width: 14px; height: 14px; }
+.dim-layer { --dim: #e8842a; }
+.dim-arrowhead { fill: var(--dim); }
+.dim-margin-box { fill: none; stroke: var(--dim); }
+.dim-extension { stroke: var(--dim); opacity: .55; }
+.dim-line { stroke: var(--dim); }
+.dim-label { fill: var(--dim); text-anchor: middle; font-weight: 600; paint-order: stroke; stroke: var(--svg-bg); stroke-width: .3em; stroke-linejoin: round; }
 .board-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
 .board-stats div { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border-radius: 7px; background: var(--input-bg); }
 .board-stats span { color: var(--muted); font-size: .72rem; }

@@ -24,6 +24,16 @@ describe('SKADIS geometry', () => {
     expect(slots).toHaveLength(119)
   })
 
+  it('centres the grid when the pitch does not divide the available span', () => {
+    const slots = skadisSlots({ ...standard, width: 740, height: 740 })
+    const ys = slots.map(slot => slot.y)
+    const xs = slots.map(slot => slot.x)
+    expect(Math.min(...ys)).toBe(30)
+    expect(740 - Math.max(...ys)).toBe(30)
+    expect(Math.min(...xs)).toBe(20)
+    expect(740 - Math.max(...xs)).toBe(20)
+  })
+
   it.each([
     [0, 20],
     [25, 30],
@@ -59,6 +69,20 @@ describe('SKADIS geometry', () => {
     expect(svg).toContain('width="360mm" height="560mm"')
     expect(svg).toContain('<rect x="0" y="0" width="360" height="560" rx="8"')
     expect(svg).toContain('x="17.5" y="12.5" width="5" height="15" rx="2.5"')
+  })
+
+  it('exports every slot and the board contour as separate ordered top-level objects', () => {
+    const svg = skadisSvg(standard)
+    const slotObjects = [...svg.matchAll(/<rect [^>]*id="slot-(\d+)"[^>]*\/>/g)]
+    const contourIndex = svg.indexOf('id="board-contour"')
+    const lastSlotIndex = svg.lastIndexOf(`id="slot-${String(slotObjects.length).padStart(3, '0')}"`)
+
+    expect(svg).not.toContain('<g')
+    expect(slotObjects).toHaveLength(skadisSlots(standard).length)
+    expect(slotObjects[0][0]).toContain('id="slot-001" data-cut-order="1"')
+    expect(new Set(slotObjects.map(match => match[1])).size).toBe(slotObjects.length)
+    expect(svg).toContain(`id="board-contour" data-cut-order="${slotObjects.length + 1}"`)
+    expect(contourIndex).toBeGreaterThan(lastSlotIndex)
   })
 
   it('exports an ASCII DXF using millimeters', () => {

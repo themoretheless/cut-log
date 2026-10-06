@@ -20,6 +20,27 @@ export interface SkadisSlot {
 const fmt = (value: number) => Number(value.toFixed(3)).toString()
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
+/**
+ * Positions of one axis for both parities, centred inside [min, max] so the
+ * leftover space is split evenly between the two edges instead of piling up
+ * against the far one. `offset` shifts the odd parity, so the two lattices are
+ * centred as a single pattern to keep the stagger intact.
+ */
+function axisPositions(min: number, max: number, pitch: number, offset: number): { even: number[]; odd: number[] } {
+  const span = max - min
+  if (span < -1e-9) return { even: [], odd: [] }
+
+  const evenCount = Math.floor(span / pitch + 1e-9) + 1
+  const oddCount = span - offset >= -1e-9 ? Math.floor((span - offset) / pitch + 1e-9) + 1 : 0
+  const used = Math.max((evenCount - 1) * pitch, oddCount > 0 ? offset + (oddCount - 1) * pitch : 0)
+  const start = min + (span - used) / 2
+
+  return {
+    even: Array.from({ length: evenCount }, (_, index) => start + index * pitch),
+    odd: Array.from({ length: oddCount }, (_, index) => start + offset + index * pitch),
+  }
+}
+
 export function skadisSlots(settings: SkadisSettings): SkadisSlot[] {
   const { width, height, slotWidth, slotHeight, pitch, margin, rowOffsetPercent, columnOffsetPercent } = settings
   if (![width, height, slotWidth, slotHeight, pitch, margin, rowOffsetPercent, columnOffsetPercent].every(Number.isFinite)) return []
@@ -36,15 +57,20 @@ export function skadisSlots(settings: SkadisSettings): SkadisSlot[] {
   const secondRowOffset = pitch * clamp(rowOffsetPercent, 0, 100) / 100
   const secondColumnOffset = pitch * clamp(columnOffsetPercent, 0, 100) / 100
 
-  for (let row = 0, y = yMin; y <= yMax + 1e-9; row += 1, y = yMin + row * pitch) {
-    const offset = row % 2 === 1 ? secondRowOffset : 0
-    for (let column = 0, x = xMin + offset; x <= xMax + 1e-9; column += 1, x = xMin + offset + column * pitch) {
-      const slotY = y + (column % 2 === 1 ? secondColumnOffset : 0)
-      const key = `${fmt(x)}:${fmt(slotY)}`
-      if (slotY <= yMax + 1e-9 && !occupied.has(key)) {
-        occupied.add(key)
-        slots.push({ x, y: slotY })
-      }
+  const xs = axisPositions(xMin, xMax, pitch, secondRowOffset)
+  const ys = axisPositions(yMin, yMax, pitch, secondColumnOffset)
+
+  const rowCount = Math.max(ys.even.length, ys.odd.length)
+  for (let row = 0; row < rowCount; row += 1) {
+    const columns = row % 2 === 1 ? xs.odd : xs.even
+    for (let column = 0; column < columns.length; column += 1) {
+      const y = (column % 2 === 1 ? ys.odd : ys.even)[row]
+      if (y === undefined) continue
+      const x = columns[column]
+      const key = `${fmt(x)}:${fmt(y)}`
+      if (occupied.has(key)) continue
+      occupied.add(key)
+      slots.push({ x, y })
     }
   }
   return slots
@@ -54,16 +80,16 @@ export function skadisSvg(settings: SkadisSettings): string {
   const { width, height, cornerRadius, slotWidth, slotHeight } = settings
   const radius = Math.max(0, Math.min(cornerRadius, width / 2, height / 2))
   const slotRadius = Math.min(slotWidth, slotHeight) / 2
-  const slots = skadisSlots(settings)
-    .map(({ x, y }) => `    <rect x="${fmt(x - slotWidth / 2)}" y="${fmt(y - slotHeight / 2)}" width="${fmt(slotWidth)}" height="${fmt(slotHeight)}" rx="${fmt(slotRadius)}" />`)
+  const slotPositions = skadisSlots(settings)
+  const idWidth = Math.max(3, String(slotPositions.length).length)
+  const slots = slotPositions
+    .map(({ x, y }, index) => `  <rect x="${fmt(x - slotWidth / 2)}" y="${fmt(y - slotHeight / 2)}" width="${fmt(slotWidth)}" height="${fmt(slotHeight)}" rx="${fmt(slotRadius)}" id="slot-${String(index + 1).padStart(idWidth, '0')}" data-cut-order="${index + 1}" fill="none" stroke="#ff0000" stroke-width="0.1" />`)
     .join('\n')
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${fmt(width)}mm" height="${fmt(height)}mm" viewBox="0 0 ${fmt(width)} ${fmt(height)}">
-  <g fill="none" stroke="#ff0000" stroke-width="0.1">
-    <rect x="0" y="0" width="${fmt(width)}" height="${fmt(height)}" rx="${fmt(radius)}" />
 ${slots}
-  </g>
+  <rect x="0" y="0" width="${fmt(width)}" height="${fmt(height)}" rx="${fmt(radius)}" id="board-contour" data-cut-order="${slotPositions.length + 1}" fill="none" stroke="#ff0000" stroke-width="0.1" />
 </svg>`
 }
 
