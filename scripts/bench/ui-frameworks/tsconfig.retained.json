@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/shared/**/*.ts",
+    "src/retained/**/*.ts",
+    "src/retained-layout/**/*.ts",
+    "src/retained-skadis/**/*.ts"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["vite/client", "svelte"]
+  },
+  "include": [
+    "src/shared/**/*.ts",
+    "src/svelte-layout/**/*.ts",
+    "src/svelte-layout/**/*.svelte",
+    "src/svelte-skadis/**/*.ts",
+    "src/svelte-skadis/**/*.svelte"
+  ]
+}

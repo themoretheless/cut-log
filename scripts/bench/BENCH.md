@@ -1,5 +1,10 @@
 # Бенчмарк: «отрисовка» короба — TypeScript vs Rust/wasm (решение)
 
+> Отдельное воспроизводимое сравнение Vue 3, Svelte 5 и retained DOM
+> для массового SVG/DOM
+> находится в [`ui-frameworks/README.md`](ui-frameworks/README.md), а локальный
+> результат — в [`ui-frameworks/results/RESULTS.md`](ui-frameworks/results/RESULTS.md).
+
 Это **запись решения**, почему геометрия коробки осталась в TypeScript, а не
 переехала в Rust/wasm. Замеряли генерацию геометрии (то, что происходит при
 изменении параметров перед перерисовкой): все SVG-пути раскроя + полная
