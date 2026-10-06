@@ -85,6 +85,13 @@ function spawnStars() {
         </svg>
         {{ t('nav.skadis') }}
       </router-link>
+      <router-link to="/skadis-box" class="page-nav-link" active-class="active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 10h16v10H4z"/>
+          <path d="M8 10V6M16 10V6M6 6h4M14 6h4"/>
+        </svg>
+        {{ t('nav.skadisbox') }}
+      </router-link>
     </div>
     <div class="top-controls">
       <button class="lang-toggle" @click="toggleLang" title="RU / EN">
