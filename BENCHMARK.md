@@ -8,32 +8,45 @@ Every list is keyed by the same stable piece id. An earlier run keyed the
 Svelte list by index while Svet keyed by id, which gave Svelte more text to
 rewrite on every transition and overstated the gap by roughly a factor of two.
 
-| | Svelte 5 | svet-engine | Forma |
-|---|---|---|---|
-| 300 rows, commit | 3.2 ms | 0.7 ms | 24 ms |
-| 300 rows, forced layout | 0.7 ms | 0.7 ms | n/a |
-| 300 rows, total | **3.8 ms** | **1.3 ms** | **~26 ms** |
-| 111 rows, total | 3.3 ms | 0.5 ms | ~13 ms |
+| | Svelte 5 | svet-engine |
+|---|---|---|
+| 300 rows, commit | 3.2 ms | 0.7 ms |
+| 300 rows, forced layout | 0.7 ms | 0.7 ms |
+| 300 rows, total | **3.8 ms** | **1.3 ms** |
+| 111 rows, total | 3.3 ms | 0.5 ms |
 
-Svelte and svet-engine both write to the DOM, so their numbers stop where the
-browser's own raster begins. Forma draws the pixels itself, so its number
-covers more work and the three columns are not interchangeable.
+Both write to the DOM and both stop where the browser's own raster begins, so
+these two columns are directly comparable.
 
-## Forma: where its 26 ms go
+Forma is deliberately not a third column here. It is a canvas renderer with no
+step that corresponds to a DOM commit, every change reloads the whole scene
+rather than reconciling a keyed list, and its timings include rasterising the
+pixels, which the two columns above exclude. Its phases are listed separately
+below.
 
-| Phase | 300 rows |
-|---|---|
-| Markup generation | 0.2 ms |
-| `load_component`, parse and layout | ~8 ms |
-| First geometry request after the change | 14.6 ms |
-| The same geometry requested again | 0.5 ms |
-| Upload and submit, 3.4 MB | ~2 ms |
+## Forma, measured by phase
+
+One change of a 300 row scene, medians of 8 on a freshly loaded page:
+
+| Phase | 300 rows | 111 rows |
+|---|---|---|
+| Markup generation | 0.2 ms | 0.2 ms |
+| `load_component`, parse and layout | 6.3 ms | ~5 ms |
+| First geometry request after the change | 11.3 ms | 4.7 ms |
+| The same geometry requested again | 0.5 ms | 0.5 ms |
+| Upload and submit, 3.4 MB | ~2 ms | 0.8 ms |
+| Until the GPU reports the frame done | 3.6 ms | 3.6 ms |
+
+The parse and layout figure needs a fresh page. On a tab that has been running
+measurements for a while it drifts to 29 ms and beyond for the same scene,
+which looks like allocation churn in the harness rather than a property of the
+engine: the geometry figure stays put across the same runs.
 
 Two causes, both measured rather than inferred.
 
 **Glyphs are tessellated per instance.** With the text removed the same 300
 controls build their geometry in 0.2 ms; with 22 characters per row it is
-16 ms and 754 792 floats of edge data. 300 identical rows cost the same as 300
+11 to 16 ms across runs and 754 792 floats of edge data. 300 identical rows cost the same as 300
 distinct ones (15.7 ms against 14.4 ms), so nothing is reused between rows that
 draw the same glyphs. The scene holds 6600 glyphs drawn from about 40 distinct
 shapes.
