@@ -59,3 +59,6 @@ npm-debug.log*
 # Claude
 .claude/
 crates/wasm/pkg-node/
+
+# Forma host: rebuilt from the pinned crate revision
+frontend-forma/wasm/
