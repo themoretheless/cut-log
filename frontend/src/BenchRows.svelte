@@ -1,13 +1,17 @@
 <script lang="ts">
+  interface Row {
+    key: number
+    text: string
+  }
   interface Props {
-    rows: readonly string[]
+    rows: readonly Row[]
   }
   const { rows }: Props = $props()
 </script>
 
 <div class="bench-list">
-  {#each rows as row, index (index)}
-    <div class="bench-row">{row}</div>
+  {#each rows as row (row.key)}
+    <div class="bench-row">{row.text}</div>
   {/each}
 </div>
 

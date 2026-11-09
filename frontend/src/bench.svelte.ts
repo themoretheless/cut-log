@@ -5,18 +5,23 @@ import BenchRows from './BenchRows.svelte'
  * Same content as the Forma scene: one static text row per piece, so the
  * measurement compares the frameworks rather than two different screens.
  */
-function buildRows(count: number, filter: string): string[] {
-  const rows: string[] = []
+interface Row {
+  key: number
+  text: string
+}
+
+function buildRows(count: number, filter: string): Row[] {
+  const rows: Row[] = []
   for (let index = 0; index < count; index++) {
     const label = `Piece ${index}`
     if (filter && !label.includes(filter)) continue
-    rows.push(`${label}  ${200 + (index % 400)} x ${150 + (index % 300)}  1`)
+    rows.push({ key: index, text: `${label}  ${200 + (index % 400)} x ${150 + (index % 300)}  1` })
   }
   return rows
 }
 
 const host = document.getElementById('app')!
-let rows = $state<string[]>([])
+let rows = $state<Row[]>([])
 mount(BenchRows, { target: host, props: { get rows() { return rows } } })
 
 const round = (value: number) => Math.round(value * 10) / 10

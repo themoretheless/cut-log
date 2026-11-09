@@ -62,3 +62,5 @@ crates/wasm/pkg-node/
 
 # Forma host: rebuilt from the pinned crate revision
 frontend-forma/wasm/
+# Svet engine: copied from the library checkout, see frontend-svet/README.md
+frontend-svet/vendor/
