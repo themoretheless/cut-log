@@ -1,5 +1,9 @@
 # Svelte, Svet and Forma on the same list
 
+All three were re-measured in one session on freshly loaded pages after
+rebuilding svet-engine from source; the rebuild produced a byte-identical
+package, so the engine measured here is the one in the library checkout.
+
 One machine, one browser, the same content in all three: 300 rows of
 `Piece N  W x H  1`, alternating with the 111 rows that match `Piece 1`.
 Medians of 12 runs after three warm-up runs.
@@ -10,10 +14,13 @@ rewrite on every transition and overstated the gap by roughly a factor of two.
 
 | | Svelte 5 | svet-engine |
 |---|---|---|
-| 300 rows, commit | 3.2 ms | 0.7 ms |
-| 300 rows, forced layout | 0.7 ms | 0.7 ms |
-| 300 rows, total | **3.8 ms** | **1.3 ms** |
-| 111 rows, total | 3.3 ms | 0.5 ms |
+| 300 rows, commit | 2.9 ms | 0.5 ms |
+| 300 rows, forced layout | 0.6 ms | 0.5 ms |
+| 300 rows, total | **3.5 ms** | **1.1 ms** |
+| 111 rows, total | 2.8 ms | 0.2 ms |
+
+Dropping to 111 rows is where they diverge most: removing 189 keyed rows costs
+svet-engine 0.2 ms against Svelte's 2.8 ms.
 
 Both write to the DOM and both stop where the browser's own raster begins, so
 these two columns are directly comparable.
@@ -31,10 +38,11 @@ One change of a 300 row scene, medians of 8 on a freshly loaded page:
 | Phase | 300 rows | 111 rows |
 |---|---|---|
 | Markup generation | 0.2 ms | 0.2 ms |
-| `load_component`, parse and layout | 6.3 ms | ~5 ms |
-| First geometry request after the change | 11.3 ms | 4.7 ms |
+| `load_component`, parse and layout | 5.7 ms | 5.1 ms |
+| First geometry request after the change | 11.9 ms | 4.3 ms |
 | The same geometry requested again | 0.5 ms | 0.5 ms |
-| Upload and submit, 3.4 MB | ~2 ms | 0.8 ms |
+| Upload and submit, 3.4 MB | 1.7 ms | 0.7 ms |
+| CPU total | **19.3 ms** | **10.1 ms** |
 | Until the GPU reports the frame done | 3.6 ms | 3.6 ms |
 
 The parse and layout figure needs a fresh page. On a tab that has been running
