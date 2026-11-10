@@ -102,12 +102,15 @@ checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "forma"
-version = "0.2.0"
-source = "git+https://github.com/themoretheless/forma.git?branch=release#2fe6a7bb10da93b8fc1421281daf1e42de204cb8"
+version = "0.3.4"
+source = "git+https://github.com/themoretheless/forma.git?branch=release#600a0dd4e61dad600b55f2e42ae74a42163ce46d"
 dependencies = [
+ "serde",
  "serde_json",
+ "svet-wasm",
  "themoretheless-tokenizer-forma",
  "ttf-parser",
+ "unicode-segmentation",
  "wasm-bindgen",
 ]
 
@@ -393,6 +396,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
+name = "svet-wasm"
+version = "0.1.0"
+source = "git+https://github.com/themoretheless/forma.git?branch=release#600a0dd4e61dad600b55f2e42ae74a42163ce46d"
+
+[[package]]
 name = "syn"
 version = "2.0.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -503,6 +511,12 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "unicode-segmentation"
+version = "1.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
 
 [[package]]
 name = "unicode-xid"

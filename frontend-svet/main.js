@@ -1,11 +1,7 @@
 // Same rows and the same measurement as the Svelte and Forma benches, written
 // against svet-engine's own primitives: a signal holding the list and <For>,
 // which reconciles keyed rows through its WASM LIS.
-// Imported from the runtime modules rather than the package barrel: the barrel
-// also re-exports the JSX compiler, which pulls @babel/parser and cannot load
-// from a plain static server.
-import { signal } from './vendor/svet-engine/reactivity.js'
-import { h, For, mount } from './vendor/svet-engine/dom.js'
+import { signal, h, For, mount } from './vendor/svet-engine/index.js'
 
 const status = document.getElementById('status')
 const host = document.getElementById('app')

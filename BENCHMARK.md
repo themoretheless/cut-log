@@ -1,8 +1,9 @@
 # Svelte, Svet and Forma on the same list
 
-All three were re-measured in one session on freshly loaded pages after
-rebuilding svet-engine from source; the rebuild produced a byte-identical
-package, so the engine measured here is the one in the library checkout.
+Both libraries come from the release branch of the forma repository at
+`600a0dd`: the Forma crate through Cargo, svet-engine built from
+`packages/svet` on that commit (`frontend-svet/vendor/SVET_REVISION`). All
+three were re-measured in one session on freshly loaded pages.
 
 One machine, one browser, the same content in all three: 300 rows of
 `Piece N  W x H  1`, alternating with the 111 rows that match `Piece 1`.
@@ -14,13 +15,13 @@ rewrite on every transition and overstated the gap by roughly a factor of two.
 
 | | Svelte 5 | svet-engine |
 |---|---|---|
-| 300 rows, commit | 2.9 ms | 0.5 ms |
-| 300 rows, forced layout | 0.6 ms | 0.5 ms |
-| 300 rows, total | **3.5 ms** | **1.1 ms** |
-| 111 rows, total | 2.8 ms | 0.2 ms |
+| 300 rows, commit | 2.2 ms | 0.4 ms |
+| 300 rows, forced layout | 0.4 ms | 0.3 ms |
+| 300 rows, total | **2.7 ms** | **0.7 ms** |
+| 111 rows, total | 1.6 ms | 0.2 ms |
 
 Dropping to 111 rows is where they diverge most: removing 189 keyed rows costs
-svet-engine 0.2 ms against Svelte's 2.8 ms.
+svet-engine 0.2 ms against Svelte's 1.6 ms.
 
 Both write to the DOM and both stop where the browser's own raster begins, so
 these two columns are directly comparable.
@@ -38,11 +39,11 @@ One change of a 300 row scene, medians of 8 on a freshly loaded page:
 | Phase | 300 rows | 111 rows |
 |---|---|---|
 | Markup generation | 0.2 ms | 0.2 ms |
-| `load_component`, parse and layout | 5.7 ms | 5.1 ms |
-| First geometry request after the change | 11.9 ms | 4.3 ms |
+| `load_component`, parse and layout | 4.4 ms | 3.8 ms |
+| First geometry request after the change | 8.5 ms | 3.3 ms |
 | The same geometry requested again | 0.5 ms | 0.5 ms |
-| Upload and submit, 3.4 MB | 1.7 ms | 0.7 ms |
-| CPU total | **19.3 ms** | **10.1 ms** |
+| Upload and submit, 3.4 MB | 1.3 ms | 0.6 ms |
+| CPU total | **14.2 ms** | **7.7 ms** |
 | Until the GPU reports the frame done | 3.6 ms | 3.6 ms |
 
 The parse and layout figure needs a fresh page. On a tab that has been running
@@ -65,13 +66,22 @@ that carries no `#[wasm_bindgen]`, so the generated bindings expose only `load`,
 `load_component` and `load_ui_files_json`. Every change re-parses and re-lays
 out the whole scene, which is what makes the two costs above recur.
 
-## Svet was not part of the Forma measurement
+## Release `600a0dd` embeds 18 MB of fonts
 
-`vector-ui/Cargo.toml` on the release branch depends on tokenizer, serde_json,
+The Forma wasm grew from 1.3 MB on `2fe6a7b` to 20 MB on `600a0dd`. Its data
+section is 18.3 MB: `crates/forma/src/text.rs` pulls the CJK fallback
+`NotoSansSC.ttf` (17.8 MB) and an emoji font in with `include_bytes!`, with no
+feature to leave them out, so every browser build ships them whether or not it
+draws a single CJK glyph.
+
+## Svet in the older Forma measurement
+
+On `2fe6a7b`, the release this section describes, `vector-ui/Cargo.toml` depended on tokenizer, serde_json,
 wasm-bindgen and ttf-parser, with the gpu crates behind optional native
 features. It does not depend on svet-wasm; that dependency exists only on
 `main`, where it is used by `binding.rs` and `native_document_graph.rs`, the
-reactive binding graph rather than text or raster. Switching the dependency to
+reactive binding graph rather than text or raster. Release `600a0dd` now
+links svet-wasm into the Forma crate as well. Switching the dependency to
 `main` would therefore leave the 16 ms of tessellation untouched, and the graph
 it accelerates is reached through the binding setters that the browser build
 does not export.

@@ -20,3 +20,13 @@ and cannot resolve from a plain static server.
 
 `window.__svetBench.render(count, filter)` applies one transition and returns
 its phase timings.
+
+The measured build comes from the release branch, whose commit is recorded in
+`vendor/SVET_REVISION`:
+
+```sh
+git -C ../forma worktree add --detach /tmp/forma-release origin/release
+(cd /tmp/forma-release/packages/svet && npm ci && npm run build:package)
+cp -R /tmp/forma-release/packages/svet/dist/package frontend-svet/vendor/svet-engine
+git -C ../forma rev-parse --short origin/release > frontend-svet/vendor/SVET_REVISION
+```
