@@ -1,8 +1,9 @@
 # Svelte, Svet and Forma on the same list
 
 Both libraries come from the release branch of the forma repository at
-`600a0dd`: the Forma crate through Cargo, svet-engine built from
-`packages/svet` on that commit (`frontend-svet/vendor/SVET_REVISION`). All
+`89bc748`, release 0.3.5: the Forma crate through Cargo, which also brings
+svet-wasm 0.3.5, and svet-engine 0.3.5 built from `packages/svet` on that
+commit (`frontend-svet/vendor/SVET_REVISION`). All
 three were re-measured in one session on freshly loaded pages.
 
 One machine, one browser, the same content in all three: 300 rows of
@@ -15,13 +16,13 @@ rewrite on every transition and overstated the gap by roughly a factor of two.
 
 | | Svelte 5 | svet-engine |
 |---|---|---|
-| 300 rows, commit | 2.2 ms | 0.4 ms |
-| 300 rows, forced layout | 0.4 ms | 0.3 ms |
-| 300 rows, total | **2.7 ms** | **0.7 ms** |
-| 111 rows, total | 1.6 ms | 0.2 ms |
+| 300 rows, commit | 3.6 ms | 0.5 ms |
+| 300 rows, forced layout | 0.5 ms | 0.4 ms |
+| 300 rows, total | **4.1 ms** | **1.0 ms** |
+| 111 rows, total | 2.1 ms | 0.3 ms |
 
 Dropping to 111 rows is where they diverge most: removing 189 keyed rows costs
-svet-engine 0.2 ms against Svelte's 1.6 ms.
+svet-engine 0.3 ms against Svelte's 2.1 ms.
 
 Both write to the DOM and both stop where the browser's own raster begins, so
 these two columns are directly comparable.
@@ -39,11 +40,11 @@ One change of a 300 row scene, medians of 8 on a freshly loaded page:
 | Phase | 300 rows | 111 rows |
 |---|---|---|
 | Markup generation | 0.2 ms | 0.2 ms |
-| `load_component`, parse and layout | 4.4 ms | 3.8 ms |
+| `load_component`, parse and layout | 4.5 ms | 3.9 ms |
 | First geometry request after the change | 8.5 ms | 3.3 ms |
 | The same geometry requested again | 0.5 ms | 0.5 ms |
-| Upload and submit, 3.4 MB | 1.3 ms | 0.6 ms |
-| CPU total | **14.2 ms** | **7.7 ms** |
+| Upload and submit, 3.4 MB | 1.3 ms | 0.5 ms |
+| CPU total | **14.3 ms** | **7.7 ms** |
 | Until the GPU reports the frame done | 3.6 ms | 3.6 ms |
 
 The parse and layout figure needs a fresh page. On a tab that has been running
@@ -66,9 +67,9 @@ that carries no `#[wasm_bindgen]`, so the generated bindings expose only `load`,
 `load_component` and `load_ui_files_json`. Every change re-parses and re-lays
 out the whole scene, which is what makes the two costs above recur.
 
-## Release `600a0dd` embeds 18 MB of fonts
+## Releases since `600a0dd` embed 18 MB of fonts
 
-The Forma wasm grew from 1.3 MB on `2fe6a7b` to 20 MB on `600a0dd`. Its data
+The Forma wasm grew from 1.3 MB on `2fe6a7b` to 20 MB on `600a0dd`, and stays there on 0.3.5. Its data
 section is 18.3 MB: `crates/forma/src/text.rs` pulls the CJK fallback
 `NotoSansSC.ttf` (17.8 MB) and an emoji font in with `include_bytes!`, with no
 feature to leave them out, so every browser build ships them whether or not it

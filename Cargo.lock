@@ -102,8 +102,8 @@ checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "forma"
-version = "0.3.4"
-source = "git+https://github.com/themoretheless/forma.git?branch=release#600a0dd4e61dad600b55f2e42ae74a42163ce46d"
+version = "0.3.5"
+source = "git+https://github.com/themoretheless/forma.git?branch=release#89bc748a2476c4b5e2b7e65e6716c375581ef55d"
 dependencies = [
  "serde",
  "serde_json",
@@ -397,8 +397,8 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
 name = "svet-wasm"
-version = "0.1.0"
-source = "git+https://github.com/themoretheless/forma.git?branch=release#600a0dd4e61dad600b55f2e42ae74a42163ce46d"
+version = "0.3.5"
+source = "git+https://github.com/themoretheless/forma.git?branch=release#89bc748a2476c4b5e2b7e65e6716c375581ef55d"
 
 [[package]]
 name = "syn"
