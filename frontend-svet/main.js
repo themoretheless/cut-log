@@ -32,13 +32,26 @@ mount(() => h('div', { class: 'bench-list' },
   For({
     each: rows,
     keyFn: row => row.key,
-    children: row => h('div', { class: 'bench-row' }, row.text),
+    children: new URLSearchParams(location.search).has('static')
+      ? row => h('div', { class: 'bench-row' }, row.text)
+      : (row, _index, current) => h('div', { class: 'bench-row' }, () => current().text),
   }),
 ), host)
 
 const round = value => Math.round(value * 10) / 10
 
+const { createOps } = await import('./ops.js')
+const ops = createOps()
+
 window.__svetBench = {
+  op(name) {
+    const next = ops[name](rows.peek ? rows.peek() : rows())
+    const start = performance.now()
+    rows.set(next)
+    void host.offsetHeight
+    return Math.round((performance.now() - start) * 100) / 100
+  },
+  text: () => [...host.querySelectorAll('.bench-row')].map(n => n.textContent),
   render(count, filter = '') {
     const buildStart = performance.now()
     const next = buildRows(count, filter)

@@ -1,5 +1,7 @@
 import { mount, tick } from 'svelte'
 import BenchRows from './BenchRows.svelte'
+// @ts-expect-error plain JS module shared with frontend-svet
+import { createOps } from './benchOps.js'
 
 /**
  * Same content as the Forma scene: one static text row per piece, so the
@@ -26,7 +28,18 @@ mount(BenchRows, { target: host, props: { get rows() { return rows } } })
 
 const round = (value: number) => Math.round(value * 10) / 10
 
+const ops = createOps()
+
 ;(window as unknown as Record<string, unknown>).__svelteBench = {
+  async op(name: string) {
+    const next = ops[name](rows)
+    const start = performance.now()
+    rows = next
+    await tick()
+    void host.offsetHeight
+    return Math.round((performance.now() - start) * 100) / 100
+  },
+  text: () => [...host.querySelectorAll('.bench-row')].map(n => n.textContent),
   async render(count: number, filter = '') {
     const buildStart = performance.now()
     const next = buildRows(count, filter)
