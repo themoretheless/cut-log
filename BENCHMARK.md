@@ -75,6 +75,32 @@ section is 18.3 MB: `crates/forma/src/text.rs` pulls the CJK fallback
 feature to leave them out, so every browser build ships them whether or not it
 draws a single CJK glyph.
 
+## Before svet and across svet releases
+
+"Before svet" is the Svelte 5 frontend this branch started from. Every svet
+release that ships `build:package` (forma-v0.3.0 through v0.3.6; forma-v0.2.0
+has no package build) was built from its tag and loaded into a fresh iframe
+through `frontend-svet/?v=<tag>`. Medians of total ms (build + commit +
+layout), three fresh pages each, warmup 3; the 300-row cases take 12
+iterations, the 5000-row cases 10. Spread between pages was within 0.1 ms for
+300 rows and about 2 ms for 5000.
+
+| Build | 300 rows | filter to 111 | create 5000 | filter to 1111 | clear 5000 |
+|---|---:|---:|---:|---:|---:|
+| Svelte 5 (before svet) | 5.2 | 3.4 | 119.2 | 8.7 | 0.8 |
+| svet forma-v0.3.0 (`32adc5d`) | 1.4 | 0.3 | 45.3 | 5.8 | 1.2 |
+| svet v0.3.1 (`8e56a23`) | 1.3 | 0.3 | 46.0 | 5.5 | 1.3 |
+| svet v0.3.2 (`0b9efd4`) | 1.3 | 0.3 | 44.7 | 6.2 | 1.3 |
+| svet v0.3.3 (`43727ef`) | 1.3 | 0.3 | 45.0 | 6.0 | 1.3 |
+| svet v0.3.4 (`2f15cb6`) | 1.3 | 0.3 | 45.3 | 5.7 | 1.3 |
+| svet v0.3.5 (`ee6ca83`) | 1.3 | 0.3 | 45.8 | 6.3 | 1.3 |
+| svet v0.3.6 (`a01d576`) | 1.3 | 0.3 | 46.7 | 5.7 | 1.4 |
+
+Svet is 2.6x faster than Svelte creating 5000 rows and 4-10x faster on the
+small transitions; only clearing is slower, by half a millisecond. Between
+svet releases nothing moves beyond the page-to-page noise: the list path
+(signal, `<For>`, WASM LIS) has not changed in speed from 0.3.0 to 0.3.6.
+
 ## Svet in the older Forma measurement
 
 On `2fe6a7b`, the release this section describes, `vector-ui/Cargo.toml` depended on tokenizer, serde_json,

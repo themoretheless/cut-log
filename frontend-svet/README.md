@@ -18,6 +18,10 @@ missing or stale.
 barrel: the barrel also re-exports the JSX compiler, which pulls `@babel/parser`
 and cannot resolve from a plain static server.
 
+Other builds can sit next to it as `vendor/svet-<tag>` and are picked with
+`?v=<tag>`; builds from 0.3.2 on keep the WASM core in `wasm-embedded.js`,
+which `main.js` loads first when it exists.
+
 `window.__svetBench.render(count, filter)` applies one transition and returns
 its phase timings.
 

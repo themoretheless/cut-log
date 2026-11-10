@@ -1,7 +1,17 @@
 // Same rows and the same measurement as the Svelte and Forma benches, written
 // against svet-engine's own primitives: a signal holding the list and <For>,
 // which reconciles keyed rows through its WASM LIS.
-import { signal, h, For, mount } from './vendor/svet-engine/index.js'
+// ?v=<tag> picks a build from vendor/svet-<tag>; reactivity.js and dom.js are
+// imported directly because the index of older builds pulls in the compiler.
+const version = new URLSearchParams(location.search).get('v')
+const base = version ? `./vendor/svet-${version}` : './vendor/svet-engine'
+// Since 0.3.2 the WASM core lives in wasm-embedded.js; earlier builds embed it
+// in the reactivity module and have no such file.
+await import(`${base}/wasm-embedded.js`).catch(() => {})
+const [{ signal }, { h, For, mount }] = await Promise.all([
+  import(`${base}/reactivity.js`),
+  import(`${base}/dom.js`),
+])
 
 const status = document.getElementById('status')
 const host = document.getElementById('app')
@@ -54,4 +64,4 @@ window.__svetBench = {
 }
 
 const first = window.__svetBench.render(20)
-status.textContent = `Svet ready\n${JSON.stringify(first, null, 2)}`
+status.textContent = `Svet ${version ?? 'engine'} ready\n${JSON.stringify(first, null, 2)}`
