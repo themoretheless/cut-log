@@ -109,39 +109,46 @@ harnesses (`__svetBench.op` / `__svelteBench.op`), with rows that bind their
 text reactively through `current()` so updates reach the DOM. Medians over
 three fresh pages, 2 warmup and 8 measured passes, ms:
 
-| Operation | Svelte 5 | svet v0.3.6 | svet `c562698` |
+| Operation | Svelte 5 | svet v0.3.6 | svet `b327856` |
 |---|---:|---:|---:|
-| create 1k | 7.5 | 6.2 | 5.4 |
-| update every 10th | 2.5 | 1.1 | 1.1 |
-| swap two rows | 1.8 | 0.3 | 0.4 |
-| remove one | 1.7 | 0.4 | 0.3 |
-| append 1k to 1k | 13.8 | 6.9 | 5.6 |
-| replace 1k | 11.7 | 13.0 | 11.8 |
-| clear 2k | 0.7 | 1.8 | 1.6 |
-| create 10k | 282.7 | 94.2 | 76.8 |
-| clear 10k | 7.0 | 32.9 | 20.5 |
+| create 1k | 6.6 | 5.6 | 5.0 |
+| update every 10th | 2.1 | 1.2 | 1.1 |
+| swap two rows | 1.6 | 0.4 | 0.3 |
+| remove one | 1.5 | 0.3 | 0.3 |
+| append 1k to 1k | 12.1 | 6.0 | 5.2 |
+| replace 1k | 10.5 | 11.5 | 9.4 |
+| clear 2k | 0.6 | 1.6 | 0.9 |
+| create 10k | 241.1 | 85.3 | 68.8 |
+| clear 10k | 7.0 | 33.6 | 9.4 |
 
 Svet lost on every operation that removes rows. With static row text, clear
-10k takes 6.8 ms, as fast as Svelte, so the cost was the reactive text
-binding: `insertChild` built a content root, a root disposer cell and a
-publish step for every run of `() => current().text`, and each of those had
-to be torn down per row, every teardown step re-entering `untrack`.
+10k took 6.8 ms, as fast as Svelte, so the cost sat in what each row owns:
+`insertChild` built a content root, a disposer cell and a publish step for
+every run of `() => current().text`, each row was a public `createRoot` with
+its own disposer closure and WeakMap entry, and every teardown step
+re-entered `untrack`. Profiles came from the JS Self-Profiling API on a page
+served with `Document-Policy: js-profiling`.
 
-Branch `claude/svet-for-bulk-clear` in forma (`c562698`):
+Branch `claude/svet-for-bulk-clear` in forma (`c562698`, `b327856`):
 
 - reactive children that resolve to text and register no cleanups run in the
   effect's own scope and patch one text node; the first DOM result or owned
   run moves into the general path, so transactional replacement still holds;
+- `For` rows own a detached scope held only by their record, disposed
+  directly in their core, instead of a public root;
+- row item and index signals are disposed and written through their state,
+  without defining `dispose` and `set` on every handle;
 - a `For` whose rows fill their parent disposes them inside one untrack frame
   and removes them with one `textContent` write;
 - `untrack` and `runUntrackedInCore` return early when nothing observes, and
   leaf owner scopes skip the traversal stack.
 
-All 1522 svet tests pass, plus three new ones in `tests/for-bulk-clear.test.ts`.
-Clear 10k drops by 38% and create 10k by 18%, but clear is still about 3x
-Svelte: what remains is the per-row effect and item signal disposal, one
-WASM `svet_dispose_node` call each, which a batched dispose in the Rust core
-would address.
+All 1525 svet tests pass, including three new ones in
+`tests/for-bulk-clear.test.ts`. Svet now wins or ties every operation except
+clear, where it is 1.3-1.5x Svelte instead of 4.8x. About a quarter of what
+remains is the DOM write itself; the rest is disposing each row's effect and
+item signal, which are separate nodes in the WASM graph, so closing the gap
+further means changing how rows map onto that graph rather than trimming JS.
 
 ## Svet in the older Forma measurement
 
