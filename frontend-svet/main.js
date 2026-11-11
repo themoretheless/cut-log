@@ -34,6 +34,8 @@ mount(() => h('div', { class: 'bench-list' },
     keyFn: row => row.key,
     children: new URLSearchParams(location.search).has('static')
       ? row => h('div', { class: 'bench-row' }, row.text)
+      : new URLSearchParams(location.search).has('nosig')
+      ? row => h('div', { class: 'bench-row' }, () => row.text)
       : (row, _index, current) => h('div', { class: 'bench-row' }, () => current().text),
   }),
 ), host)

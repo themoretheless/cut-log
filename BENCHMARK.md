@@ -150,6 +150,26 @@ remains is the DOM write itself; the rest is disposing each row's effect and
 item signal, which are separate nodes in the WASM graph, so closing the gap
 further means changing how rows map onto that graph rather than trimming JS.
 
+### Experiments that did not help
+
+Measured against `b327856`, clear 10k / clear 2k / replace 1k / create 10k,
+two runs each:
+
+| Variant | Result | ms |
+|---|---|---|
+| batched node disposal: new `svet_dispose_nodes_buffered` in the Rust core, ids collected during a `For` teardown and released in one call | no change | 9.9/9.9 -> 9.3/10.5 clear 10k |
+| rows without the item signal (`?nosig`: effect reads `row.text`, no `current()`) | no change | 9.7 -> 9.9 clear 10k |
+| owner disposal without a traversal stack when every child scope is a leaf | no change | 9.6/10.0 -> 9.6/10.8 clear 10k |
+| rows with static text (`?static`, no effect at all) | reference | 5.1 clear 10k, faster than Svelte's 7.0 |
+
+The WASM calls are about 1 ms of a 10 ms clear and the work inside
+`dispose_node` stays the same when batched; the item signal costs nothing
+measurable. What separates 9.7 from 5.1 is the text effect itself: its owner
+scope, pooled entry, public handle wrapper and graph node. None of the three
+variants were kept. Closing that gap needs a lighter binding for reactive
+text, one that skips the effect's own scope and public handle, which means
+changing svet's effect machinery rather than `For`.
+
 ## Svet in the older Forma measurement
 
 On `2fe6a7b`, the release this section describes, `vector-ui/Cargo.toml` depended on tokenizer, serde_json,
